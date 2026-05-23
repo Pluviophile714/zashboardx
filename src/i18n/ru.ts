@@ -5,6 +5,8 @@ const ru: LANG_MESSAGE = {
   setup: 'Настройка',
   overview: 'Обзор',
   proxies: 'Прокси',
+  policyGroup: 'Политики',
+  nodeGroup: 'Узлы',
   rules: 'Правила',
   connections: 'Подключения',
   logs: 'Журнал',
@@ -59,11 +61,6 @@ const ru: LANG_MESSAGE = {
   settings: 'Настройки',
   speedtestUrl: 'URL теста скорости',
   speedtestTimeout: 'Таймаут теста скорости',
-  speedtestMode: 'Режим теста скорости',
-  speedtestModeDashboard: 'Управление панелью',
-  speedtestModeCore: 'Управление ядром',
-  speedtestModeTip:
-    'Управление панелью оставляет группы Selector, LoadBalance и Smart на тестировании отдельных узлов из панели и показывает прогресс по узлам. Управление ядром вызывает API группового теста ядра, чтобы ядро проверило всю группу сразу.',
   connectionStyle: 'Стиль подключения',
   card: 'Карточка',
   table: 'Таблица',
@@ -200,8 +197,6 @@ const ru: LANG_MESSAGE = {
   search: 'Поиск',
   searchProxyGroup: 'Поиск групп прокси',
   searchProxyNode: 'Поиск узлов прокси',
-  proxySearchModeGlobal: 'Поиск узлов',
-  proxySearchModeGroup: 'Поиск групп политик',
   searchMultiple: 'Ключевые слова через пробелы',
   importing: 'Импортируется',
   hideConnection: 'Скрыть соединение',
@@ -356,6 +351,12 @@ const ru: LANG_MESSAGE = {
   ruleLastHit: 'Последнее попадание: {time}',
   ruleMissCount: 'Промах: {count} раз',
   ruleLastMiss: 'Последний промах: {time}',
+
+  // Strategy Penetration
+  strategyPenetration: 'Погружение в стратегию',
+  collapsePenetration: 'Скрыть погружение',
+  stepwisePenetration: 'По уровням',
+  fullExpansion: 'До конца',
 
   // Smart Core
   RarelyUsed: 'Редко используется',

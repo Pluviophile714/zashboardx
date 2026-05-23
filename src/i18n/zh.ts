@@ -5,6 +5,8 @@ const zh: LANG_MESSAGE = {
   setup: '配置',
   overview: '概览',
   proxies: '代理',
+  policyGroup: '策略组',
+  nodeGroup: '节点组',
   rules: '规则',
   connections: '连接',
   logs: '日志',
@@ -59,11 +61,6 @@ const zh: LANG_MESSAGE = {
   settings: '设置',
   speedtestUrl: '测速地址',
   speedtestTimeout: '测速超时',
-  speedtestMode: '测速方式',
-  speedtestModeDashboard: '面板控制',
-  speedtestModeCore: '核心控制',
-  speedtestModeTip:
-    '面板控制会让 Selector、LoadBalance、Smart 组沿用面板逐个测试节点的逻辑，并展示每个节点的测试进度。核心控制会调用核心的组测速接口，由核心一次性完成整组测速。',
   connectionStyle: '连接样式',
   card: '卡片',
   table: '表格',
@@ -198,8 +195,6 @@ const zh: LANG_MESSAGE = {
   search: '搜索',
   searchProxyGroup: '搜索代理组',
   searchProxyNode: '搜索节点',
-  proxySearchModeGlobal: '节点搜索',
-  proxySearchModeGroup: '策略组搜索',
   searchMultiple: '多个关键词用空格分隔',
   importing: '正在导入',
   hideConnection: '隐藏连接',
@@ -347,6 +342,12 @@ const zh: LANG_MESSAGE = {
   ruleLastHit: '最后命中: {time}',
   ruleMissCount: '未命中: {count} 次',
   ruleLastMiss: '最后未命中: {time}',
+
+  // Strategy Penetration
+  strategyPenetration: '策略穿透',
+  collapsePenetration: '收起穿透',
+  stepwisePenetration: '逐层穿透',
+  fullExpansion: '穿透到底',
 
   // Smart Core
   RarelyUsed: '很少使用',

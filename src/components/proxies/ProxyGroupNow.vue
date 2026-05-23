@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-1 items-center gap-1 truncate">
-    <template v-if="proxyGroup.now">
+    <template v-if="shouldShowNow">
       <Component
         class="h-4 w-4 shrink-0 outline-none"
         :is="isFixed ? LockClosedIcon : ArrowRightCircleIcon"
@@ -22,6 +22,14 @@
         />
       </template>
     </template>
+    <template v-else-if="proxyGroup.type.toLowerCase() === PROXY_TYPE.Smart && topSmartNode">
+      <ArrowRightCircleIcon class="h-4 w-4 shrink-0 text-info/70" />
+      <ProxyName
+        :name="topSmartNode"
+        class="text-base-content/70 text-xs md:text-sm"
+      />
+      <span class="text-base-content/40 text-[10px] md:text-xs">Smart</span>
+    </template>
     <template v-else-if="proxyGroup.type.toLowerCase() === PROXY_TYPE.LoadBalance">
       <CheckCircleIcon class="h-4 w-4 shrink-0" />
       <span class="text-base-content/80 text-xs md:text-sm">
@@ -35,8 +43,10 @@
 import { PROXY_TYPE } from '@/constant'
 import { useTooltip } from '@/helper/tooltip'
 import { scrollToGroup } from '@/helper/utils'
+import { activeConnections } from '@/store/connections'
 import { getNowProxyNodeName, proxyGroupList, proxyMap } from '@/store/proxies'
 import { displayFinalOutbound } from '@/store/settings'
+import { smartOrderMap, smartWeightsMap } from '@/store/smart'
 import { ArrowRightCircleIcon, CheckCircleIcon, LockClosedIcon } from '@heroicons/vue/24/outline'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -68,14 +78,84 @@ const isNowAGroup = computed(() => {
   return proxyGroupList.value.includes(proxyGroup.value.now)
 })
 
-const finalOutbound = computed(() => {
-  const now = getNowProxyNodeName(proxyGroup.value.now)
+const resolvedNow = computed(() => getNowProxyNodeName(proxyGroup.value.now))
 
-  if (now === proxyGroup.value.now) {
-    return ''
+const isSmartGroup = computed(() => {
+  return proxyGroup.value.type.toLowerCase() === PROXY_TYPE.Smart
+})
+
+const shouldShowNow = computed(() => {
+  if (!proxyGroup.value.now) return false
+
+  return !(isSmartGroup.value && resolvedNow.value === proxyGroup.value.name)
+})
+
+const getTopSmartNode = (groupName: string) => {
+  const group = proxyMap.value[groupName]
+  if (group?.type.toLowerCase() !== PROXY_TYPE.Smart) return ''
+
+  const order = smartOrderMap.value[groupName]
+  if (order) {
+    const entries = Object.entries(order)
+
+    if (entries.length) {
+      entries.sort((a, b) => a[1] - b[1])
+      return entries[0][0]
+    }
   }
 
-  return now
+  const weights = smartWeightsMap.value[groupName]
+  if (!weights) return ''
+
+  const entries = Object.entries(weights)
+  if (!entries.length) return ''
+
+  entries.sort((a, b) => Number(b[1]) - Number(a[1]))
+  return entries[0][0]
+}
+
+const getActiveConnectionOutbound = (groupName: string) => {
+  const connections = activeConnections.value
+    .filter((connection) => connection.chains.includes(groupName) && connection.chains[0])
+    .sort((a, b) => {
+      const speedDiff = b.downloadSpeed + b.uploadSpeed - (a.downloadSpeed + a.uploadSpeed)
+
+      if (speedDiff) return speedDiff
+
+      return new Date(b.start).getTime() - new Date(a.start).getTime()
+    })
+
+  return connections[0]?.chains[0] ?? ''
+}
+
+const getSmartOutbound = (groupName: string) => {
+  return getActiveConnectionOutbound(groupName) || getTopSmartNode(groupName)
+}
+
+const finalOutbound = computed(() => {
+  const activeOutbound = getActiveConnectionOutbound(props.name)
+
+  if (activeOutbound) {
+    return activeOutbound
+  }
+
+  if (resolvedNow.value !== proxyGroup.value.now) {
+    return getSmartOutbound(resolvedNow.value) || resolvedNow.value
+  }
+
+  return getSmartOutbound(proxyGroup.value.now)
+})
+
+const topSmartNode = computed(() => {
+  if (!isSmartGroup.value) return ''
+
+  const activeOutbound = getActiveConnectionOutbound(props.name)
+
+  if (activeOutbound) {
+    return activeOutbound
+  }
+
+  return getTopSmartNode(props.name)
 })
 
 const handlerClickNow = (e: Event) => {

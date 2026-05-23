@@ -65,6 +65,7 @@
         :now="proxyGroup.now"
         :render-proxies="renderProxies"
       />
+      <ProxyPenetrationSection :group-name="name" />
     </template>
   </CollapseCard>
 </template>
@@ -99,6 +100,7 @@ import ProxyGroupFilter from './ProxyGroupFilter.vue'
 import ProxyGroupNow from './ProxyGroupNow.vue'
 import ProxyName from './ProxyName.vue'
 import ProxyPreview from './ProxyPreview.vue'
+import ProxyPenetrationSection from './ProxyPenetrationSection.vue'
 
 const props = defineProps<{
   name: string

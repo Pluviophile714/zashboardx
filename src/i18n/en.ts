@@ -3,6 +3,8 @@ const en = {
   setup: 'Setup',
   overview: 'Overview',
   proxies: 'Proxies',
+  policyGroup: 'Policy',
+  nodeGroup: 'Nodes',
   rules: 'Rules',
   connections: 'Connections',
   logs: 'Logs',
@@ -57,11 +59,6 @@ const en = {
   settings: 'Settings',
   speedtestUrl: 'Speedtest URL',
   speedtestTimeout: 'Speedtest timeout',
-  speedtestMode: 'Speedtest mode',
-  speedtestModeDashboard: 'Dashboard controlled',
-  speedtestModeCore: 'Core controlled',
-  speedtestModeTip:
-    'Dashboard controlled keeps Selector, LoadBalance, and Smart groups on the dashboard-driven per-node test flow and shows per-node progress. Core controlled calls the core group latency API and lets the core test the whole group at once.',
   connectionStyle: 'Connection style',
   card: 'Card',
   table: 'Table',
@@ -198,8 +195,6 @@ const en = {
   search: 'Search',
   searchProxyGroup: 'Search proxy groups',
   searchProxyNode: 'Search proxy nodes',
-  proxySearchModeGlobal: 'Node search',
-  proxySearchModeGroup: 'Policy group search',
   searchMultiple: 'Space-separated keywords',
   importing: 'Importing...',
   hideConnection: 'Hide connection',
@@ -354,6 +349,12 @@ const en = {
   ruleLastHit: 'Last hit: {time}',
   ruleMissCount: 'Miss: {count} times',
   ruleLastMiss: 'Last miss: {time}',
+
+  // Strategy Penetration
+  strategyPenetration: 'Strategy Drill',
+  collapsePenetration: 'Hide Drill',
+  stepwisePenetration: 'Layer by layer',
+  fullExpansion: 'Expand to end',
 
   // Smart Core
   RarelyUsed: 'Rarely used',

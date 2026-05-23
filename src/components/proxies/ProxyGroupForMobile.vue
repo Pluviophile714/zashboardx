@@ -89,6 +89,7 @@
           :now="proxyGroup.now"
           :render-proxies="renderProxies"
         />
+        <ProxyPenetrationSection :group-name="name" />
       </div>
     </div>
   </div>
@@ -111,6 +112,7 @@ import ProxiesContent from './ProxiesContent.vue'
 import ProxyGroupFilter from './ProxyGroupFilter.vue'
 import ProxyGroupNow from './ProxyGroupNow.vue'
 import ProxyIcon from './ProxyIcon.vue'
+import ProxyPenetrationSection from './ProxyPenetrationSection.vue'
 
 const WIDTH_STYLE = 'calc(100vw - 1.5rem)'
 const props = defineProps<{

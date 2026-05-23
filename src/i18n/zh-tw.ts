@@ -5,6 +5,8 @@ const zhTW: LANG_MESSAGE = {
   setup: '配置',
   overview: '概覽',
   proxies: '代理',
+  policyGroup: '策略組',
+  nodeGroup: '節點組',
   rules: '規則',
   connections: '連接',
   logs: '日誌',
@@ -59,11 +61,6 @@ const zhTW: LANG_MESSAGE = {
   settings: '設定',
   speedtestUrl: '測速地址',
   speedtestTimeout: '測速超時',
-  speedtestMode: '測速方式',
-  speedtestModeDashboard: '面板控制',
-  speedtestModeCore: '核心控制',
-  speedtestModeTip:
-    '面板控制會讓 Selector、LoadBalance、Smart 組沿用面板逐個測試節點的邏輯，並顯示每個節點的測試進度。核心控制會呼叫核心的組測速介面，由核心一次完成整組測速。',
   connectionStyle: '連接樣式',
   card: '卡片',
   table: '表格',
@@ -198,8 +195,6 @@ const zhTW: LANG_MESSAGE = {
   search: '搜尋',
   searchProxyGroup: '搜尋代理組',
   searchProxyNode: '搜尋節點',
-  proxySearchModeGlobal: '節點搜尋',
-  proxySearchModeGroup: '策略組搜尋',
   searchMultiple: '多個關鍵詞用空格分隔',
   importing: '正在匯入',
   hideConnection: '隱藏連接',
@@ -347,6 +342,12 @@ const zhTW: LANG_MESSAGE = {
   ruleLastHit: '最後命中: {time}',
   ruleMissCount: '未命中: {count} 次',
   ruleLastMiss: '最後未命中: {time}',
+
+  // Strategy Penetration
+  strategyPenetration: '策略穿透',
+  collapsePenetration: '收起穿透',
+  stepwisePenetration: '逐層穿透',
+  fullExpansion: '穿透到底',
 
   // Smart Core
   RarelyUsed: '很少使用',

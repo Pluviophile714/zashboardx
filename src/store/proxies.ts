@@ -14,7 +14,6 @@ import {
   NOT_CONNECTED,
   PROXY_TAB_TYPE,
   PROXY_TYPE,
-  SPEEDTEST_MODE,
   TEST_URL,
 } from '@/constant'
 import { isProxyGroup } from '@/helper'
@@ -31,7 +30,6 @@ import {
   iconReflectList,
   independentLatencyTest,
   IPv6test,
-  speedtestMode,
   speedtestTimeout,
   speedtestUrl,
 } from './settings'
@@ -267,7 +265,7 @@ const testLatencyOneByOneWithTip = async (
   await Promise.allSettled(
     nodes.map((name) =>
       limiter(async () => {
-        const res = await latencyTestForSingle(name, url, Math.min(2000, speedtestTimeout.value))
+        const res = await latencyTestForSingle(name, url, Math.min(1500, speedtestTimeout.value))
 
         if (res.status !== 200) {
           testFailed++
@@ -311,7 +309,6 @@ export const proxyGroupLatencyTest = async (proxyGroupName: string) => {
   const url = getTestUrl(proxyGroupName)
 
   if (
-    speedtestMode.value === SPEEDTEST_MODE.DASHBOARD &&
     [PROXY_TYPE.Selector, PROXY_TYPE.LoadBalance, PROXY_TYPE.Smart].includes(
       proxyNode.type.toLowerCase() as PROXY_TYPE,
     )
@@ -429,6 +426,33 @@ export const getProxyGroupChains = (name: string) => {
     proxyNode = proxyMap.value[proxyNode.now]
   }
   return result
+}
+
+export const getDirectChildProxyGroups = (groupName: string) => {
+  return (proxyMap.value[groupName]?.all ?? []).filter((name) => {
+    return Boolean(proxyMap.value[name]?.all?.length)
+  })
+}
+
+export const getDescendantProxyGroups = (groupName: string) => {
+  const descendants: string[] = []
+  const visited = new Set<string>([groupName])
+
+  const walk = (name: string) => {
+    getDirectChildProxyGroups(name).forEach((childGroupName) => {
+      if (visited.has(childGroupName)) {
+        return
+      }
+
+      visited.add(childGroupName)
+      descendants.push(childGroupName)
+      walk(childGroupName)
+    })
+  }
+
+  walk(groupName)
+
+  return descendants
 }
 
 export const hasSmartGroup = computed(() => {

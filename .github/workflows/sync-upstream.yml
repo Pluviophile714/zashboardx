@@ -1,0 +1,47 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/Zephyruso/zashboard.git
+          git fetch upstream
+
+      - name: Check for updates
+        id: check
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "up_to_date=true" >> $GITHUB_OUTPUT
+          else
+            echo "up_to_date=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Merge upstream
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          if git merge upstream/main --no-edit; then
+            echo "merge_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "merge_success=false" >> $GITHUB_OUTPUT
+            git merge --abort
+            echo "Merge conflict - manual resolution required" >> $GITHUB_STEP_SUMMARY
+          fi
+        id: merge
+
+      - name: Push
+        if: steps.merge.outputs.merge_success == 'true'
+        run: git push origin master
