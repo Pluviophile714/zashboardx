@@ -7,44 +7,80 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      BASE_BRANCH: master
+      UPSTREAM_REPO: https://github.com/Zephyruso/zashboard.git
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: master
+          ref: ${{ env.BASE_BRANCH }}
           fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
 
       - name: Fetch upstream
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git remote add upstream https://github.com/Zephyruso/zashboard.git
-          git fetch upstream
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream main
 
       - name: Check for updates
         id: check
         run: |
           if git merge-base --is-ancestor upstream/main HEAD; then
-            echo "up_to_date=true" >> $GITHUB_OUTPUT
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
           else
-            echo "up_to_date=false" >> $GITHUB_OUTPUT
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Merge upstream
+      - name: Merge upstream into sync branch
+        if: steps.check.outputs.up_to_date == 'false'
+        id: merge
+        run: |
+          branch="sync-upstream-$(date -u +%Y%m%d)"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          git checkout -B "$branch"
+          if ! git merge upstream/main --no-edit; then
+            git merge --abort || true
+            echo "Merge conflict with upstream/main. Please resolve manually." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Verify merged result
         if: steps.check.outputs.up_to_date == 'false'
         run: |
-          if git merge upstream/main --no-edit; then
-            echo "merge_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "merge_success=false" >> $GITHUB_OUTPUT
-            git merge --abort
-            echo "Merge conflict - manual resolution required" >> $GITHUB_STEP_SUMMARY
-          fi
-        id: merge
+          pnpm install --frozen-lockfile
+          pnpm run type-check
+          pnpm run build
 
-      - name: Push
-        if: steps.merge.outputs.merge_success == 'true'
-        run: git push origin master
+      - name: Push sync branch
+        if: steps.check.outputs.up_to_date == 'false'
+        run: git push --force-with-lease origin "${{ steps.merge.outputs.branch }}"
+
+      - name: Create or update pull request
+        if: steps.check.outputs.up_to_date == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Updated existing PR for $BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base "$BASE_BRANCH" \
+              --head "$BRANCH" \
+              --title "Sync upstream zashboard" \
+              --body "Merge latest Zephyruso/zashboard upstream changes into this fork. CI verifies type-check and build before the PR is created."
+          fi
