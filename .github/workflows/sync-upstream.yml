@@ -1,18 +1,21 @@
-name: Sync Upstream
+name: Sync Upstream and Build Image
 
 on:
+  schedule:
+    - cron: '37 4 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
-  pull-requests: write
+  packages: write
 
 jobs:
-  sync:
+  sync-and-build:
     runs-on: ubuntu-latest
     env:
       BASE_BRANCH: master
       UPSTREAM_REPO: https://github.com/Zephyruso/zashboard.git
+      IMAGE: ghcr.io/pluviophile714/zashboardx
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,13 +45,9 @@ jobs:
             echo "up_to_date=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Merge upstream into sync branch
+      - name: Merge upstream
         if: steps.check.outputs.up_to_date == 'false'
-        id: merge
         run: |
-          branch="sync-upstream-$(date -u +%Y%m%d)"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          git checkout -B "$branch"
           if ! git merge upstream/main --no-edit; then
             git merge --abort || true
             echo "Merge conflict with upstream/main. Please resolve manually." >> "$GITHUB_STEP_SUMMARY"
@@ -62,23 +61,36 @@ jobs:
           pnpm run type-check
           pnpm run build
 
-      - name: Push sync branch
+      - name: Push merged master
         if: steps.check.outputs.up_to_date == 'false'
-        run: git push --force-with-lease origin "${{ steps.merge.outputs.branch }}"
+        run: git push origin "$BASE_BRANCH"
 
-      - name: Create or update pull request
+      - name: Set up QEMU
         if: steps.check.outputs.up_to_date == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.merge.outputs.branch }}
-        run: |
-          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Updated existing PR for $BRANCH" >> "$GITHUB_STEP_SUMMARY"
-          else
-            gh pr create \
-              --repo "$GITHUB_REPOSITORY" \
-              --base "$BASE_BRANCH" \
-              --head "$BRANCH" \
-              --title "Sync upstream zashboard" \
-              --body "Merge latest Zephyruso/zashboard upstream changes into this fork. CI verifies type-check and build before the PR is created."
-          fi
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.up_to_date == 'false'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        if: steps.check.outputs.up_to_date == 'false'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        if: steps.check.outputs.up_to_date == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
