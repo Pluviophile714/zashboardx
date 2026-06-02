@@ -1,11 +1,11 @@
-FROM --platform=linux/amd64 docker.io/guergeiro/pnpm:lts-latest AS builder
+FROM --platform=$BUILDPLATFORM docker.io/guergeiro/pnpm:lts-latest AS builder
 
 WORKDIR /build
 
 COPY . .
 
-RUN pnpm install
-RUN pnpm build
+RUN pnpm install --frozen-lockfile
+RUN pnpm run build
 
 FROM docker.io/caddy:alpine
 

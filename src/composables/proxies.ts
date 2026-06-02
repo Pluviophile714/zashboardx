@@ -4,42 +4,54 @@ import { isHiddenGroup } from '@/helper'
 import { configs } from '@/store/config'
 import {
   getProxyGroupChains,
-  proxiesFilter,
   proxiesTabShow,
   proxyGroupList,
   proxyMap,
   proxyProviederList,
 } from '@/store/proxies'
+import { groupsInActiveFolder, isProxyFolderModeActive } from '@/store/proxyFolders'
 import { rules } from '@/store/rules'
 import { customGlobalNode, displayGlobalByMode, manageHiddenGroup } from '@/store/settings'
 import { isEmpty } from 'lodash'
 import { computed, ref } from 'vue'
+import {
+  isProxyNodeSearchMode,
+  matchProxySearchKeyword,
+  proxyGroupContainsMatchingNode,
+  proxyProviderContainsMatchingNode,
+  proxySearchKeyword,
+} from './proxySearch'
 
-const matchProxyGroupFilter = (name: string) => {
-  const normalizedFilter = proxiesFilter.value.trim()
-  if (!normalizedFilter) return true
-  try { return new RegExp(normalizedFilter, 'i').test(name) } catch { return true }
-}
+const filterProxyGroups = (groups: string[], respectHiddenGroups = true) => {
+  if (!proxySearchKeyword.value) {
+    if (!respectHiddenGroups || manageHiddenGroup.value) {
+      return groups
+    }
 
-const filterGroups = (all: string[]) => {
-  if (proxiesFilter.value.trim().length) return all.filter(matchProxyGroupFilter)
-  if (manageHiddenGroup.value) return all
-  return all.filter((name) => !isHiddenGroup(name))
+    return groups.filter((name) => !isHiddenGroup(name))
+  }
+
+  const matchesGroup = isProxyNodeSearchMode.value
+    ? proxyGroupContainsMatchingNode
+    : (name: string) => matchProxySearchKeyword(name)
+
+  return groups.filter(matchesGroup)
 }
 
 const getCurrentProxyGroups = () => {
   if (displayGlobalByMode.value) {
     if (configs.value?.mode.toUpperCase() === GLOBAL) {
-      return [
-        isSingBox.value && proxyMap.value[customGlobalNode.value] ? customGlobalNode.value : GLOBAL,
-      ]
-    }
-    return filterGroups(proxyGroupList.value)
-  }
-  return filterGroups([...proxyGroupList.value, GLOBAL])
-}
+      const globalName =
+        isSingBox.value && proxyMap.value[customGlobalNode.value] ? customGlobalNode.value : GLOBAL
 
-// ─── AnGe group classification ───
+      return filterProxyGroups(getProxyGroupChains(globalName), false)
+    }
+
+    return filterProxyGroups(proxyGroupList.value)
+  }
+
+  return filterProxyGroups([...proxyGroupList.value, GLOBAL])
+}
 
 const currentGroupSet = computed(() => new Set(getCurrentProxyGroups()))
 
@@ -54,13 +66,17 @@ const getChildGroupNames = (name: string, groupSet: Set<string>) => {
 }
 
 const hasDescendantGroup = (
-  rootName: string, targetName: string, groupSet: Set<string>,
+  rootName: string,
+  targetName: string,
+  groupSet: Set<string>,
   visited = new Set<string>(),
 ): boolean => {
   if (rootName === targetName || visited.has(rootName)) return false
   visited.add(rootName)
   for (const member of getChildGroupNames(rootName, groupSet)) {
-    if (member === targetName || hasDescendantGroup(member, targetName, groupSet, visited)) return true
+    if (member === targetName || hasDescendantGroup(member, targetName, groupSet, visited)) {
+      return true
+    }
   }
   return false
 }
@@ -69,20 +85,27 @@ const referencedCurrentGroupNames = computed(() => {
   const referenced = new Set<string>()
   currentGroupSet.value.forEach((name) => {
     if (name === GLOBAL) return
-    getChildGroupNames(name, currentGroupSet.value).forEach((m) => referenced.add(m))
+    getChildGroupNames(name, currentGroupSet.value).forEach((member) => referenced.add(member))
   })
   return referenced
 })
 
 const fallbackPolicyGroupNames = computed(() => {
-  return new Set(getCurrentProxyGroups().filter((n) => !referencedCurrentGroupNames.value.has(n)))
+  return new Set(
+    getCurrentProxyGroups().filter((name) => !referencedCurrentGroupNames.value.has(name)),
+  )
 })
 
 const resolvedPolicyGroupNames = computed(() => {
-  const direct = [...ruleProxyNames.value].filter((n) => currentGroupSet.value.has(n))
+  const direct = [...ruleProxyNames.value].filter((name) => currentGroupSet.value.has(name))
   if (direct.length > 0) {
-    const topLevel = direct.filter((name) =>
-      !direct.some((c) => c !== name && hasDescendantGroup(c, name, currentGroupSet.value)))
+    const topLevel = direct.filter(
+      (name) =>
+        !direct.some(
+          (candidate) =>
+            candidate !== name && hasDescendantGroup(candidate, name, currentGroupSet.value),
+        ),
+    )
     if (topLevel.length > 0) return new Set(topLevel)
   }
   return fallbackPolicyGroupNames.value
@@ -90,14 +113,31 @@ const resolvedPolicyGroupNames = computed(() => {
 
 const isPolicyGroup = (name: string) => resolvedPolicyGroupNames.value.has(name)
 
-const getRenderGroups = () => {
+const getRenderProxyGroups = () => {
   if (isEmpty(proxyMap.value)) return []
-  if (proxiesTabShow.value === PROXY_TAB_TYPE.PROVIDER)
-    return proxyProviederList.value.map((g) => g.name)
+
   const current = getCurrentProxyGroups()
+
   if (proxiesTabShow.value === PROXY_TAB_TYPE.POLICY) return current.filter(isPolicyGroup)
-  if (proxiesTabShow.value === PROXY_TAB_TYPE.NODE) return current.filter((n) => !isPolicyGroup(n))
+  if (proxiesTabShow.value === PROXY_TAB_TYPE.NODE) {
+    return current.filter((name) => !isPolicyGroup(name))
+  }
+
   return current
+}
+
+const getRenderProxyProviders = () => {
+  const names = proxyProviederList.value.map((provider) => provider.name)
+
+  if (!proxySearchKeyword.value) {
+    return names
+  }
+
+  const matches = isProxyNodeSearchMode.value
+    ? proxyProviderContainsMatchingNode
+    : (name: string) => matchProxySearchKeyword(name)
+
+  return names.filter(matches)
 }
 
 const limitInitialRender = (names: string[]) =>
@@ -106,11 +146,26 @@ const limitInitialRender = (names: string[]) =>
 export const disableProxiesPageScroll = ref(false)
 export const isProxiesPageMounted = ref(false)
 export const policyGroups = computed(() => getCurrentProxyGroups().filter(isPolicyGroup))
-export const nodeGroups = computed(() => getCurrentProxyGroups().filter((n) => !isPolicyGroup(n)))
-export const renderGroups = computed(() => limitInitialRender(getRenderGroups()))
-export const renderProxyGroups = renderGroups
-export const renderProxyProviders = computed(() => limitInitialRender(proxyProviederList.value.map((p) => p.name)))
-export const renderProxiesPageItems = computed(() => {
-  if (proxiesTabShow.value === PROXY_TAB_TYPE.PROVIDER) return renderProxyProviders.value
+export const nodeGroups = computed(() =>
+  getCurrentProxyGroups().filter((name) => !isPolicyGroup(name)),
+)
+export const renderProxyGroups = computed(() => limitInitialRender(getRenderProxyGroups()))
+export const renderProxyProviders = computed(() => limitInitialRender(getRenderProxyProviders()))
+export const renderGroups = computed(() => {
+  if (proxiesTabShow.value === PROXY_TAB_TYPE.PROVIDER) {
+    return renderProxyProviders.value
+  }
+
   return renderProxyGroups.value
+})
+export const renderProxiesPageItems = computed(() => {
+  if (proxiesTabShow.value === PROXY_TAB_TYPE.PROVIDER) {
+    return renderProxyProviders.value
+  }
+
+  const groups = renderProxyGroups.value
+  if (!isProxyFolderModeActive.value) return groups
+  const filter = groupsInActiveFolder.value
+  if (!filter) return groups
+  return groups.filter((name) => filter.has(name))
 })
