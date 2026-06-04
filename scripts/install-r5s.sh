@@ -36,6 +36,13 @@ EOF
 
 cd "$APP_DIR"
 docker compose pull
+if docker ps -a --format '{{.Names}}' | grep -qx "$APP_NAME"; then
+  CURRENT_IMAGE="$(docker inspect "$APP_NAME" --format '{{.Config.Image}}' 2>/dev/null || true)"
+  if [ "$CURRENT_IMAGE" != "$IMAGE" ]; then
+    docker stop "$APP_NAME" >/dev/null 2>&1 || true
+    docker rm "$APP_NAME" >/dev/null 2>&1 || true
+  fi
+fi
 docker compose up -d
 
 echo
