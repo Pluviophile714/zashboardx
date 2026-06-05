@@ -38,6 +38,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const { showTip } = useTooltip()
 const handlerHistoryTip = (e: Event) => {
+  if (props.disableHistoryTip) return
+
   const history = getHistoryByName(props.name ?? '', props.groupName)
 
   if (!history.length) return
@@ -70,6 +72,7 @@ const props = defineProps<{
   name?: string
   loading?: boolean
   groupName?: string
+  disableHistoryTip?: boolean
 }>()
 const latencyRef = ref()
 const latency = computed(() => getLatencyByName(props.name ?? '', props.groupName))
