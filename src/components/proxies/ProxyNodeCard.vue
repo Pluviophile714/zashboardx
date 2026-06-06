@@ -102,8 +102,6 @@ const CHART_PADDING_X = 8
 const CHART_PADDING_Y = 8
 const { t } = useI18n()
 const { showTip } = useTooltip()
-const MOBILE_LATENCY_DETAILS_BACKDROP_ID = 'proxy-latency-mobile-details-backdrop'
-const MOBILE_LATENCY_DETAILS_SHEET_ID = 'proxy-latency-mobile-details-sheet'
 const props = defineProps<{
   name: string
   active?: boolean
@@ -415,50 +413,18 @@ const createLatencyDetailsTip = () => {
   return root
 }
 
-const showMobileLatencyDetailsTip = () => {
-  const key = `${props.groupName ?? ''}\n${props.name}`
-  const existingSheet = document.getElementById(MOBILE_LATENCY_DETAILS_SHEET_ID)
-
-  if (existingSheet?.dataset.latencyKey === key) return
-
-  document.getElementById(MOBILE_LATENCY_DETAILS_BACKDROP_ID)?.remove()
-
-  const backdrop = document.createElement('div')
-  const sheet = createLatencyDetailsTip()
-
-  backdrop.id = MOBILE_LATENCY_DETAILS_BACKDROP_ID
-  backdrop.className = 'fixed inset-0 z-9999 bg-transparent'
-  backdrop.style.zIndex = '9999'
-  backdrop.addEventListener('pointerdown', () => backdrop.remove())
-
-  sheet.id = MOBILE_LATENCY_DETAILS_SHEET_ID
-  sheet.dataset.latencyKey = key
-  sheet.style.position = 'fixed'
-  sheet.style.left = '8px'
-  sheet.style.right = '8px'
-  sheet.style.bottom = 'calc(env(safe-area-inset-bottom, 0px) + 5rem)'
-  sheet.style.width = 'auto'
-  sheet.style.maxHeight = 'min(52dvh, 26rem)'
-  sheet.style.zIndex = '10000'
-  sheet.addEventListener('pointerdown', (event) => event.stopPropagation())
-
-  backdrop.append(sheet)
-  document.body.append(backdrop)
-}
-
 const handlerLatencyDetailsTip = (e: Event) => {
   if (!getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length) return
-
-  if (isCompactLatencyDetails()) {
-    showMobileLatencyDetailsTip()
-    return
-  }
 
   const tipEvent = Object.create(e, {
     currentTarget: {
       value: cardRef.value ?? e.currentTarget,
     },
   }) as Event
+  const compact = isCompactLatencyDetails()
+  const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
+  const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
+  const placement = compact ? mobilePlacement : 'top'
 
   showTip(tipEvent, createLatencyDetailsTip(), {
     appendTo: document.body,
@@ -469,7 +435,7 @@ const handlerLatencyDetailsTip = (e: Event) => {
     hideOnClick: false,
     maxWidth: 'none',
     offset: [0, 8],
-    placement: 'top',
+    placement,
     popperOptions: {
       strategy: 'fixed',
       modifiers: [
@@ -485,7 +451,10 @@ const handlerLatencyDetailsTip = (e: Event) => {
           name: 'flip',
           options: {
             boundary: 'viewport',
-            fallbackPlacements: ['top', 'bottom', 'right', 'left'],
+            fallbackPlacements:
+              compact && placement === 'bottom'
+                ? ['bottom', 'top', 'right', 'left']
+                : ['top', 'bottom', 'right', 'left'],
             padding: 8,
           },
         },
