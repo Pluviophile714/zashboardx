@@ -9,7 +9,7 @@
         latencyTipAnimationClass,
       )
     "
-    @pointermove="handlerLatencyDetailsTip"
+    @pointerenter="handlerLatencyDetailsTip"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -54,7 +54,6 @@
       class="flex w-full gap-px overflow-hidden rounded-full"
       :class="isSmallCard ? 'h-1' : 'h-1.5'"
       aria-hidden="true"
-      @pointermove.stop="handlerLatencyDetailsTip"
     >
       <div
         v-for="(segment, index) in latencyStabilityBar"
