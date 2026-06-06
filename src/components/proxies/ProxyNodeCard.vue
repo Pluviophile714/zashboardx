@@ -9,7 +9,7 @@
         latencyTipAnimationClass,
       )
     "
-    @mousemove="handlerLatencyDetailsTip"
+    @pointermove="handlerLatencyDetailsTip"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -54,7 +54,7 @@
       class="flex w-full gap-px overflow-hidden rounded-full"
       :class="isSmallCard ? 'h-1' : 'h-1.5'"
       aria-hidden="true"
-      @mousemove.stop="handlerLatencyDetailsTip"
+      @pointermove.stop="handlerLatencyDetailsTip"
     >
       <div
         v-for="(segment, index) in latencyStabilityBar"
@@ -94,6 +94,7 @@ import LatencyTag from './LatencyTag.vue'
 import ProxyIcon from './ProxyIcon.vue'
 
 const LATENCY_BAR_SEGMENTS = 10
+const LATENCY_DETAIL_SEGMENTS = 30
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
 const CHART_PADDING_X = 8
@@ -271,6 +272,41 @@ const buildSparklineSvg = (history: { delay: number }[]) => {
   `
 }
 
+const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[]) => {
+  const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
+  const emptySegments: { delay?: number; time?: string }[] = Array.from(
+    { length: Math.max(0, LATENCY_DETAIL_SEGMENTS - recentHistory.length) },
+    () => ({}),
+  )
+  const strip = document.createElement('div')
+
+  strip.className = 'mt-2 flex w-full gap-1'
+
+  for (const item of [...emptySegments, ...recentHistory]) {
+    const segment = document.createElement('div')
+
+    segment.className = 'min-w-0 flex-1'
+    segment.style.height = '18px'
+    segment.style.borderRadius = '2px'
+    segment.style.backgroundColor =
+      item.delay === undefined
+        ? 'color-mix(in oklch, var(--color-base-content) 14%, transparent)'
+        : getLatencyColorValue(item.delay)
+    segment.style.opacity = item.delay === undefined ? '0.75' : '1'
+
+    if (item.time) {
+      segment.title =
+        item.delay && item.delay > NOT_CONNECTED
+          ? `${dayjs(item.time).format('YYYY-MM-DD HH:mm:ss')} ${item.delay}ms`
+          : `${dayjs(item.time).format('YYYY-MM-DD HH:mm:ss')} ---`
+    }
+
+    strip.append(segment)
+  }
+
+  return strip
+}
+
 const createLatencyDetailsTip = () => {
   const history = getHistoryByName(props.name, props.groupName) ?? []
   const recent = history.slice(-LATENCY_BAR_SEGMENTS)
@@ -309,6 +345,7 @@ const createLatencyDetailsTip = () => {
       svg ??
       '<div class="flex h-14 items-center justify-center text-xs text-base-content/50">not enough data</div>'
     chart.append(sparkline)
+    chart.append(buildLatencyHistoryStrip(history))
 
     const stabilityLine = document.createElement('div')
     stabilityLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
@@ -361,10 +398,18 @@ const createLatencyDetailsTip = () => {
 
 const handlerLatencyDetailsTip = (e: Event) => {
   if (!getHistoryByName(props.name, props.groupName)?.length) return
+  const tipEvent = Object.create(e, {
+    currentTarget: {
+      value: cardRef.value ?? e.currentTarget,
+    },
+  }) as Event
 
-  showTip(e, createLatencyDetailsTip(), {
-    delay: [350, 0],
+  showTip(tipEvent, createLatencyDetailsTip(), {
+    delay: [350, 180],
     interactive: true,
+    interactiveBorder: 24,
+    interactiveDebounce: 120,
+    hideOnClick: false,
     maxWidth: 'none',
     trigger: 'mouseenter',
     touch: ['hold', 500],
