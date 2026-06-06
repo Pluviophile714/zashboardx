@@ -15,7 +15,7 @@
     <div
       class="w-full flex-1 text-sm"
       :class="truncateProxyName && 'truncate'"
-      @mouseenter="checkTruncation"
+      @mouseenter="checkNodeTextTruncation"
     >
       <ProxyIcon
         v-if="node?.icon"
@@ -36,7 +36,7 @@
     <div class="flex h-4 w-full items-center justify-between">
       <span
         :class="`truncate text-xs tracking-tight ${active ? 'text-primary-content' : 'text-base-content/60'}`"
-        @mouseenter="checkTruncation"
+        @mouseenter="checkNodeTextTruncation"
       >
         {{ typeDescription }}
       </span>
@@ -155,6 +155,15 @@ const latencyStabilityBar = computed(() => {
     class: getLatencySegmentClass(item?.delay),
   }))
 })
+
+const hasLatencyDetailsHistory = () =>
+  getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length > 0
+
+const checkNodeTextTruncation = (e: Event) => {
+  if (hasLatencyDetailsHistory()) return
+
+  checkTruncation(e)
+}
 
 const getLatencyTextClass = (delay: number) => {
   if (!delay || delay === NOT_CONNECTED) {
@@ -413,7 +422,7 @@ const createLatencyDetailsTip = () => {
 }
 
 const handlerLatencyDetailsTip = (e: Event) => {
-  if (!getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length) return
+  if (!hasLatencyDetailsHistory()) return
 
   const tipEvent = Object.create(e, {
     currentTarget: {
