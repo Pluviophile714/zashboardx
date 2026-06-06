@@ -183,8 +183,8 @@ const getLatencyColorValue = (delay: number) => {
   return 'rgb(244, 96, 108)'
 }
 
-const getLatencyStats = (history: { delay: number }[]) => {
-  const recent = history.slice(-LATENCY_BAR_SEGMENTS)
+const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
+  const recent = history.slice(-windowSize)
   const successItems = recent.filter((item) => item.delay > NOT_CONNECTED)
   const delays = successItems.map((item) => item.delay)
 
@@ -202,15 +202,15 @@ const getLatencyStats = (history: { delay: number }[]) => {
     max,
     min,
     jitter: Math.round(Math.sqrt(variance)),
-    successRate: Math.round((successItems.length / recent.length) * 100),
+    successRate: Math.round((successItems.length / windowSize) * 100),
     successTests: successItems.length,
-    totalTests: recent.length,
+    totalTests: windowSize,
   }
 }
 
-const buildSparklineSvg = (history: { delay: number }[]) => {
-  const recent = history.slice(-LATENCY_BAR_SEGMENTS)
-  const stats = getLatencyStats(history)
+const buildSparklineSvg = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
+  const recent = history.slice(-windowSize)
+  const stats = getLatencyStats(history, windowSize)
 
   if (!stats || stats.successTests < 2) {
     return null
@@ -312,7 +312,7 @@ const createLatencyDetailsTip = () => {
   const history = getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS)
   const recent = history.slice(-LATENCY_BAR_SEGMENTS)
   const newestFirst = [...recent].reverse()
-  const stats = getLatencyStats(history)
+  const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const root = document.createElement('div')
 
   root.className =
@@ -339,7 +339,7 @@ const createLatencyDetailsTip = () => {
     statLine.append(min, avg, max)
     chart.append(statLine)
 
-    const svg = buildSparklineSvg(history)
+    const svg = buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS)
     const sparkline = document.createElement('div')
     sparkline.className = 'text-base-content/80'
     sparkline.innerHTML =
