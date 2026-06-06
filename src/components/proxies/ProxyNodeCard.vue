@@ -208,7 +208,13 @@ const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_
   }
 }
 
-const buildSparklineSvg = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
+const isCompactLatencyDetails = () => window.matchMedia('(max-width: 640px)').matches
+
+const buildSparklineSvg = (
+  history: { delay: number }[],
+  windowSize = LATENCY_BAR_SEGMENTS,
+  compact = false,
+) => {
   const recent = history.slice(-windowSize)
   const stats = getLatencyStats(history, windowSize)
 
@@ -230,8 +236,10 @@ const buildSparklineSvg = (history: { delay: number }[], windowSize = LATENCY_BA
     lowerBound = Math.max(0, upperBound - visualRange)
   }
 
+  const chartHeight = compact ? 12 : CHART_HEIGHT
+  const chartPaddingY = compact ? 2 : CHART_PADDING_Y
   const plotWidth = CHART_WIDTH - CHART_PADDING_X * 2
-  const plotHeight = CHART_HEIGHT - CHART_PADDING_Y * 2
+  const plotHeight = chartHeight - chartPaddingY * 2
   const xStep = plotWidth / (successfulRecent.length - 1)
   const points = successfulRecent.map((item, index) => {
     const normalized = (item.delay - lowerBound) / (upperBound - lowerBound || 1)
@@ -239,7 +247,7 @@ const buildSparklineSvg = (history: { delay: number }[], windowSize = LATENCY_BA
 
     return {
       x: CHART_PADDING_X + index * xStep,
-      y: CHART_PADDING_Y + (1 - clamped) * plotHeight,
+      y: chartPaddingY + (1 - clamped) * plotHeight,
       delay: item.delay,
     }
   })
@@ -248,32 +256,32 @@ const buildSparklineSvg = (history: { delay: number }[], windowSize = LATENCY_BA
     .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
     .join(' ')
 
-  const areaPath = `${path} L ${CHART_WIDTH - CHART_PADDING_X} ${CHART_HEIGHT - CHART_PADDING_Y} L ${CHART_PADDING_X} ${CHART_HEIGHT - CHART_PADDING_Y} Z`
+  const areaPath = `${path} L ${CHART_WIDTH - CHART_PADDING_X} ${chartHeight - chartPaddingY} L ${CHART_PADDING_X} ${chartHeight - chartPaddingY} Z`
   const color = getLatencyColorValue(stats.avg)
   const circles = points
     .map(
       (point) =>
-        `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="1.45" fill="${color}" />`,
+        `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="${compact ? '0.9' : '1.45'}" fill="${color}" fill-opacity="${compact ? '0.9' : '1'}" />`,
     )
     .join('')
 
   return `
-    <svg viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" class="h-14 w-full" preserveAspectRatio="none" aria-hidden="true">
+    <svg viewBox="0 0 ${CHART_WIDTH} ${chartHeight}" class="${compact ? 'h-6' : 'h-14'} w-full" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <linearGradient id="latency-area-${props.name.replace(/[^a-zA-Z0-9_-]/g, '-')}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="${color}" stop-opacity="0.1" />
           <stop offset="100%" stop-color="${color}" stop-opacity="0.02" />
         </linearGradient>
       </defs>
-      <line x1="${CHART_PADDING_X}" y1="${CHART_HEIGHT / 2}" x2="${CHART_WIDTH - CHART_PADDING_X}" y2="${CHART_HEIGHT / 2}" stroke="currentColor" stroke-opacity="0.12" stroke-dasharray="4 4" />
-      <path d="${areaPath}" fill="url(#latency-area-${props.name.replace(/[^a-zA-Z0-9_-]/g, '-')})" />
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+      <line x1="${CHART_PADDING_X}" y1="${chartHeight / 2}" x2="${CHART_WIDTH - CHART_PADDING_X}" y2="${chartHeight / 2}" stroke="currentColor" stroke-opacity="${compact ? '0.08' : '0.12'}" stroke-dasharray="4 4" />
+      ${compact ? '' : `<path d="${areaPath}" fill="url(#latency-area-${props.name.replace(/[^a-zA-Z0-9_-]/g, '-')})" />`}
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="${compact ? '1' : '1.25'}" stroke-opacity="${compact ? '0.9' : '1'}" stroke-linecap="round" stroke-linejoin="round" />
       ${circles}
     </svg>
   `
 }
 
-const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[]) => {
+const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[], compact = false) => {
   const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
     { length: Math.max(0, LATENCY_DETAIL_SEGMENTS - recentHistory.length) },
@@ -287,7 +295,7 @@ const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[]) =
     const segment = document.createElement('div')
 
     segment.className = 'min-w-0 flex-1'
-    segment.style.height = '18px'
+    segment.style.height = compact ? '14px' : '18px'
     segment.style.borderRadius = '2px'
     segment.style.backgroundColor =
       item.delay === undefined
@@ -309,23 +317,27 @@ const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[]) =
 }
 
 const createLatencyDetailsTip = () => {
+  const compact = isCompactLatencyDetails()
   const history = getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS)
   const recent = history.slice(-LATENCY_BAR_SEGMENTS)
   const newestFirst = [...recent].reverse()
   const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const root = document.createElement('div')
 
-  root.className =
-    'w-76 max-w-[calc(100vw-2rem)] rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
+  root.className = compact
+    ? 'max-h-[min(68vh,28rem)] w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
+    : 'w-76 max-w-[calc(100vw-2rem)] rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
 
   const title = document.createElement('div')
-  title.className = 'mb-2 truncate text-center text-base font-bold'
+  title.className = compact
+    ? 'mb-1.5 truncate text-center text-sm font-bold'
+    : 'mb-2 truncate text-center text-base font-bold'
   title.textContent = node.value?.name ?? props.name
   root.append(title)
 
   if (stats) {
     const chart = document.createElement('div')
-    chart.className = 'rounded-lg bg-base-300/50 p-2'
+    chart.className = compact ? 'rounded-lg bg-base-300/50 p-1.5' : 'rounded-lg bg-base-300/50 p-2'
 
     const statLine = document.createElement('div')
     statLine.className = 'mb-1 flex items-center justify-between text-xs text-base-content/75'
@@ -339,14 +351,16 @@ const createLatencyDetailsTip = () => {
     statLine.append(min, avg, max)
     chart.append(statLine)
 
-    const svg = buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS)
+    const svg = buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS, compact)
     const sparkline = document.createElement('div')
-    sparkline.className = 'text-base-content/80'
+
+    sparkline.className = compact ? 'text-base-content/60' : 'text-base-content/80'
     sparkline.innerHTML =
       svg ??
-      '<div class="flex h-14 items-center justify-center text-xs text-base-content/50">not enough data</div>'
+      `<div class="flex ${compact ? 'h-6' : 'h-14'} items-center justify-center text-xs text-base-content/50">not enough data</div>`
     chart.append(sparkline)
-    chart.append(buildLatencyHistoryStrip(history))
+
+    chart.append(buildLatencyHistoryStrip(history, compact))
 
     const stabilityLine = document.createElement('div')
     stabilityLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
@@ -360,8 +374,9 @@ const createLatencyDetailsTip = () => {
   }
 
   const list = document.createElement('div')
-  list.className =
-    'mt-2 flex max-h-52 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
+  list.className = compact
+    ? 'mt-1.5 flex max-h-32 flex-col gap-0.5 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
+    : 'mt-2 flex max-h-52 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
 
   if (!newestFirst.length) {
     const empty = document.createElement('div')
@@ -372,21 +387,22 @@ const createLatencyDetailsTip = () => {
 
   for (const item of newestFirst) {
     const row = document.createElement('div')
-    row.className =
-      'grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-base-300/60'
+    row.className = compact
+      ? 'grid grid-cols-[auto_1fr_auto] items-center gap-1.5 rounded-md px-1 py-1 hover:bg-base-300/60'
+      : 'grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-base-300/60'
 
     const status = document.createElement('span')
     status.className =
       item.delay > NOT_CONNECTED
-        ? 'size-2.5 rounded-full bg-low-latency'
-        : 'size-2.5 rounded-full bg-base-content/35'
+        ? `${compact ? 'size-2' : 'size-2.5'} rounded-full bg-low-latency`
+        : `${compact ? 'size-2' : 'size-2.5'} rounded-full bg-base-content/35`
 
     const time = document.createElement('time')
-    time.className = 'truncate text-xs text-base-content/75'
+    time.className = `${compact ? 'text-[11px]' : 'text-xs'} truncate text-base-content/75`
     time.textContent = dayjs(item.time).format('YYYY-MM-DD HH:mm:ss')
 
     const delay = document.createElement('span')
-    delay.className = `text-xs font-semibold ${getLatencyTextClass(item.delay)}`
+    delay.className = `${compact ? 'text-[11px]' : 'text-xs'} font-semibold ${getLatencyTextClass(item.delay)}`
     delay.textContent = item.delay > NOT_CONNECTED ? `${item.delay}ms` : '---'
 
     row.append(status, time, delay)
@@ -406,12 +422,35 @@ const handlerLatencyDetailsTip = (e: Event) => {
   }) as Event
 
   showTip(tipEvent, createLatencyDetailsTip(), {
+    appendTo: document.body,
     delay: [350, 180],
     interactive: true,
     interactiveBorder: 24,
     interactiveDebounce: 120,
     hideOnClick: false,
     maxWidth: 'none',
+    placement: isCompactLatencyDetails() ? 'top' : 'top',
+    popperOptions: {
+      strategy: 'fixed',
+      modifiers: [
+        {
+          name: 'preventOverflow',
+          options: {
+            boundary: 'viewport',
+            padding: 8,
+            tether: false,
+          },
+        },
+        {
+          name: 'flip',
+          options: {
+            boundary: 'viewport',
+            fallbackPlacements: ['bottom', 'top', 'right', 'left'],
+            padding: 8,
+          },
+        },
+      ],
+    },
     trigger: 'mouseenter',
     touch: ['hold', 500],
   })
