@@ -95,6 +95,7 @@ import ProxyIcon from './ProxyIcon.vue'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
+const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
 const CHART_PADDING_X = 8
@@ -189,6 +190,51 @@ const getLatencyColorValue = (delay: number) => {
     return 'rgb(250, 210, 75)'
   }
   return 'rgb(244, 96, 108)'
+}
+
+const getLatencyTimelineAccent = (delay?: number) => {
+  if (delay === undefined) {
+    return null
+  }
+  if (!delay || delay === NOT_CONNECTED) {
+    return {
+      color: 'rgb(244, 96, 108)',
+      ratio: 0.82,
+    }
+  }
+  if (delay < lowLatency.value) {
+    return null
+  }
+  if (delay < mediumLatency.value) {
+    const range = Math.max(1, mediumLatency.value - lowLatency.value)
+    const progress = Math.min(1, Math.max(0, (delay - lowLatency.value) / range))
+
+    return {
+      color: 'rgb(250, 210, 75)',
+      ratio: 0.18 + progress * 0.24,
+    }
+  }
+
+  const range = Math.max(1, mediumLatency.value)
+  const progress = Math.min(1, Math.max(0, (delay - mediumLatency.value) / range))
+
+  return {
+    color: 'rgb(244, 96, 108)',
+    ratio: 0.44 + progress * 0.34,
+  }
+}
+
+const formatLatencyHistoryGap = (gap: number) => {
+  const minutes = Math.max(1, Math.round(gap / 60000))
+
+  if (minutes < 60) {
+    return `${minutes} 分钟`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+
+  return restMinutes ? `${hours} 小时 ${restMinutes} 分钟` : `${hours} 小时`
 }
 
 const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
@@ -289,27 +335,74 @@ const buildSparklineSvg = (
   `
 }
 
-const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[], compact = false) => {
+const buildLatencyStatusTimeline = (
+  history: { delay: number; time?: string }[],
+  compact = false,
+) => {
   const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
     { length: Math.max(0, LATENCY_DETAIL_SEGMENTS - recentHistory.length) },
     () => ({}),
   )
+  const timeline = document.createElement('div')
+  const header = document.createElement('div')
   const strip = document.createElement('div')
+  const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
+  const sampleCount = recentHistory.length
+  const sampledSuccessRate =
+    stats && sampleCount ? Math.round((stats.successTests / sampleCount) * 100) : 0
 
-  strip.className = 'mt-2 flex w-full gap-1'
+  timeline.className = compact
+    ? 'mt-2 rounded-md bg-base-200/40 p-1.5'
+    : 'mt-2.5 rounded-lg bg-base-200/40 p-2'
+  header.className = compact
+    ? 'mb-1 flex items-center justify-between text-[10px] text-base-content/55'
+    : 'mb-1.5 flex items-center justify-between text-[11px] text-base-content/55'
+
+  const oldestLabel = document.createElement('span')
+  oldestLabel.textContent = '近 30 次'
+  const successLabel = document.createElement('span')
+  successLabel.className =
+    stats && sampledSuccessRate >= 80
+      ? 'text-low-latency'
+      : stats && sampledSuccessRate >= 50
+        ? 'text-medium-latency'
+        : 'text-high-latency'
+  successLabel.textContent = stats
+    ? `${sampledSuccessRate}% 可用 · ${sampleCount}/${stats.totalTests} 记录`
+    : '暂无记录'
+  const newestLabel = document.createElement('span')
+  newestLabel.textContent = '现在'
+  header.append(oldestLabel, successLabel, newestLabel)
+
+  strip.className = 'flex w-full items-end gap-1'
+
+  let previousTimestamp: number | undefined
 
   for (const item of [...emptySegments, ...recentHistory]) {
     const segment = document.createElement('div')
+    const timestamp = item.time ? Date.parse(item.time) : undefined
+    const accent = getLatencyTimelineAccent(item.delay)
 
-    segment.className = 'min-w-0 flex-1'
-    segment.style.height = compact ? '14px' : '18px'
-    segment.style.borderRadius = '2px'
+    segment.className = 'relative min-w-0 flex-1 overflow-hidden'
+    segment.style.height = compact ? '18px' : '24px'
+    segment.style.borderRadius = compact ? '3px' : '4px'
     segment.style.backgroundColor =
       item.delay === undefined
-        ? 'color-mix(in oklch, var(--color-base-content) 14%, transparent)'
-        : getLatencyColorValue(item.delay)
-    segment.style.opacity = item.delay === undefined ? '0.75' : '1'
+        ? 'color-mix(in oklch, var(--color-base-content) 12%, transparent)'
+        : item.delay > NOT_CONNECTED
+          ? 'oklch(0.648 0.15 160)'
+          : 'color-mix(in oklch, var(--color-base-content) 18%, transparent)'
+    segment.style.opacity = item.delay === undefined ? '0.7' : '1'
+
+    if (
+      previousTimestamp &&
+      timestamp &&
+      Number.isFinite(timestamp) &&
+      timestamp - previousTimestamp > LATENCY_HISTORY_GAP_THRESHOLD
+    ) {
+      segment.style.marginLeft = compact ? '3px' : '4px'
+    }
 
     if (item.time) {
       segment.title =
@@ -318,10 +411,26 @@ const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[], c
           : `${dayjs(item.time).format('YYYY-MM-DD HH:mm:ss')} ---`
     }
 
+    if (accent) {
+      const accentElement = document.createElement('span')
+      const segmentHeight = compact ? 18 : 24
+
+      accentElement.className = 'absolute inset-x-0 bottom-0'
+      accentElement.style.height = `${Math.max(2, Math.round(segmentHeight * accent.ratio))}px`
+      accentElement.style.backgroundColor = accent.color
+      accentElement.style.opacity = '0.95'
+      segment.append(accentElement)
+    }
+
+    if (timestamp && Number.isFinite(timestamp)) {
+      previousTimestamp = timestamp
+    }
+
     strip.append(segment)
   }
 
-  return strip
+  timeline.append(header, strip)
+  return timeline
 }
 
 const createLatencyDetailsTip = () => {
@@ -368,14 +477,14 @@ const createLatencyDetailsTip = () => {
       `<div class="flex ${compact ? 'h-6' : 'h-14'} items-center justify-center text-xs text-base-content/50">not enough data</div>`
     chart.append(sparkline)
 
-    chart.append(buildLatencyHistoryStrip(history, compact))
+    chart.append(buildLatencyStatusTimeline(history, compact))
 
     const stabilityLine = document.createElement('div')
     stabilityLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
     const jitter = document.createElement('span')
     jitter.textContent = `jitter: ${stats.jitter}ms`
     const success = document.createElement('span')
-    success.textContent = `${stats.successTests}/${stats.totalTests} (${stats.successRate}%)`
+    success.textContent = `可用 ${stats.successTests}/${stats.totalTests}`
     stabilityLine.append(jitter, success)
     chart.append(stabilityLine)
     root.append(chart)
@@ -393,7 +502,36 @@ const createLatencyDetailsTip = () => {
     list.append(empty)
   }
 
+  let previousTimestamp: number | undefined
+
   for (const item of newestFirst) {
+    const timestamp = Date.parse(item.time)
+
+    if (
+      previousTimestamp &&
+      Number.isFinite(timestamp) &&
+      previousTimestamp - timestamp > LATENCY_HISTORY_GAP_THRESHOLD
+    ) {
+      const gap = document.createElement('div')
+      gap.className = compact
+        ? 'grid grid-cols-[1fr_auto_1fr] items-center gap-1.5 px-1 py-0.5 text-[10px] text-base-content/45'
+        : 'grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-1.5 py-0.5 text-[11px] text-base-content/45'
+
+      const before = document.createElement('span')
+      before.className = 'h-px bg-base-content/10'
+      const label = document.createElement('span')
+      label.textContent = `间隔 ${formatLatencyHistoryGap(previousTimestamp - timestamp)}`
+      const after = document.createElement('span')
+      after.className = 'h-px bg-base-content/10'
+
+      gap.append(before, label, after)
+      list.append(gap)
+    }
+
+    if (Number.isFinite(timestamp)) {
+      previousTimestamp = timestamp
+    }
+
     const row = document.createElement('div')
     row.className = compact
       ? 'grid grid-cols-[auto_1fr_auto] items-center gap-1.5 rounded-md px-1 py-1 hover:bg-base-300/60'
