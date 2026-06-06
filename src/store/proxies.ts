@@ -43,6 +43,10 @@ export const proxyMap = ref<Record<string, Proxy>>({})
 export const IPv6Map = useStorage<Record<string, boolean>>('cache/ipv6-map', {})
 export const hiddenGroupMap = useStorage<Record<string, boolean>>('config/hidden-group-map', {})
 export const proxyProviederList = ref<ProxyProvider[]>([])
+const latencyHistoryCache = useStorage<Record<string, Proxy['history']>>(
+  'cache/proxy-latency-history',
+  {},
+)
 
 const speedtestUrlWithDefault = computed(() => {
   return speedtestUrl.value || TEST_URL
@@ -97,6 +101,34 @@ export const getHistoryByName = (proxyName: string, groupName?: string) => {
   const nowNode = proxyMap.value[getNowProxyNodeName(proxyName)]
 
   return nowNode?.history
+}
+
+const getLatencyHistoryCacheKey = (proxyName: string, groupName?: string) => {
+  return `${proxyName}\n${getTestUrl(groupName)}`
+}
+
+export const getDisplayHistoryByName = (proxyName: string, groupName?: string, limit = 30) => {
+  const key = getLatencyHistoryCacheKey(proxyName, groupName)
+  const cachedHistory = latencyHistoryCache.value[key] ?? []
+  const currentHistory = getHistoryByName(proxyName, groupName) ?? []
+
+  if (!currentHistory.length) {
+    return cachedHistory.slice(-limit)
+  }
+
+  const merged = [...cachedHistory, ...currentHistory]
+    .filter((item) => item?.time)
+    .sort((prev, next) => Date.parse(prev.time) - Date.parse(next.time))
+    .filter((item, index, list) => {
+      const next = list[index + 1]
+
+      return !next || item.time !== next.time || item.delay !== next.delay
+    })
+    .slice(-limit)
+
+  latencyHistoryCache.value[key] = merged
+
+  return merged
 }
 
 export const getIPv6ByName = (proxyName: string) => {

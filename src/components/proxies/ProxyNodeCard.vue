@@ -71,6 +71,7 @@ import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
+  getDisplayHistoryByName,
   getHistoryByName,
   getIPv6ByName,
   getTestUrl,
@@ -308,7 +309,7 @@ const buildLatencyHistoryStrip = (history: { delay: number; time?: string }[]) =
 }
 
 const createLatencyDetailsTip = () => {
-  const history = getHistoryByName(props.name, props.groupName) ?? []
+  const history = getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS)
   const recent = history.slice(-LATENCY_BAR_SEGMENTS)
   const newestFirst = [...recent].reverse()
   const stats = getLatencyStats(history)
@@ -397,7 +398,7 @@ const createLatencyDetailsTip = () => {
 }
 
 const handlerLatencyDetailsTip = (e: Event) => {
-  if (!getHistoryByName(props.name, props.groupName)?.length) return
+  if (!getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length) return
   const tipEvent = Object.create(e, {
     currentTarget: {
       value: cardRef.value ?? e.currentTarget,
