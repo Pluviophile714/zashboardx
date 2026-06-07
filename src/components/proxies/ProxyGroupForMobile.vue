@@ -82,6 +82,7 @@
           opacity: contentOpacity,
           contain: 'layout style paint',
         }"
+        @scroll.passive="suppressTooltip()"
       >
         <Component
           :is="groupProxiesByProvider ? ProxiesByProvider : ProxiesContent"
@@ -100,6 +101,7 @@ import { useBounceOnVisible } from '@/composables/bouncein'
 import { disableProxiesPageScroll } from '@/composables/proxies'
 import { useRenderProxyList } from '@/composables/renderProxies'
 import { isHiddenGroup } from '@/helper'
+import { suppressTooltip } from '@/helper/tooltip'
 import { PROXIES_PARENT_CLASS } from '@/helper/utils'
 import { hiddenGroupMap, proxyGroupLatencyTest, proxyMap } from '@/store/proxies'
 import { blurIntensity, groupProxiesByProvider, manageHiddenGroup } from '@/store/settings'
