@@ -18,7 +18,6 @@
         v-if="showContent"
         class="max-h-108 overflow-y-auto p-4 pt-0"
         :class="[PROXIES_PARENT_CLASS, !showCollapse && 'opacity-0']"
-        @scroll.passive="suppressTooltip()"
       >
         <slot name="content" />
       </div>
@@ -27,7 +26,6 @@
 </template>
 
 <script setup lang="ts">
-import { suppressTooltip } from '@/helper/tooltip'
 import { PROXIES_PARENT_CLASS } from '@/helper/utils'
 import { collapseGroupMap } from '@/store/settings'
 import { computed, ref, watch } from 'vue'

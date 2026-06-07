@@ -3,17 +3,6 @@ import tippy, { type Instance, type Props } from 'tippy.js'
 let appContent: HTMLElement
 let tippyInstance: Instance | null = null
 let currentTarget: HTMLElement | null = null
-let tooltipSuppressedUntil = 0
-
-export const isTooltipSuppressed = () => performance.now() < tooltipSuppressedUntil
-
-export const getTooltipSuppressionRemaining = () =>
-  Math.max(0, tooltipSuppressedUntil - performance.now())
-
-export const suppressTooltip = (duration = 450) => {
-  tooltipSuppressedUntil = performance.now() + duration
-  tippyInstance?.hide()
-}
 
 export const useTooltip = () => {
   if (!appContent) {

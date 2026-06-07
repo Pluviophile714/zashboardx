@@ -10,9 +10,6 @@
       )
     "
     @pointerenter="handlerLatencyDetailsTip"
-    @pointercancel="cancelLatencyDetailsTip"
-    @pointerleave="cancelLatencyDetailsTip"
-    @pointerup="cancelLatencyDetailsTip"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -70,12 +67,7 @@
 
 <script setup lang="ts">
 import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
-import {
-  checkTruncation,
-  getTooltipSuppressionRemaining,
-  isTooltipSuppressed,
-  useTooltip,
-} from '@/helper/tooltip'
+import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
   getDisplayHistoryByName,
@@ -103,7 +95,6 @@ import ProxyIcon from './ProxyIcon.vue'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
-const LATENCY_DETAIL_TIP_DELAY = 350
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
@@ -168,15 +159,6 @@ const latencyStabilityBar = computed(() => {
 
 const hasLatencyDetailsHistory = () =>
   getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length > 0
-
-let latencyDetailsTipTimer: number | undefined
-
-const cancelLatencyDetailsTip = () => {
-  if (latencyDetailsTipTimer === undefined) return
-
-  window.clearTimeout(latencyDetailsTipTimer)
-  latencyDetailsTipTimer = undefined
-}
 
 const checkNodeTextTruncation = (e: Event) => {
   if (hasLatencyDetailsHistory()) return
@@ -577,69 +559,55 @@ const createLatencyDetailsTip = () => {
 }
 
 const handlerLatencyDetailsTip = (e: Event) => {
-  const pointerType = (e as PointerEvent).pointerType
-  const isTouchPointer = pointerType === 'touch' || pointerType === 'pen'
-
   if (!hasLatencyDetailsHistory()) return
 
-  cancelLatencyDetailsTip()
+  const tipEvent = Object.create(e, {
+    currentTarget: {
+      value: cardRef.value ?? e.currentTarget,
+    },
+  }) as Event
+  const compact = isCompactLatencyDetails()
+  const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
+  const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
+  const placement = compact ? mobilePlacement : 'top'
 
-  const tipDelay = LATENCY_DETAIL_TIP_DELAY + getTooltipSuppressionRemaining()
-
-  latencyDetailsTipTimer = window.setTimeout(() => {
-    latencyDetailsTipTimer = undefined
-
-    if (isTooltipSuppressed()) return
-    if (!isTouchPointer && !(cardRef.value as HTMLElement | undefined)?.matches(':hover')) return
-
-    const tipEvent = Object.create(e, {
-      currentTarget: {
-        value: cardRef.value ?? e.currentTarget,
-      },
-    }) as Event
-    const compact = isCompactLatencyDetails()
-    const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
-    const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
-    const placement = compact ? mobilePlacement : 'top'
-
-    showTip(tipEvent, createLatencyDetailsTip(), {
-      appendTo: document.body,
-      delay: [0, 180],
-      interactive: true,
-      interactiveBorder: 24,
-      interactiveDebounce: 120,
-      hideOnClick: false,
-      maxWidth: 'none',
-      offset: [0, 8],
-      placement,
-      popperOptions: {
-        strategy: 'fixed',
-        modifiers: [
-          {
-            name: 'preventOverflow',
-            options: {
-              boundary: 'viewport',
-              padding: 8,
-              tether: false,
-            },
+  showTip(tipEvent, createLatencyDetailsTip(), {
+    appendTo: document.body,
+    delay: [350, 180],
+    interactive: true,
+    interactiveBorder: 24,
+    interactiveDebounce: 120,
+    hideOnClick: false,
+    maxWidth: 'none',
+    offset: [0, 8],
+    placement,
+    popperOptions: {
+      strategy: 'fixed',
+      modifiers: [
+        {
+          name: 'preventOverflow',
+          options: {
+            boundary: 'viewport',
+            padding: 8,
+            tether: false,
           },
-          {
-            name: 'flip',
-            options: {
-              boundary: 'viewport',
-              fallbackPlacements:
-                compact && placement === 'bottom'
-                  ? ['bottom', 'top', 'right', 'left']
-                  : ['top', 'bottom', 'right', 'left'],
-              padding: 8,
-            },
+        },
+        {
+          name: 'flip',
+          options: {
+            boundary: 'viewport',
+            fallbackPlacements:
+              compact && placement === 'bottom'
+                ? ['bottom', 'top', 'right', 'left']
+                : ['top', 'bottom', 'right', 'left'],
+            padding: 8,
           },
-        ],
-      },
-      trigger: 'mouseenter',
-      touch: ['hold', 500],
-    })
-  }, tipDelay)
+        },
+      ],
+    },
+    trigger: 'mouseenter',
+    touch: ['hold', 500],
+  })
 }
 
 const latencyTipAnimationClass = ref<string[]>([])
