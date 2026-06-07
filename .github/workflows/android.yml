@@ -1,6 +1,17 @@
 name: Build Android App
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/android.yml'
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'public/**'
+      - 'src/**'
   workflow_dispatch:
 
 permissions:
