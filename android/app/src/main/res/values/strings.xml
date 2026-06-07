@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ZashboardX</string>
+    <string name="title_activity_main">ZashboardX</string>
+    <string name="package_name">dev.pluviophile.zashboardx</string>
+    <string name="custom_url_scheme">dev.pluviophile.zashboardx</string>
+</resources>

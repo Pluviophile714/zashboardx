@@ -146,6 +146,7 @@ export enum LOG_LEVEL {
 }
 
 export enum ROUTE_NAME {
+  app = 'app',
   overview = 'overview',
   proxies = 'proxies',
   connections = 'connections',
@@ -163,6 +164,7 @@ export const ROUTE_ICON_MAP = {
   [ROUTE_NAME.logs]: DocumentTextIcon,
   [ROUTE_NAME.settings]: Cog6ToothIcon,
   [ROUTE_NAME.setup]: CubeTransparentIcon,
+  [ROUTE_NAME.app]: CubeTransparentIcon,
 }
 
 export enum TABLE_SIZE {

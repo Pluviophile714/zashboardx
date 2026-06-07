@@ -1,8 +1,10 @@
 import { ROUTE_NAME } from '@/constant'
 import { renderRoutes } from '@/helper'
+import { isNativeAppMode } from '@/helper/appMode'
 import { i18n } from '@/i18n'
 import { language } from '@/store/settings'
 import { activeBackend } from '@/store/setup'
+import AppLauncherPage from '@/views/AppLauncherPage.vue'
 import ConnectionsPage from '@/views/ConnectionsPage.vue'
 import HomePage from '@/views/HomePage.vue'
 import LogsPage from '@/views/LogsPage.vue'
@@ -53,9 +55,14 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: ROUTE_NAME.proxies,
+      redirect: isNativeAppMode ? ROUTE_NAME.app : ROUTE_NAME.proxies,
       component: HomePage,
       children: childrenRouter,
+    },
+    {
+      path: '/app',
+      name: ROUTE_NAME.app,
+      component: AppLauncherPage,
     },
     {
       path: '/setup',
@@ -71,7 +78,9 @@ const router = createRouter({
 
 const title = useTitle('zashboard')
 const setTitleByName = (name: string | symbol | undefined) => {
-  if (typeof name === 'string' && activeBackend.value) {
+  if (name === ROUTE_NAME.app) {
+    title.value = 'ZashboardX'
+  } else if (typeof name === 'string' && activeBackend.value) {
     const backend = activeBackend.value
     const prefix = backend.label || `${backend.host}:${backend.port}`
     title.value = `${prefix} | ${i18n.global.t(name)}`
@@ -92,8 +101,8 @@ router.beforeEach((to, from) => {
     to.meta.transition = toIndex < fromIndex ? 'slide-right' : 'slide-left'
   }
 
-  if (!activeBackend.value && to.name !== ROUTE_NAME.setup) {
-    router.push({ name: ROUTE_NAME.setup })
+  if (!activeBackend.value && ![ROUTE_NAME.app, ROUTE_NAME.setup].includes(to.name as ROUTE_NAME)) {
+    router.push({ name: isNativeAppMode ? ROUTE_NAME.app : ROUTE_NAME.setup })
   }
 })
 
