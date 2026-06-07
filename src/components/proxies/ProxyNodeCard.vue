@@ -10,7 +10,9 @@
       )
     "
     @pointerenter="handlerLatencyDetailsTip"
+    @pointercancel="cancelLatencyDetailsTip"
     @pointerleave="cancelLatencyDetailsTip"
+    @pointerup="cancelLatencyDetailsTip"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -68,7 +70,12 @@
 
 <script setup lang="ts">
 import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
-import { checkTruncation, isTooltipSuppressed, useTooltip } from '@/helper/tooltip'
+import {
+  checkTruncation,
+  getTooltipSuppressionRemaining,
+  isTooltipSuppressed,
+  useTooltip,
+} from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
   getDisplayHistoryByName,
@@ -570,15 +577,20 @@ const createLatencyDetailsTip = () => {
 }
 
 const handlerLatencyDetailsTip = (e: Event) => {
-  if (!hasLatencyDetailsHistory() || isTooltipSuppressed()) return
+  const pointerType = (e as PointerEvent).pointerType
+  const isTouchPointer = pointerType === 'touch' || pointerType === 'pen'
+
+  if (!hasLatencyDetailsHistory()) return
 
   cancelLatencyDetailsTip()
+
+  const tipDelay = LATENCY_DETAIL_TIP_DELAY + getTooltipSuppressionRemaining()
 
   latencyDetailsTipTimer = window.setTimeout(() => {
     latencyDetailsTipTimer = undefined
 
     if (isTooltipSuppressed()) return
-    if (!(cardRef.value as HTMLElement | undefined)?.matches(':hover')) return
+    if (!isTouchPointer && !(cardRef.value as HTMLElement | undefined)?.matches(':hover')) return
 
     const tipEvent = Object.create(e, {
       currentTarget: {
@@ -627,7 +639,7 @@ const handlerLatencyDetailsTip = (e: Event) => {
       trigger: 'mouseenter',
       touch: ['hold', 500],
     })
-  }, LATENCY_DETAIL_TIP_DELAY)
+  }, tipDelay)
 }
 
 const latencyTipAnimationClass = ref<string[]>([])

@@ -7,6 +7,9 @@ let tooltipSuppressedUntil = 0
 
 export const isTooltipSuppressed = () => performance.now() < tooltipSuppressedUntil
 
+export const getTooltipSuppressionRemaining = () =>
+  Math.max(0, tooltipSuppressedUntil - performance.now())
+
 export const suppressTooltip = (duration = 450) => {
   tooltipSuppressedUntil = performance.now() + duration
   tippyInstance?.hide()
