@@ -11,6 +11,9 @@
 @theme inline {
   --color-base-150: var(--color-base-150);
   --color-base-border: var(--color-base-border);
+  --color-low-latency: oklch(0.648 0.15 160);
+  --color-medium-latency: rgb(250, 210, 75);
+  --color-high-latency: rgb(244, 96, 108);
 }
 
 @utility base-container {
