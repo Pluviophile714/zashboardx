@@ -16,7 +16,7 @@ jobs:
     env:
       IMAGE: ghcr.io/pluviophile714/zashboardx
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v6
 
@@ -32,6 +32,8 @@ jobs:
         run: pnpm run type-check
 
       - name: Build
+        env:
+          SINGBOX_NATIVE: true
         run: pnpm run build
 
       - name: Set up QEMU
