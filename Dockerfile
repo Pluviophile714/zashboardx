@@ -15,5 +15,15 @@ WORKDIR /srv
 
 COPY --from=builder /build/dist/. .
 COPY Caddyfile .
+RUN find /srv -type f \( \
+  -name '*.css' -o \
+  -name '*.html' -o \
+  -name '*.js' -o \
+  -name '*.json' -o \
+  -name '*.svg' -o \
+  -name '*.ttf' -o \
+  -name '*.webmanifest' -o \
+  -name '*.wasm' \
+  \) -exec gzip -k -9 {} \;
 
 CMD ["caddy", "run"]

@@ -1,7 +1,18 @@
 :80 {
-  file_server
+	root * .
 
-  root * .
-  
-  try_files {path} /index.html
+	@staticAssets {
+		path /assets/*
+	}
+	header @staticAssets Cache-Control "public, max-age=31536000, immutable"
+
+	@entryFiles {
+		path / /index.html /manifest.webmanifest /registerSW.js /sw.js /sw-*.js /workbox-*
+	}
+	header @entryFiles Cache-Control "no-cache"
+
+	try_files {path} /index.html
+	file_server {
+		precompressed gzip
+	}
 }
