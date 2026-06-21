@@ -5,8 +5,6 @@ const ru: LANG_MESSAGE = {
   setup: 'Настройка',
   overview: 'Обзор',
   proxies: 'Прокси',
-  policyGroup: 'Политики',
-  nodeGroup: 'Узлы',
   rules: 'Правила',
   connections: 'Подключения',
   logs: 'Журнал',

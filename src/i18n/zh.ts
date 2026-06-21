@@ -5,8 +5,6 @@ const zh: LANG_MESSAGE = {
   setup: '配置',
   overview: '概览',
   proxies: '代理',
-  policyGroup: '策略组',
-  nodeGroup: '节点组',
   rules: '规则',
   connections: '连接',
   logs: '日志',

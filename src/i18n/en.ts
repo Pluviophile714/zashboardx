@@ -3,8 +3,6 @@ const en = {
   setup: 'Setup',
   overview: 'Overview',
   proxies: 'Proxies',
-  policyGroup: 'Policy',
-  nodeGroup: 'Nodes',
   rules: 'Rules',
   connections: 'Connections',
   logs: 'Logs',

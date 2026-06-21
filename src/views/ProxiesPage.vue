@@ -72,15 +72,10 @@ const { padding } = usePaddingForViews({
 })
 const renderPageItems = renderProxiesPageItems
 const proxiesRef = ref()
-const scrollStatus = useSessionStorage<Record<PROXY_TAB_TYPE, number>>(
-  'cache/proxies-scroll-status',
-  {
-    [PROXY_TAB_TYPE.PROVIDER]: 0,
-    [PROXY_TAB_TYPE.PROXIES]: 0,
-    [PROXY_TAB_TYPE.POLICY]: 0,
-    [PROXY_TAB_TYPE.NODE]: 0,
-  },
-)
+const scrollStatus = useSessionStorage('cache/proxies-scroll-status', {
+  [PROXY_TAB_TYPE.PROVIDER]: 0,
+  [PROXY_TAB_TYPE.PROXIES]: 0,
+})
 
 const handleScroll = () => {
   if (!proxiesRef.value) return
@@ -138,7 +133,7 @@ const renderComponent = computed(() => {
 })
 
 const foldersUiVisible = computed(
-  () => isProxyFolderModeActive.value && proxiesTabShow.value !== PROXY_TAB_TYPE.PROVIDER,
+  () => isProxyFolderModeActive.value && proxiesTabShow.value === PROXY_TAB_TYPE.PROXIES,
 )
 
 const displayTwoColumns = computed(() => {

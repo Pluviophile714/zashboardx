@@ -5,8 +5,6 @@ const zhTW: LANG_MESSAGE = {
   setup: '配置',
   overview: '概覽',
   proxies: '代理',
-  policyGroup: '策略組',
-  nodeGroup: '節點組',
   rules: '規則',
   connections: '連接',
   logs: '日誌',

@@ -1,5 +1,6 @@
 import { disconnectByIdAPI, isSingBox, updateProxyProviderAPI } from '@/api'
-import { nodeGroups, policyGroups, renderGroups } from '@/composables/proxies'
+import { renderProxiesPageItems } from '@/composables/proxies'
+import { isProxyNodeSearchMode, toggleProxySearchMode } from '@/composables/proxySearch'
 import { useCtrlsBar } from '@/composables/useCtrlsBar'
 import { PROXY_SORT_TYPE, PROXY_TAB_TYPE, ROUTE_NAME, SETTINGS_MENU_KEY } from '@/constant'
 import { getMinCardWidth } from '@/helper/utils'
@@ -33,6 +34,8 @@ import {
   BoltIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  GlobeAltIcon,
+  RectangleGroupIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 import { every } from 'lodash'
@@ -103,12 +106,12 @@ export default defineComponent({
     }
 
     const hasNotCollapsed = computed(() => {
-      return renderGroups.value.some((name) => collapseGroupMap.value[name])
+      return renderProxiesPageItems.value.some((name) => collapseGroupMap.value[name])
     })
 
     const handlerClickToggleCollapse = () => {
       collapseGroupMap.value = Object.fromEntries(
-        renderGroups.value.map((name) => [name, !hasNotCollapsed.value]),
+        renderProxiesPageItems.value.map((name) => [name, !hasNotCollapsed.value]),
       )
     }
 
@@ -117,47 +120,16 @@ export default defineComponent({
     }
 
     const tabsWithNumbers = computed(() => {
-      const policyCount = policyGroups.value.length
-      const nodeCount = nodeGroups.value.length
-      const providerCount = proxyProviederList.value.length
-
-      const entries: { type: PROXY_TAB_TYPE; count: number }[] = []
-
-      if (policyCount > 0) {
-        entries.push({ type: PROXY_TAB_TYPE.POLICY, count: policyCount })
-      }
-      if (nodeCount > 0) {
-        entries.push({ type: PROXY_TAB_TYPE.NODE, count: nodeCount })
-      }
-      if (providerCount > 0) {
-        entries.push({ type: PROXY_TAB_TYPE.PROVIDER, count: providerCount })
-      }
-
-      // Fallback: show all if classification produced empty results
-      if (entries.length === 0) {
-        entries.push({
-          type: PROXY_TAB_TYPE.PROXIES,
-          count: proxyGroupList.value.length,
-        })
-      }
-
-      // Ensure current tab is valid
-      const validTypes = entries.map((e) => e.type)
-      if (!validTypes.includes(proxiesTabShow.value)) {
-        proxiesTabShow.value = entries[0].type
-      }
-
-      return entries
+      return Object.values(PROXY_TAB_TYPE).map((type) => {
+        return {
+          type,
+          count:
+            type === PROXY_TAB_TYPE.PROXIES
+              ? proxyGroupList.value.length
+              : proxyProviederList.value.length,
+        }
+      })
     })
-
-    const isPolicyOrNodeTab = computed(() => {
-      return (
-        proxiesTabShow.value === PROXY_TAB_TYPE.POLICY ||
-        proxiesTabShow.value === PROXY_TAB_TYPE.NODE ||
-        proxiesTabShow.value === PROXY_TAB_TYPE.PROXIES
-      )
-    })
-
     return () => {
       const tabs = (
         <div
@@ -186,7 +158,7 @@ export default defineComponent({
           <ArrowPathIcon class={['h-4 w-4', isUpgrading.value && 'animate-spin']} />
         </button>
       )
-      const modeSelect = isPolicyOrNodeTab.value && configs.value && (
+      const modeSelect = configs.value && (
         <select
           class={['select select-sm', isLargeCtrlsBar.value ? 'min-w-40' : 'min-w-24']}
           v-model={configs.value.mode}
@@ -222,7 +194,7 @@ export default defineComponent({
         </select>
       )
 
-      const latencyTestAll = isPolicyOrNodeTab.value && (
+      const latencyTestAll = (
         <button
           class="btn btn-circle btn-sm"
           onClick={handlerClickLatencyTestAll}
@@ -235,12 +207,12 @@ export default defineComponent({
         </button>
       )
 
-      const toggleCollapseAll = isPolicyOrNodeTab.value && (
+      const toggleCollapseAll = (
         <button
           class={[
             'btn btn-circle btn-sm',
             twoColumnProxyGroup.value &&
-              proxiesTabShow.value !== PROXY_TAB_TYPE.PROVIDER &&
+              proxiesTabShow.value === PROXY_TAB_TYPE.PROXIES &&
               'max-sm:hidden',
           ]}
           onClick={handlerClickToggleCollapse}
@@ -253,17 +225,31 @@ export default defineComponent({
         </button>
       )
 
-      const searchPlaceholder =
-        proxiesTabShow.value === PROXY_TAB_TYPE.PROVIDER
-          ? `${t('searchProxyNode')} | Regex`
-          : `${t('searchProxyGroup')} | Regex`
+      const searchPlaceholder = isProxyNodeSearchMode.value
+        ? `${t('searchProxyNode')} | Regex`
+        : `${t('searchProxyGroup')} | Regex`
       const searchInput = (
-        <TextInput
-          class={['w-32 flex-1', isLargeCtrlsBar.value && 'max-w-80']}
-          v-model={proxiesFilter.value}
-          placeholder={searchPlaceholder}
-          clearable={true}
-        />
+        <div class={['relative w-32 flex-1', isLargeCtrlsBar.value && 'max-w-80']}>
+          <button
+            class="btn btn-circle btn-ghost btn-xs absolute top-1/2 left-1 z-20 h-6 min-h-6 w-6 -translate-y-1/2 p-0"
+            title={
+              isProxyNodeSearchMode.value ? t('proxySearchModeGlobal') : t('proxySearchModeGroup')
+            }
+            onClick={toggleProxySearchMode}
+          >
+            {isProxyNodeSearchMode.value ? (
+              <GlobeAltIcon class="h-3.5 w-3.5" />
+            ) : (
+              <RectangleGroupIcon class="h-3.5 w-3.5" />
+            )}
+          </button>
+          <TextInput
+            v-model={proxiesFilter.value}
+            placeholder={searchPlaceholder}
+            clearable={true}
+            inputClass="pl-7"
+          />
+        </div>
       )
 
       const settingsModal = (
@@ -379,7 +365,7 @@ export default defineComponent({
 
       const content = !isLargeCtrlsBar.value ? (
         <div class="flex flex-col gap-2 p-2">
-          {tabsWithNumbers.value.length > 1 && (
+          {hasProviders.value && (
             <div class="flex gap-2">
               {tabs}
               {upgradeAllIcon}
@@ -395,7 +381,7 @@ export default defineComponent({
         </div>
       ) : (
         <div class="flex gap-2 p-2">
-          {tabsWithNumbers.value.length > 1 && tabs}
+          {hasProviders.value && tabs}
           {modeSelect}
           <div class="flex flex-1">{searchInput}</div>
           {upgradeAllIcon}
