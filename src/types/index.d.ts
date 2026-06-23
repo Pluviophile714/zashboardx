@@ -190,4 +190,12 @@ export interface NodeRank {
   Name: string
   Rank: string
   Weight: number
+  LossRate?: number
+  CumulLossRate?: number
+  CumulSent?: number
+  CumulRetrans?: number
+  loss_rate?: number
+  cumul_loss_rate?: number
+  cumul_sent?: number
+  cumul_retrans?: number
 }

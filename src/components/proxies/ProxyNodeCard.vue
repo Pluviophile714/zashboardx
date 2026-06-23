@@ -67,6 +67,12 @@
 
 <script setup lang="ts">
 import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
+import {
+  formatSmartLossRate,
+  getPrimarySmartLossRate,
+  getSmartLossRateClass,
+  resolveSmartLossMetric,
+} from '@/helper/smartLossMetrics'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
@@ -85,7 +91,7 @@ import {
   proxySortType,
   truncateProxyName,
 } from '@/store/settings'
-import { smartWeightsMap } from '@/store/smart'
+import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import { twMerge } from 'tailwind-merge'
 import { computed, onMounted, ref } from 'vue'
@@ -129,6 +135,14 @@ const typeDescription = computed(() => {
 
   return [type, isUDP, smartDesc, isV6].filter(Boolean).join(isSmallCard.value ? '/' : ' / ')
 })
+const smartLossMetric = computed(() =>
+  resolveSmartLossMetric(
+    smartLossMetricsMap.value,
+    smartLossMetricsByNameMap.value,
+    props.groupName,
+    props.name,
+  ),
+)
 
 const getLatencySegmentClass = (delay?: number) => {
   if (!delay || delay === NOT_CONNECTED) {
@@ -479,12 +493,27 @@ const createLatencyDetailsTip = () => {
     chart.append(buildLatencyStatusTimeline(history, compact))
 
     const stabilityLine = document.createElement('div')
-    stabilityLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
     const jitter = document.createElement('span')
     jitter.textContent = `jitter: ${stats.jitter}ms`
     const success = document.createElement('span')
     success.textContent = `可用 ${stats.successTests}/${stats.totalTests}`
-    stabilityLine.append(jitter, success)
+
+    const lossMetric = smartLossMetric.value
+    const lossRate = getPrimarySmartLossRate(lossMetric)
+
+    const loss = document.createElement('span')
+
+    stabilityLine.className =
+      'mt-1 grid grid-cols-3 items-center gap-2 text-xs text-base-content/75'
+    jitter.className = 'justify-self-start'
+    loss.className = `justify-self-center font-semibold ${getSmartLossRateClass(lossMetric)}`
+    loss.textContent = `loss: ${formatSmartLossRate(lossRate)}`
+    if (lossMetric?.current !== undefined && lossMetric?.cumulative !== undefined) {
+      loss.title = `当前 ${formatSmartLossRate(lossMetric.current)} · 累计 ${formatSmartLossRate(lossMetric.cumulative)}`
+    }
+    success.className = 'justify-self-end'
+    stabilityLine.append(jitter, loss, success)
+
     chart.append(stabilityLine)
     root.append(chart)
   }
