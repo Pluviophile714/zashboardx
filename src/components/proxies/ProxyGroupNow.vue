@@ -41,10 +41,11 @@
 
 <script setup lang="ts">
 import { PROXY_TYPE } from '@/constant'
+import { getConnectionChains, getConnectionStart } from '@/helper'
 import { useTooltip } from '@/helper/tooltip'
 import { scrollToGroup } from '@/helper/utils'
+import { getNowProxyNodeName, proxyGroupList, proxyMap } from '@/assembly/proxies'
 import { activeConnections } from '@/store/connections'
-import { getNowProxyNodeName, proxyGroupList, proxyMap } from '@/store/proxies'
 import { displayFinalOutbound } from '@/store/settings'
 import { smartOrderMap, smartWeightsMap } from '@/store/smart'
 import { ArrowRightCircleIcon, CheckCircleIcon, LockClosedIcon } from '@heroicons/vue/24/outline'
@@ -116,16 +117,22 @@ const getTopSmartNode = (groupName: string) => {
 
 const getActiveConnectionOutbound = (groupName: string) => {
   const connections = activeConnections.value
-    .filter((connection) => connection.chains.includes(groupName) && connection.chains[0])
+    .filter((connection) => {
+      const chains = getConnectionChains(connection)
+
+      return chains.includes(groupName) && chains[0]
+    })
     .sort((a, b) => {
       const speedDiff = b.downloadSpeed + b.uploadSpeed - (a.downloadSpeed + a.uploadSpeed)
 
       if (speedDiff) return speedDiff
 
-      return new Date(b.start).getTime() - new Date(a.start).getTime()
+      return Number(getConnectionStart(b)) - Number(getConnectionStart(a))
     })
 
-  return connections[0]?.chains[0] ?? ''
+  const chains = connections[0] ? getConnectionChains(connections[0]) : []
+
+  return chains[0] ?? ''
 }
 
 const getSmartOutbound = (groupName: string) => {

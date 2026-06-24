@@ -1,4 +1,4 @@
-import { fetchSmartGroupWeightsAPI, fetchSmartWeightsAPI } from '@/api'
+import { fetchSmartGroupWeightsAPI, fetchSmartWeightsAPI } from '@/assembly/proxies'
 import {
   extractSmartLossMetric,
   type SmartLossMetric,

@@ -83,7 +83,7 @@ import {
   hasDisplayHistoryByName,
   proxyLatencyTest,
   proxyMap,
-} from '@/store/proxies'
+} from '@/assembly/proxies'
 import {
   IPv6test,
   lowLatency,
@@ -644,7 +644,7 @@ const handlerLatencyTest = async () => {
 
   isLatencyTesting.value = true
   try {
-    await proxyLatencyTest(props.name, getTestUrl(props.groupName))
+    await proxyLatencyTest(props.name, getTestUrl(props.groupName), undefined, props.groupName)
     isLatencyTesting.value = false
   } catch {
     isLatencyTesting.value = false

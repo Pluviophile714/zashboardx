@@ -1,149 +1,41 @@
+// Clash REST/WS 后端的代理「组装逻辑」:从 /proxies、/providers/proxies 拉取并
+// 组装视图状态,以及选择/测速等动作。写入门面 index.ts 的共享状态。
 import {
   deleteFixedProxyAPI,
-  disconnectByIdAPI,
   fetchProxiesAPI,
   fetchProxyGroupLatencyAPI,
   fetchProxyLatencyAPI,
   fetchProxyProviderAPI,
-  isSingBox,
   selectProxyAPI,
-} from '@/api'
-import {
-  GLOBAL,
-  IPV6_TEST_URL,
-  NOT_CONNECTED,
-  PROXY_TAB_TYPE,
-  PROXY_TYPE,
-  TEST_URL,
-} from '@/constant'
-import { isProxyGroup } from '@/helper'
+} from '@/api/clash'
+import { disconnectByIdAPI } from '@/assembly/connections'
+import { GLOBAL, IPV6_TEST_URL, NOT_CONNECTED, PROXY_TYPE, SPEEDTEST_MODE } from '@/constant'
+import { getConnectionChains, isProxyGroup } from '@/helper'
 import { showNotification } from '@/helper/notification'
-import type { Proxy, ProxyProvider } from '@/types'
-import { useStorage } from '@vueuse/core'
-import { last } from 'lodash'
-import pLimit from 'p-limit'
-import { computed, ref } from 'vue'
-import { activeConnections } from './connections'
+import { activeConnections } from '@/store/connections'
 import {
   automaticDisconnection,
-  groupTestUrls,
   iconReflectList,
   independentLatencyTest,
   IPv6test,
+  speedtestMode,
   speedtestTimeout,
-  speedtestUrl,
-} from './settings'
-import { initSmartWeights } from './smart'
-
-export const proxiesFilter = ref('')
-export const proxiesTabShow = ref(PROXY_TAB_TYPE.PROXIES)
-
-export const proxyGroupList = ref<string[]>([])
-export const proxyMap = ref<Record<string, Proxy>>({})
-export const IPv6Map = useStorage<Record<string, boolean>>('cache/ipv6-map', {})
-export const hiddenGroupMap = useStorage<Record<string, boolean>>('config/hidden-group-map', {})
-export const proxyProviederList = ref<ProxyProvider[]>([])
-const latencyHistoryCache = useStorage<Record<string, Proxy['history']>>(
-  'cache/proxy-latency-history',
-  {},
-)
-
-const speedtestUrlWithDefault = computed(() => {
-  return speedtestUrl.value || TEST_URL
-})
-
-export const getTestUrl = (groupName?: string) => {
-  if (!groupName || !independentLatencyTest.value) {
-    return speedtestUrlWithDefault.value
-  }
-
-  const groupTestUrl = groupTestUrls.value.find((item) => item.name === groupName)
-
-  if (groupTestUrl) {
-    return groupTestUrl.url
-  }
-
-  const proxyNode =
-    proxyMap.value[groupName] || proxyProviederList.value.find((p) => p.name === groupName)
-
-  return proxyNode?.testUrl || speedtestUrlWithDefault.value
-}
-
-export const getLatencyByName = (proxyName: string, groupName?: string) => {
-  const history = getHistoryByName(proxyName, groupName)
-
-  return getLatencyFromHistory(history)
-}
-
-export const getHistoryByName = (proxyName: string, groupName?: string) => {
-  if (independentLatencyTest.value && !isSingBox.value) {
-    const proxyNode = proxyMap.value[proxyName]
-    const url = getTestUrl(groupName)
-
-    if (!proxyNode) {
-      return []
-    }
-
-    if (!proxyNode?.extra) {
-      proxyNode.extra = {}
-    }
-
-    if (!proxyNode.extra?.[url]) {
-      proxyNode.extra[url] = {
-        history: [],
-        alive: true,
-      }
-    }
-
-    return proxyNode?.extra?.[url]?.history
-  }
-
-  const nowNode = proxyMap.value[getNowProxyNodeName(proxyName)]
-
-  return nowNode?.history
-}
-
-const getLatencyHistoryCacheKey = (proxyName: string, groupName?: string) => {
-  return `${proxyName}\n${getTestUrl(groupName)}`
-}
-
-export const hasDisplayHistoryByName = (proxyName: string, groupName?: string) => {
-  const cachedHistory = latencyHistoryCache.value[getLatencyHistoryCacheKey(proxyName, groupName)]
-
-  if (cachedHistory?.length) {
-    return true
-  }
-
-  return !!getHistoryByName(proxyName, groupName)?.length
-}
-
-export const getDisplayHistoryByName = (proxyName: string, groupName?: string, limit = 30) => {
-  const key = getLatencyHistoryCacheKey(proxyName, groupName)
-  const cachedHistory = latencyHistoryCache.value[key] ?? []
-  const currentHistory = getHistoryByName(proxyName, groupName) ?? []
-
-  if (!currentHistory.length) {
-    return cachedHistory.slice(-limit)
-  }
-
-  const merged = [...cachedHistory, ...currentHistory]
-    .filter((item) => item?.time)
-    .sort((prev, next) => Date.parse(prev.time) - Date.parse(next.time))
-    .filter((item, index, list) => {
-      const next = list[index + 1]
-
-      return !next || item.time !== next.time || item.delay !== next.delay
-    })
-    .slice(-limit)
-
-  latencyHistoryCache.value[key] = merged
-
-  return merged
-}
-
-export const getIPv6ByName = (proxyName: string) => {
-  return IPv6Map.value[getNowProxyNodeName(proxyName)]
-}
+} from '@/store/settings'
+import { initSmartWeights } from '@/store/smart'
+import type { Proxy } from '@/types'
+import { last } from 'lodash'
+import pLimit from 'p-limit'
+import {
+  getHistoryByName,
+  getLatencyByName,
+  getNowProxyNodeName,
+  getTestUrl,
+  IPv6Map,
+  proxyGroupList,
+  proxyMap,
+  proxyProviederList,
+  speedtestUrlWithDefault,
+} from './index'
 
 let fetchTime = 0
 
@@ -160,7 +52,7 @@ export const fetchProxies = async () => {
     return
   }
 
-  const sortIndex = proxyData.proxies[GLOBAL].all ?? []
+  const sortIndex = proxyData.proxies[GLOBAL]?.all ?? []
   const allProviderProxies: Record<string, Proxy> = {}
   const providers = Object.values(providerData.providers).filter(
     (provider) => provider.name !== 'default' && provider.vehicleType !== 'Compatible',
@@ -234,7 +126,7 @@ export const handlerProxySelect = async (proxyGroupName: string, proxyName: stri
 
   if (automaticDisconnection.value) {
     activeConnections.value
-      .filter((c) => c.chains.includes(proxyGroupName))
+      .filter((c) => getConnectionChains(c).includes(proxyGroupName))
       .forEach((c) => disconnectByIdAPI(c.id))
   }
   fetchProxies()
@@ -307,7 +199,7 @@ const testLatencyOneByOneWithTip = async (
   await Promise.allSettled(
     nodes.map((name) =>
       limiter(async () => {
-        const res = await latencyTestForSingle(name, url, Math.min(1500, speedtestTimeout.value))
+        const res = await latencyTestForSingle(name, url, Math.min(2000, speedtestTimeout.value))
 
         if (res.status !== 200) {
           testFailed++
@@ -342,7 +234,6 @@ const testLatencyOneByOneWithTip = async (
     type: testFailed ? 'alert-warning' : 'alert-success',
     timeout: 3000,
   })
-  await fetchProxies()
 }
 
 export const proxyGroupLatencyTest = async (proxyGroupName: string) => {
@@ -351,6 +242,7 @@ export const proxyGroupLatencyTest = async (proxyGroupName: string) => {
   const url = getTestUrl(proxyGroupName)
 
   if (
+    speedtestMode.value === SPEEDTEST_MODE.DASHBOARD &&
     [PROXY_TYPE.Selector, PROXY_TYPE.LoadBalance, PROXY_TYPE.Smart].includes(
       proxyNode.type.toLowerCase() as PROXY_TYPE,
     )
@@ -420,85 +312,8 @@ export const allProxiesLatencyTest = async () => {
   return testLatencyOneByOneWithTip('all', proxyNode)
 }
 
-const getLatencyFromHistory = (history: Proxy['history']) => {
-  return last(history)?.delay ?? NOT_CONNECTED
-}
-
 const getIPv6FromExtra = (proxy: Proxy) => {
   const ipv6History = proxy.extra?.[IPV6_TEST_URL]?.history
 
   return (last(ipv6History)?.delay ?? NOT_CONNECTED) > NOT_CONNECTED
 }
-
-export const getNowProxyNodeName = (name: string) => {
-  let node = proxyMap.value[name]
-
-  if (!name || !node) {
-    return name
-  }
-
-  while (node.now && node.now !== node.name) {
-    const nextNode = proxyMap.value[node.now]
-
-    if (!nextNode) {
-      return node.name
-    }
-
-    node = nextNode
-  }
-
-  return node.name
-}
-
-export const getProxyGroupChains = (name: string) => {
-  let proxyNode = proxyMap.value[name]
-
-  if (!proxyNode) {
-    return []
-  }
-
-  const result = [name]
-
-  while (
-    proxyNode.now &&
-    proxyNode.now !== proxyNode.name &&
-    proxyGroupList.value.includes(proxyNode.now)
-  ) {
-    result.push(proxyNode.now)
-    proxyNode = proxyMap.value[proxyNode.now]
-  }
-  return result
-}
-
-export const getDirectChildProxyGroups = (groupName: string) => {
-  return (proxyMap.value[groupName]?.all ?? []).filter((name) => {
-    return Boolean(proxyMap.value[name]?.all?.length)
-  })
-}
-
-export const getDescendantProxyGroups = (groupName: string) => {
-  const descendants: string[] = []
-  const visited = new Set<string>([groupName])
-
-  const walk = (name: string) => {
-    getDirectChildProxyGroups(name).forEach((childGroupName) => {
-      if (visited.has(childGroupName)) {
-        return
-      }
-
-      visited.add(childGroupName)
-      descendants.push(childGroupName)
-      walk(childGroupName)
-    })
-  }
-
-  walk(groupName)
-
-  return descendants
-}
-
-export const hasSmartGroup = computed(() => {
-  return Object.values(proxyMap.value).some(
-    (proxy) => proxy.type.toLowerCase() === PROXY_TYPE.Smart,
-  )
-})

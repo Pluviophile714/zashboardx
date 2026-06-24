@@ -310,6 +310,7 @@ const hiddenControllerCount = computed(() =>
   Math.max(backendList.value.length - visibleBackends.value.length, 0),
 )
 const form = reactive<Omit<Backend, 'uuid'>>({
+  type: 'clash',
   protocol: 'http',
   host: '192.168.8.1',
   port: '9090',
@@ -490,6 +491,7 @@ const openEditForm = (uuid: string) => {
   if (!backend) return
 
   form.protocol = backend.protocol
+  form.type = backend.type ?? 'clash'
   form.host = backend.host
   form.port = backend.port
   form.secondaryPath = backend.secondaryPath
@@ -509,6 +511,7 @@ const closeForm = (force = false) => {
 
 const saveController = async () => {
   const candidate: Omit<Backend, 'uuid'> = {
+    type: form.type ?? 'clash',
     protocol: form.protocol,
     host: form.host.trim(),
     port: form.port.trim(),

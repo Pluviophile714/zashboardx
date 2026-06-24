@@ -1,5 +1,8 @@
 <template>
-  <div class="mt-2.5" @click.stop>
+  <div
+    class="mt-2.5"
+    @click.stop
+  >
     <div class="flex flex-wrap items-center gap-3">
       <button
         class="btn btn-sm min-w-24 gap-1.5"
@@ -70,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { getDescendantProxyGroups, getProxyGroupChains, proxyMap } from '@/store/proxies'
+import { getDescendantProxyGroups, getProxyGroupChains, proxyMap } from '@/assembly/proxies'
 import { collapseGroupMap } from '@/store/settings'
 import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import { useStorage } from '@vueuse/core'

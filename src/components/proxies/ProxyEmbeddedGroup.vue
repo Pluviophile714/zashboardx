@@ -114,13 +114,10 @@
 <script setup lang="ts">
 import { useBounceOnVisible } from '@/composables/bouncein'
 import { useRenderProxyList } from '@/composables/renderProxies'
+import { getConnectionChains } from '@/helper'
 import { prettyBytesHelper } from '@/helper/utils'
 import { activeConnections } from '@/store/connections'
-import {
-  handlerProxySelect,
-  proxyGroupLatencyTest,
-  proxyMap,
-} from '@/store/proxies'
+import { handlerProxySelect, proxyGroupLatencyTest, proxyMap } from '@/assembly/proxies'
 import {
   collapseGroupMap,
   groupProxiesByProvider,
@@ -184,7 +181,7 @@ const handlerLatencyTest = async () => {
 
 const downloadTotal = computed(() => {
   return activeConnections.value
-    .filter((conn) => conn.chains.includes(props.name))
+    .filter((conn) => getConnectionChains(conn).includes(props.name))
     .reduce((total, conn) => total + conn.downloadSpeed, 0)
 })
 
