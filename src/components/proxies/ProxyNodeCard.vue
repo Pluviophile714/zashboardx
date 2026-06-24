@@ -135,14 +135,13 @@ const typeDescription = computed(() => {
 
   return [type, isUDP, smartDesc, isV6].filter(Boolean).join(isSmallCard.value ? '/' : ' / ')
 })
-const smartLossMetric = computed(() =>
+const getSmartLossMetric = () =>
   resolveSmartLossMetric(
     smartLossMetricsMap.value,
     smartLossMetricsByNameMap.value,
     props.groupName,
     props.name,
-  ),
-)
+  )
 
 const getLatencySegmentClass = (delay?: number) => {
   if (!delay || delay === NOT_CONNECTED) {
@@ -498,7 +497,7 @@ const createLatencyDetailsTip = () => {
     const success = document.createElement('span')
     success.textContent = `可用 ${stats.successTests}/${stats.totalTests}`
 
-    const lossMetric = smartLossMetric.value
+    const lossMetric = getSmartLossMetric()
     const lossRate = getPrimarySmartLossRate(lossMetric)
 
     const loss = document.createElement('span')
