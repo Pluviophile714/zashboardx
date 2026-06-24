@@ -80,6 +80,7 @@ import {
   getHistoryByName,
   getIPv6ByName,
   getTestUrl,
+  hasDisplayHistoryByName,
   proxyLatencyTest,
   proxyMap,
 } from '@/store/proxies'
@@ -170,8 +171,7 @@ const latencyStabilityBar = computed(() => {
   }))
 })
 
-const hasLatencyDetailsHistory = () =>
-  getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS).length > 0
+const hasLatencyDetailsHistory = () => hasDisplayHistoryByName(props.name, props.groupName)
 
 const checkNodeTextTruncation = (e: Event) => {
   if (hasLatencyDetailsHistory()) return

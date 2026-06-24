@@ -5,17 +5,22 @@ import {
   type SmartLossMetricByNameMap,
 } from '@/helper/smartLossMetrics'
 import type { NodeRank } from '@/types'
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 
-export const smartWeightsMap = ref<Record<string, Record<string, string>>>({})
-export const smartOrderMap = ref<Record<string, Record<string, number>>>({})
-export const smartLossMetricsMap = ref<Record<string, Record<string, SmartLossMetric>>>({})
-export const smartLossMetricsByNameMap = ref<SmartLossMetricByNameMap>({})
+type SmartWeightsMap = Record<string, Record<string, string>>
+type SmartOrderMap = Record<string, Record<string, number>>
+type SmartLossMetricsMap = Record<string, Record<string, SmartLossMetric>>
 
-const restructWeights = (proxyName: string, weights: NodeRank[]) => {
+export const smartWeightsMap = shallowRef<SmartWeightsMap>({})
+export const smartOrderMap = shallowRef<SmartOrderMap>({})
+export const smartLossMetricsMap = shallowRef<SmartLossMetricsMap>({})
+export const smartLossMetricsByNameMap = shallowRef<SmartLossMetricByNameMap>({})
+
+const buildSmartGroupMaps = (weights: NodeRank[]) => {
   const smartWeights: Record<string, string> = {}
   const smartOrder: Record<string, number> = {}
   const smartLossMetrics: Record<string, SmartLossMetric> = {}
+  const smartLossMetricsByName: SmartLossMetricByNameMap = {}
 
   weights.forEach((weight, index) => {
     smartWeights[weight.Name] = weight.Rank
@@ -25,43 +30,70 @@ const restructWeights = (proxyName: string, weights: NodeRank[]) => {
 
     if (lossMetric) {
       smartLossMetrics[weight.Name] = lossMetric
-      smartLossMetricsByNameMap.value[weight.Name] = lossMetric
+      smartLossMetricsByName[weight.Name] = lossMetric
     }
   })
 
-  smartWeightsMap.value[proxyName] = smartWeights
-  smartOrderMap.value[proxyName] = smartOrder
-  smartLossMetricsMap.value[proxyName] = smartLossMetrics
+  return {
+    smartLossMetrics,
+    smartLossMetricsByName,
+    smartOrder,
+    smartWeights,
+  }
 }
 
 // deprecated
 const fetchSmartGroupWeights = async (proxyName: string) => {
   const { data } = await fetchSmartGroupWeightsAPI(proxyName)
 
-  if (!data.weights?.length) return
+  if (!data.weights?.length) return null
 
-  restructWeights(proxyName, data.weights)
+  const maps = buildSmartGroupMaps(data.weights)
+
+  return { proxyName, ...maps }
 }
 
 export const initSmartWeights = async (smartGroups: string[]) => {
   const { status, data: smartWeights } = await fetchSmartWeightsAPI()
 
-  smartWeightsMap.value = {}
-  smartOrderMap.value = {}
-  smartLossMetricsMap.value = {}
-  smartLossMetricsByNameMap.value = {}
+  const nextSmartWeightsMap: SmartWeightsMap = {}
+  const nextSmartOrderMap: SmartOrderMap = {}
+  const nextSmartLossMetricsMap: SmartLossMetricsMap = {}
+  const nextSmartLossMetricsByNameMap: SmartLossMetricByNameMap = {}
 
   if (status !== 200) {
     // deprecated fallback
-    smartGroups.forEach((name) => {
-      fetchSmartGroupWeights(name)
+    const groupMaps = await Promise.all(smartGroups.map((name) => fetchSmartGroupWeights(name)))
+
+    groupMaps.forEach((maps) => {
+      if (!maps) return
+
+      nextSmartWeightsMap[maps.proxyName] = maps.smartWeights
+      nextSmartOrderMap[maps.proxyName] = maps.smartOrder
+      nextSmartLossMetricsMap[maps.proxyName] = maps.smartLossMetrics
+      Object.assign(nextSmartLossMetricsByNameMap, maps.smartLossMetricsByName)
     })
+
+    smartWeightsMap.value = nextSmartWeightsMap
+    smartOrderMap.value = nextSmartOrderMap
+    smartLossMetricsMap.value = nextSmartLossMetricsMap
+    smartLossMetricsByNameMap.value = nextSmartLossMetricsByNameMap
     return
   }
 
   for (const [group, weights] of Object.entries(smartWeights.weights)) {
     if (!weights?.length) continue
 
-    restructWeights(group, weights)
+    const maps = buildSmartGroupMaps(weights)
+
+    nextSmartWeightsMap[group] = maps.smartWeights
+    nextSmartOrderMap[group] = maps.smartOrder
+    nextSmartLossMetricsMap[group] = maps.smartLossMetrics
+    Object.assign(nextSmartLossMetricsByNameMap, maps.smartLossMetricsByName)
   }
+
+  smartWeightsMap.value = nextSmartWeightsMap
+  smartOrderMap.value = nextSmartOrderMap
+  smartLossMetricsMap.value = nextSmartLossMetricsMap
+  smartLossMetricsByNameMap.value = nextSmartLossMetricsByNameMap
 }

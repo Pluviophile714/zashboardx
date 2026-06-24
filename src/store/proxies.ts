@@ -107,6 +107,16 @@ const getLatencyHistoryCacheKey = (proxyName: string, groupName?: string) => {
   return `${proxyName}\n${getTestUrl(groupName)}`
 }
 
+export const hasDisplayHistoryByName = (proxyName: string, groupName?: string) => {
+  const cachedHistory = latencyHistoryCache.value[getLatencyHistoryCacheKey(proxyName, groupName)]
+
+  if (cachedHistory?.length) {
+    return true
+  }
+
+  return !!getHistoryByName(proxyName, groupName)?.length
+}
+
 export const getDisplayHistoryByName = (proxyName: string, groupName?: string, limit = 30) => {
   const key = getLatencyHistoryCacheKey(proxyName, groupName)
   const cachedHistory = latencyHistoryCache.value[key] ?? []
