@@ -102,6 +102,8 @@ import ProxyIcon from './ProxyIcon.vue'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
+const LATENCY_AVAILABILITY_WINDOW = 24 * 60 * 60 * 1000
+const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
@@ -272,6 +274,26 @@ const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_
     successRate: Math.round((successItems.length / windowSize) * 100),
     successTests: successItems.length,
     totalTests: windowSize,
+  }
+}
+
+const getLatencyAvailabilityStats = (history: { delay: number; time?: string }[]) => {
+  const since = Date.now() - LATENCY_AVAILABILITY_WINDOW
+  const recent = history.filter((item) => {
+    const timestamp = item.time ? Date.parse(item.time) : Number.NaN
+
+    return Number.isFinite(timestamp) && timestamp >= since
+  })
+  const successCount = recent.filter((item) => item.delay > NOT_CONNECTED).length
+  const totalCount = recent.length
+  const failedCount = totalCount - successCount
+  const availability = totalCount ? Math.round((successCount / totalCount) * 1000) / 10 : null
+
+  return {
+    availability,
+    failedCount,
+    successCount,
+    totalCount,
   }
 }
 
@@ -448,7 +470,12 @@ const buildLatencyStatusTimeline = (
 
 const createLatencyDetailsTip = () => {
   const compact = isCompactLatencyDetails()
-  const history = getDisplayHistoryByName(props.name, props.groupName, LATENCY_DETAIL_SEGMENTS)
+  const availabilityHistory = getDisplayHistoryByName(
+    props.name,
+    props.groupName,
+    LATENCY_AVAILABILITY_MAX_SAMPLES,
+  )
+  const history = availabilityHistory.slice(-LATENCY_DETAIL_SEGMENTS)
   const newestFirst = [...history].reverse()
   const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const root = document.createElement('div')
@@ -494,8 +521,6 @@ const createLatencyDetailsTip = () => {
     const stabilityLine = document.createElement('div')
     const jitter = document.createElement('span')
     jitter.textContent = `jitter: ${stats.jitter}ms`
-    const success = document.createElement('span')
-    success.textContent = `可用 ${stats.successTests}/${stats.totalTests}`
 
     const lossMetric = getSmartLossMetric()
     const lossRate = getPrimarySmartLossRate(lossMetric)
@@ -503,17 +528,42 @@ const createLatencyDetailsTip = () => {
     const loss = document.createElement('span')
 
     stabilityLine.className =
-      'mt-1 grid grid-cols-3 items-center gap-2 text-xs text-base-content/75'
+      'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/75'
     jitter.className = 'justify-self-start'
-    loss.className = `justify-self-center font-semibold ${getSmartLossRateClass(lossMetric)}`
+    loss.className = `font-semibold ${getSmartLossRateClass(lossMetric)}`
     loss.textContent = `loss: ${formatSmartLossRate(lossRate)}`
     if (lossMetric?.current !== undefined && lossMetric?.cumulative !== undefined) {
       loss.title = `当前 ${formatSmartLossRate(lossMetric.current)} · 累计 ${formatSmartLossRate(lossMetric.cumulative)}`
     }
-    success.className = 'justify-self-end'
-    stabilityLine.append(jitter, loss, success)
+    stabilityLine.append(jitter, loss)
 
     chart.append(stabilityLine)
+
+    const availabilityStats = getLatencyAvailabilityStats(availabilityHistory)
+    const availabilityLine = document.createElement('div')
+    const availability = document.createElement('span')
+    const failure = document.createElement('span')
+
+    availabilityLine.className =
+      'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/65'
+    availability.textContent =
+      availabilityStats.availability === null
+        ? '24h 可用率: --'
+        : `24h 可用率: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount} 次`
+    availability.title = '基于浏览器本地已有测速历史，不代表后台全天候监控'
+    failure.className =
+      availabilityStats.failedCount > 0 ? 'text-high-latency' : 'text-base-content/45'
+    failure.textContent =
+      availabilityStats.totalCount === 0
+        ? '暂无记录'
+        : availabilityStats.failedCount > 0
+          ? `失败 ${availabilityStats.failedCount} 次`
+          : ''
+    availabilityLine.append(availability)
+    if (failure.textContent) {
+      availabilityLine.append(failure)
+    }
+    chart.append(availabilityLine)
     root.append(chart)
   }
 
