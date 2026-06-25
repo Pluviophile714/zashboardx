@@ -9,7 +9,7 @@
         latencyTipAnimationClass,
       )
     "
-    @pointerenter="handlerLatencyDetailsTip"
+    @pointerenter="handlerLatencyDetailsTip($event, 'card')"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -47,6 +47,7 @@
         :group-name="groupName"
         :disable-history-tip="true"
         @click.stop="handlerLatencyTest"
+        @pointerenter.stop="handlerLatencyDetailsTip($event, 'latency')"
       />
     </div>
 
@@ -636,15 +637,19 @@ const createLatencyDetailsTip = () => {
   return root
 }
 
-const handlerLatencyDetailsTip = (e: Event) => {
+const handlerLatencyDetailsTip = (e: Event, source: 'card' | 'latency') => {
   if (!hasLatencyDetailsHistory()) return
+
+  const compact = isCompactLatencyDetails()
+  if ((compact && source !== 'latency') || (!compact && source !== 'card')) return
+
+  const anchor = source === 'latency' ? e.currentTarget : (cardRef.value ?? e.currentTarget)
 
   const tipEvent = Object.create(e, {
     currentTarget: {
-      value: cardRef.value ?? e.currentTarget,
+      value: anchor,
     },
   }) as Event
-  const compact = isCompactLatencyDetails()
   const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
   const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
   const placement = compact ? mobilePlacement : 'top'
