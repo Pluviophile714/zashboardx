@@ -55,7 +55,7 @@ import { PROXIES_PARENT_CLASS } from '@/helper/utils'
 import { proxyGroupLatencyTest } from '@/assembly/proxies'
 import { proxyMap } from '@/assembly/proxies'
 import { blurIntensity, groupProxiesByProvider } from '@/store/settings'
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
 import ProxiesByProvider from './ProxiesByProvider.vue'
 import ProxiesContent from './ProxiesContent.vue'
 import ProxyGroupHeaderForMobile from './ProxyGroupHeaderForMobile.vue'
@@ -198,6 +198,12 @@ const handlerLatencyTest = async () => {
     isLatencyTesting.value = false
   }
 }
+
+onUnmounted(() => {
+  if (modalMode.value) {
+    disableProxiesPageScroll.value = false
+  }
+})
 
 useBounceOnVisible(cardRef)
 </script>
