@@ -777,7 +777,7 @@ const handlerLatencyDetailsTip = (e: Event) => {
   showTip(tipEvent, createLatencyDetailsTip(), {
     animation: 'fade',
     appendTo: document.body,
-    delay: [350, 180],
+    delay: [0, 120],
     duration: [70, 50],
     interactive: true,
     interactiveBorder: compact ? 10 : 8,
