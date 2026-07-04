@@ -1,0 +1,32 @@
+FROM docker.io/node:24-alpine AS builder
+
+WORKDIR /build
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.node.json ./
+COPY packages/metrics-helper/package.json packages/metrics-helper/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/metrics-helper packages/metrics-helper
+
+RUN pnpm metrics:build
+
+FROM docker.io/node:24-alpine
+
+ENV NODE_ENV=production \
+  METRICS_BIND_HOST=0.0.0.0 \
+  METRICS_PORT=8787 \
+  METRICS_DATABASE_PATH=/data/metrics.sqlite
+
+WORKDIR /app
+
+COPY --from=builder /build/packages/metrics-helper/dist ./dist
+COPY --from=builder /build/packages/metrics-helper/package.json ./package.json
+
+RUN mkdir -p /data
+
+EXPOSE 8787
+
+CMD ["node", "dist/index.js"]

@@ -1,18 +1,24 @@
 :80 {
 	root * .
 
-	@staticAssets {
-		path /assets/*
+	handle /api/metrics* {
+		reverse_proxy http://zashboardx-metrics:8787
 	}
-	header @staticAssets Cache-Control "public, max-age=31536000, immutable"
 
-	@entryFiles {
-		path / /index.html /manifest.webmanifest /registerSW.js /sw.js /sw-*.js /workbox-*
-	}
-	header @entryFiles Cache-Control "no-cache"
+	handle {
+		@staticAssets {
+			path /assets/*
+		}
+		header @staticAssets Cache-Control "public, max-age=31536000, immutable"
 
-	try_files {path} /index.html
-	file_server {
-		precompressed gzip
+		@entryFiles {
+			path / /index.html /manifest.webmanifest /registerSW.js /sw.js /sw-*.js /workbox-*
+		}
+		header @entryFiles Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server {
+			precompressed gzip
+		}
 	}
 }

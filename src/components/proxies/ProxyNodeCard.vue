@@ -92,6 +92,7 @@ import {
   proxySortType,
   truncateProxyName,
 } from '@/store/settings'
+import { proxyMetricsMap } from '@/store/proxyMetrics'
 import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import { twMerge } from 'tailwind-merge'
@@ -416,6 +417,42 @@ const getLatencyAvailabilityNote = (stats: ReturnType<typeof getLatencyAvailabil
   }
 }
 
+const formatSharedMetricsAvailability = (metrics: (typeof proxyMetricsMap.value)[string]) => {
+  if (metrics.availability === null) {
+    return 'R5S 24h: --'
+  }
+
+  return `R5S 24h: ${(metrics.availability * 100).toFixed(1)}% · ${metrics.successCount}/${metrics.sampleCount}`
+}
+
+const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) => {
+  if (!metrics.sampleCount) {
+    return {
+      className: 'text-base-content/45',
+      text: '暂无记录',
+    }
+  }
+
+  if (metrics.failureCount > 0) {
+    return {
+      className: 'text-high-latency',
+      text: `失败 ${metrics.failureCount} 次`,
+    }
+  }
+
+  if (metrics.sampleCount < LATENCY_AVAILABILITY_MIN_SAMPLES || metrics.coverageSeconds < 3600) {
+    return {
+      className: 'text-medium-latency',
+      text: '样本不足',
+    }
+  }
+
+  return {
+    className: 'text-base-content/45',
+    text: '',
+  }
+}
+
 const isCompactLatencyDetails = () => window.matchMedia('(max-width: 640px)').matches
 
 const buildSparklineSvg = (
@@ -658,27 +695,35 @@ const createLatencyDetailsTip = () => {
 
     chart.append(stabilityLine)
 
+    const sharedMetrics = proxyMetricsMap.value[props.name]
     const availabilityStats = getLatencyAvailabilityStats(availabilityHistory)
     const availabilityLine = document.createElement('div')
     const availabilityMain = document.createElement('div')
     const coverage = document.createElement('div')
     const availability = document.createElement('span')
     const failure = document.createElement('span')
-    const availabilityNote = getLatencyAvailabilityNote(availabilityStats)
+    const availabilityNote = sharedMetrics
+      ? getSharedMetricsNote(sharedMetrics)
+      : getLatencyAvailabilityNote(availabilityStats)
 
     availabilityLine.className = 'mt-1 grid gap-0.5 text-xs text-base-content/65'
     availabilityMain.className = 'flex items-center justify-between gap-2'
-    availability.textContent =
-      availabilityStats.availability === null
+    availability.textContent = sharedMetrics
+      ? formatSharedMetricsAvailability(sharedMetrics)
+      : availabilityStats.availability === null
         ? '本机24h: --'
         : `本机24h: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
-    availability.title = '基于当前浏览器本地测速历史，不代表 R5S 全天候监控'
+    availability.title = sharedMetrics
+      ? '基于 R5S 指标助手持续探测记录'
+      : '基于当前浏览器本地测速历史，不代表 R5S 全天候监控'
     failure.className = availabilityNote.className
     failure.textContent = availabilityNote.text
     coverage.className = compact
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
-    coverage.textContent = `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
+    coverage.textContent = sharedMetrics
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · R5S 记录`
+      : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
     availabilityMain.append(availability)
     if (failure.textContent) {
       availabilityMain.append(failure)

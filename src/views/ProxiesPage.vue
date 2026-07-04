@@ -62,10 +62,11 @@ import { PROXY_TAB_TYPE } from '@/constant'
 import { isMiddleScreen, PROXIES_PAGE } from '@/helper/utils'
 import { fetchProxies } from '@/assembly/proxies'
 import { proxiesTabShow } from '@/assembly/proxies'
+import { refreshProxyMetrics } from '@/store/proxyMetrics'
 import { disableProxiesPageTextSelect, twoColumnProxyGroup } from '@/store/settings'
 import { folderManagerOpen, isProxyFolderModeActive } from '@/store/proxyFolders'
 import { useSessionStorage } from '@vueuse/core'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const { padding } = usePaddingForViews({
   offsetTop: 0,
@@ -110,15 +111,27 @@ watch(proxiesTabShow, () =>
 )
 
 isProxiesPageMounted.value = false
+let metricsRefreshTimer: ReturnType<typeof setInterval> | undefined
 
 onMounted(() => {
   setTimeout(() => {
     isProxiesPageMounted.value = true
     nextTick(() => {
       waitTickUntilReady()
-      fetchProxies()
+      void fetchProxies().finally(() => {
+        void refreshProxyMetrics({ force: true })
+      })
     })
+    metricsRefreshTimer = setInterval(() => {
+      void refreshProxyMetrics()
+    }, 30 * 1000)
   })
+})
+
+onUnmounted(() => {
+  if (metricsRefreshTimer) {
+    clearInterval(metricsRefreshTimer)
+  }
 })
 
 const renderComponent = computed(() => {

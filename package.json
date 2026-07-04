@@ -19,6 +19,8 @@
     "format": "prettier --write src/",
     "generate": "buf generate",
     "lint": "eslint . --fix",
+    "metrics:build": "pnpm --filter @zashboardx/metrics-helper build",
+    "metrics:test": "pnpm --filter @zashboardx/metrics-helper test",
     "prepare": "husky",
     "preview": "vite preview",
     "type-check": "vue-tsc --build --force"
