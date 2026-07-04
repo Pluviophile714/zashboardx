@@ -9,7 +9,6 @@
         latencyTipAnimationClass,
       )
     "
-    @pointerenter="handlerLatencyDetailsTip($event, 'card')"
     @contextmenu.stop.prevent="handlerLatencyTest"
   >
     <div
@@ -47,7 +46,7 @@
         :group-name="groupName"
         :disable-history-tip="true"
         @click.stop="handlerLatencyTest"
-        @pointerenter.stop="handlerLatencyDetailsTip($event, 'latency')"
+        @pointerenter.stop="handlerLatencyDetailsTip"
       />
     </div>
 
@@ -96,7 +95,7 @@ import {
 import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import { twMerge } from 'tailwind-merge'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import ProxyIcon from './ProxyIcon.vue'
@@ -105,13 +104,15 @@ const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
 const LATENCY_AVAILABILITY_WINDOW = 24 * 60 * 60 * 1000
 const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
+const LATENCY_AVAILABILITY_MIN_SAMPLES = 12
+const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
 const CHART_PADDING_X = 8
 const CHART_PADDING_Y = 8
 const { t } = useI18n()
-const { showTip } = useTooltip()
+const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
   name: string
   active?: boolean
@@ -177,9 +178,69 @@ const latencyStabilityBar = computed(() => {
 const hasLatencyDetailsHistory = () => hasDisplayHistoryByName(props.name, props.groupName)
 
 const checkNodeTextTruncation = (e: Event) => {
-  if (hasLatencyDetailsHistory()) return
-
   checkTruncation(e)
+}
+
+let latencyDetailsCloseTimer: ReturnType<typeof window.setTimeout> | undefined
+let latencyDetailsTipCleanup: (() => void) | undefined
+
+const clearLatencyDetailsCloseTimer = () => {
+  if (!latencyDetailsCloseTimer) return
+
+  window.clearTimeout(latencyDetailsCloseTimer)
+  latencyDetailsCloseTimer = undefined
+}
+
+const isHoveringElement = (element?: Element | null) => {
+  if (!element) return false
+
+  try {
+    return element.matches(':hover') || Boolean(element.querySelector(':hover'))
+  } catch {
+    return false
+  }
+}
+
+const cleanupLatencyDetailsTip = () => {
+  clearLatencyDetailsCloseTimer()
+  latencyDetailsTipCleanup?.()
+  latencyDetailsTipCleanup = undefined
+}
+
+const scheduleLatencyDetailsTipHide = (
+  reference: HTMLElement,
+  popper: HTMLElement,
+  delay = 220,
+) => {
+  clearLatencyDetailsCloseTimer()
+  latencyDetailsCloseTimer = window.setTimeout(() => {
+    if (!isHoveringElement(reference) && !isHoveringElement(popper)) {
+      hideTip()
+    }
+  }, delay)
+}
+
+const bindLatencyDetailsTipHoverBoundary = (
+  reference: HTMLElement,
+  popper: HTMLElement,
+  compact: boolean,
+) => {
+  cleanupLatencyDetailsTip()
+
+  const hideDelay = compact ? 260 : 220
+  const scheduleHide = () => scheduleLatencyDetailsTipHide(reference, popper, hideDelay)
+
+  reference.addEventListener('pointerenter', clearLatencyDetailsCloseTimer)
+  reference.addEventListener('pointerleave', scheduleHide)
+  popper.addEventListener('pointerenter', clearLatencyDetailsCloseTimer)
+  popper.addEventListener('pointerleave', scheduleHide)
+
+  latencyDetailsTipCleanup = () => {
+    reference.removeEventListener('pointerenter', clearLatencyDetailsCloseTimer)
+    reference.removeEventListener('pointerleave', scheduleHide)
+    popper.removeEventListener('pointerenter', clearLatencyDetailsCloseTimer)
+    popper.removeEventListener('pointerleave', scheduleHide)
+  }
 }
 
 const getLatencyTextClass = (delay: number) => {
@@ -253,6 +314,18 @@ const formatLatencyHistoryGap = (gap: number) => {
   return restMinutes ? `${hours} 小时 ${restMinutes} 分钟` : `${hours} 小时`
 }
 
+const formatLatencyAvailabilityCoverage = (coverage: number, totalCount: number) => {
+  if (!totalCount) {
+    return '覆盖 --'
+  }
+
+  if (coverage < 60000) {
+    return '覆盖不足 1 分钟'
+  }
+
+  return `覆盖 ${formatLatencyHistoryGap(coverage)}`
+}
+
 const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
   const recent = history.slice(-windowSize)
   const successItems = recent.filter((item) => item.delay > NOT_CONNECTED)
@@ -280,21 +353,66 @@ const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_
 
 const getLatencyAvailabilityStats = (history: { delay: number; time?: string }[]) => {
   const since = Date.now() - LATENCY_AVAILABILITY_WINDOW
-  const recent = history.filter((item) => {
+  let firstTimestamp = Number.POSITIVE_INFINITY
+  let lastTimestamp = 0
+  let successCount = 0
+  let totalCount = 0
+
+  for (const item of history) {
     const timestamp = item.time ? Date.parse(item.time) : Number.NaN
 
-    return Number.isFinite(timestamp) && timestamp >= since
-  })
-  const successCount = recent.filter((item) => item.delay > NOT_CONNECTED).length
-  const totalCount = recent.length
+    if (!Number.isFinite(timestamp) || timestamp < since) continue
+
+    totalCount += 1
+    if (item.delay > NOT_CONNECTED) {
+      successCount += 1
+    }
+    firstTimestamp = Math.min(firstTimestamp, timestamp)
+    lastTimestamp = Math.max(lastTimestamp, timestamp)
+  }
+
   const failedCount = totalCount - successCount
+  const coverage = totalCount > 1 ? lastTimestamp - firstTimestamp : 0
   const availability = totalCount ? Math.round((successCount / totalCount) * 1000) / 10 : null
+  const isInsufficient =
+    totalCount > 0 &&
+    (totalCount < LATENCY_AVAILABILITY_MIN_SAMPLES || coverage < LATENCY_AVAILABILITY_MIN_COVERAGE)
 
   return {
     availability,
+    coverage,
     failedCount,
+    isInsufficient,
     successCount,
     totalCount,
+  }
+}
+
+const getLatencyAvailabilityNote = (stats: ReturnType<typeof getLatencyAvailabilityStats>) => {
+  if (stats.totalCount === 0) {
+    return {
+      className: 'text-base-content/45',
+      text: '暂无记录',
+    }
+  }
+
+  if (stats.failedCount > 0) {
+    return {
+      className: 'text-high-latency',
+      text: `失败 ${stats.failedCount} 次`,
+    }
+  }
+
+  if (stats.isInsufficient) {
+    return {
+      className: 'text-medium-latency',
+      text: '样本不足',
+    }
+  }
+
+  return {
+    className: 'text-base-content/45',
+    text: '',
   }
 }
 
@@ -542,28 +660,30 @@ const createLatencyDetailsTip = () => {
 
     const availabilityStats = getLatencyAvailabilityStats(availabilityHistory)
     const availabilityLine = document.createElement('div')
+    const availabilityMain = document.createElement('div')
+    const coverage = document.createElement('div')
     const availability = document.createElement('span')
     const failure = document.createElement('span')
+    const availabilityNote = getLatencyAvailabilityNote(availabilityStats)
 
-    availabilityLine.className =
-      'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/65'
+    availabilityLine.className = 'mt-1 grid gap-0.5 text-xs text-base-content/65'
+    availabilityMain.className = 'flex items-center justify-between gap-2'
     availability.textContent =
       availabilityStats.availability === null
-        ? '24h 可用率: --'
-        : `24h 可用率: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount} 次`
-    availability.title = '基于浏览器本地已有测速历史，不代表后台全天候监控'
-    failure.className =
-      availabilityStats.failedCount > 0 ? 'text-high-latency' : 'text-base-content/45'
-    failure.textContent =
-      availabilityStats.totalCount === 0
-        ? '暂无记录'
-        : availabilityStats.failedCount > 0
-          ? `失败 ${availabilityStats.failedCount} 次`
-          : ''
-    availabilityLine.append(availability)
+        ? '本机24h: --'
+        : `本机24h: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
+    availability.title = '基于当前浏览器本地测速历史，不代表 R5S 全天候监控'
+    failure.className = availabilityNote.className
+    failure.textContent = availabilityNote.text
+    coverage.className = compact
+      ? 'text-[10px] text-base-content/45'
+      : 'text-[11px] text-base-content/45'
+    coverage.textContent = `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
+    availabilityMain.append(availability)
     if (failure.textContent) {
-      availabilityLine.append(failure)
+      availabilityMain.append(failure)
     }
+    availabilityLine.append(availabilityMain, coverage)
     chart.append(availabilityLine)
     root.append(chart)
   }
@@ -637,13 +757,13 @@ const createLatencyDetailsTip = () => {
   return root
 }
 
-const handlerLatencyDetailsTip = (e: Event, source: 'card' | 'latency') => {
+const handlerLatencyDetailsTip = (e: Event) => {
   if (!hasLatencyDetailsHistory()) return
 
   const compact = isCompactLatencyDetails()
-  if ((compact && source !== 'latency') || (!compact && source !== 'card')) return
+  const anchor = e.currentTarget as HTMLElement | null
 
-  const anchor = source === 'latency' ? e.currentTarget : (cardRef.value ?? e.currentTarget)
+  if (!anchor) return
 
   const tipEvent = Object.create(e, {
     currentTarget: {
@@ -655,14 +775,20 @@ const handlerLatencyDetailsTip = (e: Event, source: 'card' | 'latency') => {
   const placement = compact ? mobilePlacement : 'top'
 
   showTip(tipEvent, createLatencyDetailsTip(), {
+    animation: 'fade',
     appendTo: document.body,
     delay: [350, 180],
+    duration: [70, 50],
     interactive: true,
-    interactiveBorder: 24,
-    interactiveDebounce: 120,
+    interactiveBorder: compact ? 10 : 8,
+    interactiveDebounce: 40,
     hideOnClick: false,
     maxWidth: 'none',
     offset: [0, 8],
+    onShown: (instance) => {
+      bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
+    },
+    onDestroy: cleanupLatencyDetailsTip,
     placement,
     popperOptions: {
       strategy: 'fixed',
@@ -726,6 +852,8 @@ onMounted(() => {
     }, 300)
   }
 })
+
+onUnmounted(cleanupLatencyDetailsTip)
 </script>
 
 <style scoped>
