@@ -1,4 +1,4 @@
-FROM docker.io/node:24-alpine AS builder
+FROM --platform=$BUILDPLATFORM docker.io/node:24-alpine AS builder
 
 WORKDIR /build
 
