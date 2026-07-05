@@ -4,7 +4,7 @@ set -eu
 APP_NAME="zashboardx"
 APP_DIR="/opt/${APP_NAME}"
 IMAGE="ghcr.io/pluviophile714/zashboardx:latest"
-METRICS_IMAGE="ghcr.io/pluviophile714/zashboardx-metrics:latest"
+METRICS_IMAGE="ghcr.io/pluviophile714/zashboardx:metrics-latest"
 DEFAULT_PORT="2080"
 
 read_env_value() {
@@ -79,8 +79,8 @@ if [ ! -f "${APP_DIR}/compose.yaml" ] || [ ! -f "${APP_DIR}/.env" ]; then
 fi
 
 cd "$APP_DIR"
-if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml"; then
-  echo "Migrating compose stack to include zashboardx-metrics..."
+if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml" || ! grep -qxF "METRICS_IMAGE=${METRICS_IMAGE}" "${APP_DIR}/.env"; then
+  echo "Refreshing compose stack for zashboardx-metrics..."
   write_stack_files
 fi
 docker compose pull

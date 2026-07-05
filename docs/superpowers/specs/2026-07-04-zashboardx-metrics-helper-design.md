@@ -57,7 +57,7 @@ On the R5S deployment, Caddy can reverse proxy `/api/metrics/*` to the helper se
 
 The helper is a separate container, for example:
 
-- Image: `ghcr.io/pluviophile714/zashboardx-metrics:latest`
+- Image: `ghcr.io/pluviophile714/zashboardx:metrics-latest`
 - Internal port: `8787`
 - Data volume: `/data`
 
@@ -169,7 +169,7 @@ Keep the current GHCR flow.
 The repository can build two images:
 
 - `ghcr.io/pluviophile714/zashboardx:latest`
-- `ghcr.io/pluviophile714/zashboardx-metrics:latest`
+- `ghcr.io/pluviophile714/zashboardx:metrics-latest`
 
 R5S Docker Compose can run both services:
 

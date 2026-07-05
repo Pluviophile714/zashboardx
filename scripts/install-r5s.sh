@@ -4,7 +4,7 @@ set -eu
 APP_NAME="zashboardx"
 APP_DIR="/opt/${APP_NAME}"
 IMAGE="ghcr.io/pluviophile714/zashboardx:latest"
-METRICS_IMAGE="ghcr.io/pluviophile714/zashboardx-metrics:latest"
+METRICS_IMAGE="ghcr.io/pluviophile714/zashboardx:metrics-latest"
 DEFAULT_PORT="2080"
 PORT="${1:-$DEFAULT_PORT}"
 

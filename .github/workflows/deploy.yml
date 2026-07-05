@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/pluviophile714/zashboardx
-      METRICS_IMAGE: ghcr.io/pluviophile714/zashboardx-metrics
+      METRICS_IMAGE: ghcr.io/pluviophile714/zashboardx
     steps:
       - uses: actions/checkout@v6
 
@@ -74,7 +74,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.METRICS_IMAGE }}:latest
-            ${{ env.METRICS_IMAGE }}:${{ github.sha }}
+            ${{ env.METRICS_IMAGE }}:metrics-latest
+            ${{ env.METRICS_IMAGE }}:metrics-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

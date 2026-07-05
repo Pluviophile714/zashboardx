@@ -348,7 +348,7 @@ reverse_proxy @metrics http://zashboardx-metrics:8787
 
 - [ ] **Step 3: Publish helper image in GitHub Actions**
 
-Keep the existing zashboardx image build and add a second `docker/build-push-action` step for `Dockerfile.metrics-helper` tagged as `ghcr.io/pluviophile714/zashboardx-metrics:latest` and `${{ github.sha }}`.
+Keep the existing zashboardx image build and add a second `docker/build-push-action` step for `Dockerfile.metrics-helper` tagged on the public zashboardx package as `ghcr.io/pluviophile714/zashboardx:metrics-latest` and `metrics-${{ github.sha }}`.
 
 - [ ] **Step 4: Update R5S install script**
 
