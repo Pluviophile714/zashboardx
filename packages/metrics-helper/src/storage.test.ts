@@ -87,6 +87,27 @@ test('returns null for a single node without samples in the window', () => {
   storage.close()
 })
 
+test('ignores duplicate probe samples from repeated scrapes', () => {
+  const storage = createStorage()
+  const sample: ProbeSample = {
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(0),
+    delay: 80,
+    success: true,
+  }
+
+  assert.equal(storage.insertProbeSample(sample), true)
+  assert.equal(storage.insertProbeSample(sample), false)
+
+  const metrics = storage.getNodeMetrics(24 * 60 * 60, Date.parse(at(30)))
+
+  assert.equal(metrics['HK-01'].sampleCount, 1)
+  assert.equal(metrics['HK-01'].successCount, 1)
+
+  storage.close()
+})
+
 test('prunes samples older than retention days', () => {
   const storage = createStorage()
 

@@ -10,6 +10,10 @@ type MihomoProxy = {
   name?: string
   type?: string
   all?: string[]
+  history?: {
+    time?: string
+    delay?: number | string
+  }[]
 }
 
 type ProxiesResponse = {
@@ -29,6 +33,49 @@ const isBuiltinProxy = (name: string, proxy: MihomoProxy | undefined) => {
   return builtinNames.has(name) || (type ? builtinTypes.has(type) : false)
 }
 
+const toHistorySamples = (
+  nodeName: string,
+  proxy: MihomoProxy | undefined,
+  testUrl: string | undefined,
+): ProbeSample[] | undefined => {
+  if (!testUrl || !Array.isArray(proxy?.history)) {
+    return undefined
+  }
+
+  const samples: ProbeSample[] = []
+
+  for (const item of proxy.history) {
+    const timestampMs = item.time ? Date.parse(item.time) : Number.NaN
+    const delay = typeof item.delay === 'number' ? item.delay : Number(item.delay)
+
+    if (!Number.isFinite(timestampMs) || !Number.isFinite(delay)) {
+      continue
+    }
+
+    if (delay > 0) {
+      samples.push({
+        nodeName,
+        testUrl,
+        timestamp: new Date(timestampMs).toISOString(),
+        delay,
+        success: true,
+      })
+      continue
+    }
+
+    samples.push({
+      nodeName,
+      testUrl,
+      timestamp: new Date(timestampMs).toISOString(),
+      delay: null,
+      success: false,
+      errorType: 'history_failed',
+    })
+  }
+
+  return samples.length ? samples : undefined
+}
+
 export class MihomoClient {
   readonly #baseUrl: string
   readonly #secret: string
@@ -40,7 +87,7 @@ export class MihomoClient {
     this.#fetch = options.fetchImpl ?? fetch
   }
 
-  async discoverProxyNodes(): Promise<DiscoveredProxyNode[]> {
+  async discoverProxyNodes(testUrl?: string): Promise<DiscoveredProxyNode[]> {
     const data = await this.#requestJson<ProxiesResponse>('/proxies')
     const proxies = data.proxies ?? {}
     const groupNames = new Set<string>()
@@ -61,10 +108,15 @@ export class MihomoClient {
 
         return !groupNames.has(name) && !isGroupProxy(proxy) && !isBuiltinProxy(name, proxy)
       })
-      .map((name) => ({
-        name,
-        type: proxies[name]?.type ?? null,
-      }))
+      .map((name) => {
+        const historySamples = toHistorySamples(name, proxies[name], testUrl)
+
+        return {
+          name,
+          type: proxies[name]?.type ?? null,
+          ...(historySamples ? { historySamples } : {}),
+        }
+      })
       .sort((prev, next) => prev.name.localeCompare(next.name, 'zh-Hans-CN'))
   }
 

@@ -12,6 +12,7 @@ export type ProbeSample = {
 export type DiscoveredProxyNode = {
   name: string
   type: string | null
+  historySamples?: ProbeSample[]
 }
 
 export type NodeMetrics = {

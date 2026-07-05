@@ -85,6 +85,21 @@ export class MetricsStorage {
 
   insertProbeSample(sample: ProbeSample) {
     this.recordNode(sample.nodeName, null)
+    const existing = this.#db
+      .prepare(
+        `
+        SELECT 1
+        FROM probe_samples
+        WHERE node_name = ? AND test_url = ? AND timestamp = ?
+        LIMIT 1
+      `,
+      )
+      .get(sample.nodeName, sample.testUrl, sample.timestamp)
+
+    if (existing) {
+      return false
+    }
+
     this.#db
       .prepare(
         `
@@ -107,6 +122,8 @@ export class MetricsStorage {
         sample.success ? 1 : 0,
         sample.errorType ?? null,
       )
+
+    return true
   }
 
   getNodeMetrics(windowSeconds: number, nowMs = Date.now()) {

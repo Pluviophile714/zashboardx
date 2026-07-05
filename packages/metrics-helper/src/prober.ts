@@ -52,13 +52,20 @@ export class ProbeRunner {
     this.#health.running = true
 
     try {
-      const nodes = await this.#client.discoverProxyNodes()
+      const nodes = await this.#client.discoverProxyNodes(this.#config.probeTestUrl)
+      const fallbackNodes = []
 
       for (const node of nodes) {
         this.#storage.recordNode(node.name, node.type)
+
+        if (node.historySamples?.length) {
+          node.historySamples.forEach((sample) => this.#storage.insertProbeSample(sample))
+        } else {
+          fallbackNodes.push(node)
+        }
       }
 
-      await runBounded(nodes, this.#config.probeConcurrency, async (node) => {
+      await runBounded(fallbackNodes, this.#config.probeConcurrency, async (node) => {
         const sample = await this.#client.probeNode(
           node.name,
           this.#config.probeTestUrl,

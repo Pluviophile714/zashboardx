@@ -24,7 +24,7 @@ write_stack_files() {
   PORT="$(read_env_value PORT "$DEFAULT_PORT")"
   MIHOMO_BASE_URL="$(read_env_value MIHOMO_BASE_URL "${MIHOMO_BASE_URL:-http://192.168.8.1:9090}")"
   MIHOMO_SECRET="$(read_env_value MIHOMO_SECRET "${MIHOMO_SECRET:-}")"
-  PROBE_INTERVAL_SECONDS="$(read_env_value PROBE_INTERVAL_SECONDS "${PROBE_INTERVAL_SECONDS:-300}")"
+  SCRAPE_INTERVAL_SECONDS="$(read_env_value SCRAPE_INTERVAL_SECONDS "${SCRAPE_INTERVAL_SECONDS:-30}")"
   PROBE_CONCURRENCY="$(read_env_value PROBE_CONCURRENCY "${PROBE_CONCURRENCY:-8}")"
   PROBE_TIMEOUT_MS="$(read_env_value PROBE_TIMEOUT_MS "${PROBE_TIMEOUT_MS:-5000}")"
   PROBE_TEST_URL="$(read_env_value PROBE_TEST_URL "${PROBE_TEST_URL:-https://www.gstatic.com/generate_204}")"
@@ -35,7 +35,8 @@ IMAGE=${IMAGE}
 METRICS_IMAGE=${METRICS_IMAGE}
 MIHOMO_BASE_URL=${MIHOMO_BASE_URL}
 MIHOMO_SECRET=${MIHOMO_SECRET}
-PROBE_INTERVAL_SECONDS=${PROBE_INTERVAL_SECONDS}
+SCRAPE_INTERVAL_SECONDS=${SCRAPE_INTERVAL_SECONDS}
+PROBE_INTERVAL_SECONDS=${SCRAPE_INTERVAL_SECONDS}
 PROBE_CONCURRENCY=${PROBE_CONCURRENCY}
 PROBE_TIMEOUT_MS=${PROBE_TIMEOUT_MS}
 PROBE_TEST_URL=${PROBE_TEST_URL}
@@ -58,6 +59,7 @@ services:
     environment:
       MIHOMO_BASE_URL: ${MIHOMO_BASE_URL}
       MIHOMO_SECRET: ${MIHOMO_SECRET}
+      SCRAPE_INTERVAL_SECONDS: ${SCRAPE_INTERVAL_SECONDS}
       PROBE_INTERVAL_SECONDS: ${PROBE_INTERVAL_SECONDS}
       PROBE_CONCURRENCY: ${PROBE_CONCURRENCY}
       PROBE_TIMEOUT_MS: ${PROBE_TIMEOUT_MS}
@@ -79,7 +81,7 @@ if [ ! -f "${APP_DIR}/compose.yaml" ] || [ ! -f "${APP_DIR}/.env" ]; then
 fi
 
 cd "$APP_DIR"
-if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml" || ! grep -qxF "METRICS_IMAGE=${METRICS_IMAGE}" "${APP_DIR}/.env"; then
+if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml" || ! grep -qxF "METRICS_IMAGE=${METRICS_IMAGE}" "${APP_DIR}/.env" || ! grep -q "^SCRAPE_INTERVAL_SECONDS=" "${APP_DIR}/.env"; then
   echo "Refreshing compose stack for zashboardx-metrics..."
   write_stack_files
 fi

@@ -27,7 +27,11 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): MetricsHelperC
   mihomoSecret: env.MIHOMO_SECRET || '',
   bindHost: env.METRICS_BIND_HOST || '0.0.0.0',
   port: parseInteger(env.METRICS_PORT, 8787, 1),
-  probeIntervalSeconds: parseInteger(env.PROBE_INTERVAL_SECONDS, 300, 30),
+  probeIntervalSeconds: parseInteger(
+    env.SCRAPE_INTERVAL_SECONDS ?? env.PROBE_INTERVAL_SECONDS,
+    30,
+    30,
+  ),
   probeConcurrency: parseInteger(env.PROBE_CONCURRENCY, 8, 1),
   probeTimeoutMs: parseInteger(env.PROBE_TIMEOUT_MS, 5000, 500),
   probeTestUrl: env.PROBE_TEST_URL || 'https://www.gstatic.com/generate_204',

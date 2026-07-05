@@ -25,6 +25,7 @@ const getGitCommitId = (): string => {
 //   all (default) | cdn | firasans | misans | pingfang | sarasa | none
 // See src/assets/load-fonts.ts for what each value loads.
 const font = process.env.FONT || 'all'
+const metricsProxyTarget = process.env.METRICS_PROXY_TARGET || 'http://192.168.8.2:2080'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -82,6 +83,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  server: {
+    proxy: {
+      '/api/metrics': {
+        target: metricsProxyTarget,
+        changeOrigin: true,
+      },
     },
   },
 })

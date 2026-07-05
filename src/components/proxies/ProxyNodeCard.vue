@@ -79,6 +79,7 @@ import {
   getDisplayHistoryByName,
   getHistoryByName,
   getIPv6ByName,
+  getNowProxyNodeName,
   getTestUrl,
   hasDisplayHistoryByName,
   proxyLatencyTest,
@@ -422,7 +423,7 @@ const formatSharedMetricsAvailability = (metrics: (typeof proxyMetricsMap.value)
     return 'R5S 24h: --'
   }
 
-  return `R5S 24h: ${(metrics.availability * 100).toFixed(1)}% · ${metrics.successCount}/${metrics.sampleCount}`
+  return `R5S 24h: ${(metrics.availability * 100).toFixed(1)}%`
 }
 
 const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) => {
@@ -450,6 +451,36 @@ const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) =
   return {
     className: 'text-base-content/45',
     text: '',
+  }
+}
+
+const getSharedMetricsResolution = () => {
+  const directMetrics = proxyMetricsMap.value[props.name]
+
+  if (directMetrics) {
+    return {
+      metrics: directMetrics,
+      sourceName: props.name,
+      usesResolvedNode: false,
+    }
+  }
+
+  const resolvedName = getNowProxyNodeName(props.name)
+
+  if (!resolvedName || resolvedName === props.name) {
+    return null
+  }
+
+  const resolvedMetrics = proxyMetricsMap.value[resolvedName]
+
+  if (!resolvedMetrics) {
+    return null
+  }
+
+  return {
+    metrics: resolvedMetrics,
+    sourceName: resolvedName,
+    usesResolvedNode: true,
   }
 }
 
@@ -551,7 +582,7 @@ const buildLatencyStatusTimeline = (
     : 'mb-1.5 flex items-center justify-between text-[11px] text-base-content/55'
 
   const oldestLabel = document.createElement('span')
-  oldestLabel.textContent = '近 30 次'
+  oldestLabel.textContent = '本机近30次'
   const successLabel = document.createElement('span')
   successLabel.className =
     stats && sampledSuccessRate >= 80
@@ -695,7 +726,8 @@ const createLatencyDetailsTip = () => {
 
     chart.append(stabilityLine)
 
-    const sharedMetrics = proxyMetricsMap.value[props.name]
+    const sharedMetricsResolution = getSharedMetricsResolution()
+    const sharedMetrics = sharedMetricsResolution?.metrics
     const availabilityStats = getLatencyAvailabilityStats(availabilityHistory)
     const availabilityLine = document.createElement('div')
     const availabilityMain = document.createElement('div')
@@ -714,7 +746,9 @@ const createLatencyDetailsTip = () => {
         ? '本机24h: --'
         : `本机24h: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
     availability.title = sharedMetrics
-      ? '基于 R5S 指标助手持续探测记录'
+      ? sharedMetricsResolution?.usesResolvedNode
+        ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
+        : '基于 R5S 指标助手长期采集记录'
       : '基于当前浏览器本地测速历史，不代表 R5S 全天候监控'
     failure.className = availabilityNote.className
     failure.textContent = availabilityNote.text
@@ -722,7 +756,7 @@ const createLatencyDetailsTip = () => {
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
     coverage.textContent = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · R5S 记录`
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · R5S 采集 ${sharedMetrics.sampleCount} 次`
       : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
     availabilityMain.append(availability)
     if (failure.textContent) {
