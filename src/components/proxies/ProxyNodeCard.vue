@@ -32,22 +32,33 @@
       >
     </div>
 
-    <div class="flex h-4 w-full items-center justify-between">
+    <div
+      class="flex w-full items-end justify-between gap-1"
+      :class="isSmallCard ? 'min-h-7' : 'min-h-8'"
+    >
       <span
         :class="`truncate text-xs tracking-tight ${active ? 'text-primary-content' : 'text-base-content/60'}`"
         @mouseenter="checkNodeTextTruncation"
       >
         {{ typeDescription }}
       </span>
-      <LatencyTag
-        :class="[isSmallCard && 'h-4! w-8! rounded-md!', 'shrink-0']"
-        :name="node.name"
-        :loading="isLatencyTesting"
-        :group-name="groupName"
-        :disable-history-tip="true"
-        @click.stop="handlerLatencyTest"
-        @pointerenter.stop="handlerLatencyDetailsTip"
-      />
+      <div class="flex shrink-0 flex-col items-end gap-0.5">
+        <span
+          v-if="cardAvailabilityLabel"
+          :class="cardAvailabilityClass"
+        >
+          {{ cardAvailabilityLabel }}
+        </span>
+        <LatencyTag
+          :class="[isSmallCard && 'h-4! w-8! rounded-md!', 'shrink-0']"
+          :name="node.name"
+          :loading="isLatencyTesting"
+          :group-name="groupName"
+          :disable-history-tip="true"
+          @click.stop="handlerLatencyTest"
+          @pointerenter.stop="handlerLatencyDetailsTip"
+        />
+      </div>
     </div>
 
     <div
@@ -484,6 +495,62 @@ const getSharedMetricsResolution = () => {
   return null
 }
 
+const formatCardAvailability = (availability: number) => {
+  const percent = availability * 100
+
+  if (percent >= 99.95) return '100%'
+  if (percent >= 99) return `${percent.toFixed(1)}%`
+
+  return `${Math.round(percent)}%`
+}
+
+const cardAvailabilityMetrics = computed(() => getSharedMetricsResolution()?.metrics)
+const cardAvailabilityLabel = computed(() => {
+  const metrics = cardAvailabilityMetrics.value
+
+  if (
+    !metrics ||
+    metrics.availability === null ||
+    !metrics.sampleCount ||
+    metrics.sampleCount < LATENCY_AVAILABILITY_MIN_SAMPLES ||
+    metrics.coverageSeconds < LATENCY_AVAILABILITY_MIN_COVERAGE / 1000
+  ) {
+    return ''
+  }
+
+  return `24h ${formatCardAvailability(metrics.availability)}`
+})
+const cardAvailabilityClass = computed(() => {
+  const metrics = cardAvailabilityMetrics.value
+  const baseClass = twMerge(
+    'h-3 rounded-full px-1.5 text-[10px] leading-3 tracking-tight',
+    isSmallCard.value && 'px-1 text-[9px]',
+  )
+
+  if (!metrics || metrics.availability === null) {
+    return twMerge(
+      baseClass,
+      props.active
+        ? 'bg-primary-content/10 text-primary-content/70'
+        : 'bg-base-content/10 text-base-content/50',
+    )
+  }
+
+  if (props.active) {
+    return twMerge(baseClass, 'bg-primary-content/10 text-primary-content/80')
+  }
+
+  if (metrics.availability >= 0.99) {
+    return twMerge(baseClass, 'bg-low-latency/10 text-low-latency')
+  }
+
+  if (metrics.availability >= 0.95) {
+    return twMerge(baseClass, 'bg-medium-latency/10 text-medium-latency')
+  }
+
+  return twMerge(baseClass, 'bg-high-latency/10 text-high-latency')
+})
+
 const isCompactLatencyDetails = () => window.matchMedia('(max-width: 640px)').matches
 
 const buildSparklineSvg = (
@@ -756,7 +823,7 @@ const createLatencyDetailsTip = () => {
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
     coverage.textContent = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · R5S 采集 ${sharedMetrics.sampleCount} 次`
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · 样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
       : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
     availabilityMain.append(availability)
     if (failure.textContent) {
