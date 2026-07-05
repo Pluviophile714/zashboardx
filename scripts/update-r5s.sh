@@ -25,7 +25,7 @@ write_stack_files() {
   MIHOMO_BASE_URL="$(read_env_value MIHOMO_BASE_URL "${MIHOMO_BASE_URL:-http://192.168.8.1:9090}")"
   MIHOMO_SECRET="$(read_env_value MIHOMO_SECRET "${MIHOMO_SECRET:-}")"
   PROBE_INTERVAL_SECONDS="$(read_env_value PROBE_INTERVAL_SECONDS "${PROBE_INTERVAL_SECONDS:-300}")"
-  PROBE_CONCURRENCY="$(read_env_value PROBE_CONCURRENCY "${PROBE_CONCURRENCY:-4}")"
+  PROBE_CONCURRENCY="$(read_env_value PROBE_CONCURRENCY "${PROBE_CONCURRENCY:-8}")"
   PROBE_TIMEOUT_MS="$(read_env_value PROBE_TIMEOUT_MS "${PROBE_TIMEOUT_MS:-5000}")"
   PROBE_TEST_URL="$(read_env_value PROBE_TEST_URL "${PROBE_TEST_URL:-https://www.gstatic.com/generate_204}")"
 
