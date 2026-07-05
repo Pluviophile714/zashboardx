@@ -22,7 +22,7 @@ export type ProxyMetricsResponse = {
 
 export const fetchProxyMetricsHelperAPI = async (
   metricsWindow = '24h',
-  timeout = 1500,
+  timeout = 6000,
 ): Promise<ProxyMetricsResponse | null> => {
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeout)

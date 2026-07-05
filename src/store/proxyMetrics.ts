@@ -27,7 +27,6 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
 
     if (!response) {
       proxyMetricsAvailable.value = false
-      proxyMetricsMap.value = {}
       return
     }
 

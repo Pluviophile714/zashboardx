@@ -101,6 +101,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import ProxyIcon from './ProxyIcon.vue'
+import { getSmartOutbound } from './smartOutbound'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
@@ -420,10 +421,10 @@ const getLatencyAvailabilityNote = (stats: ReturnType<typeof getLatencyAvailabil
 
 const formatSharedMetricsAvailability = (metrics: (typeof proxyMetricsMap.value)[string]) => {
   if (metrics.availability === null) {
-    return 'R5S 24h: --'
+    return '24h可用率: --'
   }
 
-  return `R5S 24h: ${(metrics.availability * 100).toFixed(1)}%`
+  return `24h可用率: ${(metrics.availability * 100).toFixed(1)}%`
 }
 
 const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) => {
@@ -455,33 +456,32 @@ const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) =
 }
 
 const getSharedMetricsResolution = () => {
-  const directMetrics = proxyMetricsMap.value[props.name]
+  const names: string[] = []
+  const addName = (name?: string) => {
+    if (name && !names.includes(name)) {
+      names.push(name)
+    }
+  }
+  const resolvedName = getNowProxyNodeName(props.name)
+  const smartOutbound = getSmartOutbound(resolvedName || props.name) || getSmartOutbound(props.name)
 
-  if (directMetrics) {
-    return {
-      metrics: directMetrics,
-      sourceName: props.name,
-      usesResolvedNode: false,
+  addName(smartOutbound)
+  addName(resolvedName !== props.name ? resolvedName : '')
+  addName(props.name)
+
+  for (const name of names) {
+    const metrics = proxyMetricsMap.value[name]
+
+    if (metrics) {
+      return {
+        metrics,
+        sourceName: name,
+        usesResolvedNode: name !== props.name,
+      }
     }
   }
 
-  const resolvedName = getNowProxyNodeName(props.name)
-
-  if (!resolvedName || resolvedName === props.name) {
-    return null
-  }
-
-  const resolvedMetrics = proxyMetricsMap.value[resolvedName]
-
-  if (!resolvedMetrics) {
-    return null
-  }
-
-  return {
-    metrics: resolvedMetrics,
-    sourceName: resolvedName,
-    usesResolvedNode: true,
-  }
+  return null
 }
 
 const isCompactLatencyDetails = () => window.matchMedia('(max-width: 640px)').matches
@@ -743,8 +743,8 @@ const createLatencyDetailsTip = () => {
     availability.textContent = sharedMetrics
       ? formatSharedMetricsAvailability(sharedMetrics)
       : availabilityStats.availability === null
-        ? '本机24h: --'
-        : `本机24h: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
+        ? '24h可用率: --'
+        : `24h可用率: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
     availability.title = sharedMetrics
       ? sharedMetricsResolution?.usesResolvedNode
         ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
