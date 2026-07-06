@@ -528,7 +528,7 @@ const formatCardAvailability = (availability: number) => {
   if (percent >= 99.95) return '100%'
   if (percent >= 99) return `${percent.toFixed(1)}%`
 
-  return `${Math.round(percent)}%`
+  return `${percent.toFixed(1)}%`
 }
 
 const cardAvailabilityMetrics = computed(() => getSharedMetricsResolution()?.metrics)
