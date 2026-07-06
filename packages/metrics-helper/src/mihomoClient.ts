@@ -10,6 +10,7 @@ type MihomoProxy = {
   name?: string
   type?: string
   all?: string[]
+  now?: string
   history?: {
     time?: string
     delay?: number | string
@@ -102,25 +103,79 @@ export class MihomoClient {
       }
     }
 
-    return [...candidateNames]
-      .filter((name) => {
-        const proxy = proxies[name]
+    const discovered = new Map<string, DiscoveredProxyNode>()
 
-        return (
-          Boolean(proxy) &&
-          !groupNames.has(name) &&
-          !isGroupProxy(proxy) &&
-          !isBuiltinProxy(name, proxy)
-        )
+    for (const name of candidateNames) {
+      const proxy = proxies[name]
+
+      if (
+        Boolean(proxy) &&
+        !groupNames.has(name) &&
+        !isGroupProxy(proxy) &&
+        !isBuiltinProxy(name, proxy)
+      ) {
+        const historySamples = toHistorySamples(name, proxy, testUrl)
+
+        discovered.set(name, {
+          name,
+          type: proxy?.type ?? null,
+          ...(historySamples ? { historySamples } : {}),
+        })
+      }
+    }
+
+    for (const proxy of Object.values(proxies)) {
+      if (!isGroupProxy(proxy) || !proxy.now || !proxy.all?.includes(proxy.now)) {
+        continue
+      }
+
+      const name = proxy.now
+
+      if (groupNames.has(name) || isBuiltinProxy(name, proxies[name])) {
+        continue
+      }
+
+      const historySamples = toHistorySamples(name, proxy, testUrl)
+
+      if (!historySamples?.length) {
+        continue
+      }
+
+      const node = discovered.get(name) ?? {
+        name,
+        type: proxies[name]?.type ?? null,
+      }
+
+      discovered.set(name, {
+        ...node,
+        historySamples: [...(node.historySamples ?? []), ...historySamples],
       })
-      .map((name) => {
-        const historySamples = toHistorySamples(name, proxies[name], testUrl)
+    }
+
+    return [...discovered.values()]
+      .filter((node) => {
+        const proxy = proxies[node.name]
+
+        if (proxy) {
+          return true
+        }
+
+        return Boolean(node.historySamples?.length)
+      })
+      .map((node) => {
+        const proxy = proxies[node.name]
 
         return {
-          name,
-          type: proxies[name]?.type ?? null,
-          ...(historySamples ? { historySamples } : {}),
+          ...node,
+          type: proxy?.type ?? node.type,
         }
+      })
+      .filter((node) => {
+        const proxy = proxies[node.name]
+
+        return (
+          !groupNames.has(node.name) && !isGroupProxy(proxy) && !isBuiltinProxy(node.name, proxy)
+        )
       })
       .sort((prev, next) => prev.name.localeCompare(next.name, 'zh-Hans-CN'))
   }

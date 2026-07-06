@@ -111,6 +111,52 @@ test('maps mihomo proxy history to observed probe samples', async () => {
   ])
 })
 
+test('maps selected group history to leaf nodes missing from top-level proxies', async () => {
+  const fetchMock: typeof fetch = async () =>
+    jsonResponse({
+      proxies: {
+        Manual: {
+          name: 'Manual',
+          type: 'Selector',
+          all: ['HK-01', 'STALE-01'],
+          now: 'HK-01',
+          history: [
+            { time: '2026-07-06T03:00:00.000Z', delay: 58 },
+            { time: '2026-07-06T03:05:00.000Z', delay: 0 },
+          ],
+        },
+      },
+    })
+  const client = new MihomoClient({
+    baseUrl: 'http://mihomo.example:9090',
+    secret: '',
+    fetchImpl: fetchMock,
+  })
+
+  const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+
+  assert.equal(nodes.length, 1)
+  assert.equal(nodes[0].name, 'HK-01')
+  assert.equal(nodes[0].type, null)
+  assert.deepEqual(nodes[0].historySamples, [
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:00:00.000Z',
+      delay: 58,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:05:00.000Z',
+      delay: null,
+      success: false,
+      errorType: 'history_failed',
+    },
+  ])
+})
+
 test('probes a proxy node through the delay endpoint', async () => {
   const requested: string[] = []
   const fetchMock: typeof fetch = async (input) => {
