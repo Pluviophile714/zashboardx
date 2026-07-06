@@ -241,6 +241,33 @@ const bindLatencyDetailsTipHoverBoundary = (
 ) => {
   cleanupLatencyDetailsTip()
 
+  if (compact) {
+    const hideOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+
+      if (target && (reference.contains(target) || popper.contains(target))) {
+        clearLatencyDetailsCloseTimer()
+        return
+      }
+
+      hideTip()
+    }
+
+    document.addEventListener('pointerdown', hideOnOutsidePointerDown, true)
+    popper.addEventListener('pointerdown', clearLatencyDetailsCloseTimer)
+    popper.addEventListener('pointermove', clearLatencyDetailsCloseTimer)
+    popper.addEventListener('touchmove', clearLatencyDetailsCloseTimer, { passive: true })
+
+    latencyDetailsTipCleanup = () => {
+      document.removeEventListener('pointerdown', hideOnOutsidePointerDown, true)
+      popper.removeEventListener('pointerdown', clearLatencyDetailsCloseTimer)
+      popper.removeEventListener('pointermove', clearLatencyDetailsCloseTimer)
+      popper.removeEventListener('touchmove', clearLatencyDetailsCloseTimer)
+    }
+
+    return
+  }
+
   const hideDelay = compact ? 260 : 220
   const scheduleHide = () => scheduleLatencyDetailsTipHide(reference, popper, hideDelay)
 
