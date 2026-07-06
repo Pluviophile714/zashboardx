@@ -19,6 +19,11 @@ import { getMinCardWidth } from '@/helper/utils'
 import { activeConnections } from '@/store/connections'
 import { isProxyFolderModeActive } from '@/store/proxyFolders'
 import {
+  proxyMetricsLastRequestAt,
+  proxyMetricsRequestDurationMs,
+  proxyMetricsRequestFailed,
+} from '@/store/proxyMetrics'
+import {
   automaticDisconnection,
   collapseGroupMap,
   disableProxiesPageTextSelect,
@@ -81,6 +86,34 @@ export default defineComponent({
     const foldersUiVisible = computed(
       () => isProxyFolderModeActive.value && proxiesTabShow.value === PROXY_TAB_TYPE.PROXIES,
     )
+
+    const formatMetricsDuration = (duration: number) => {
+      if (duration >= 1000) {
+        return `${(duration / 1000).toFixed(1)}s`
+      }
+
+      return `${Math.max(1, duration)}ms`
+    }
+
+    const metricsDurationLabel = computed(() => {
+      const duration = proxyMetricsRequestDurationMs.value
+      const value =
+        proxyMetricsRequestFailed.value || duration === null
+          ? '--'
+          : formatMetricsDuration(duration)
+
+      return isLargeCtrlsBar.value ? `metrics ${value}` : value
+    })
+
+    const metricsDurationTitle = computed(() => {
+      const requestedAt = proxyMetricsLastRequestAt.value
+        ? new Date(proxyMetricsLastRequestAt.value).toLocaleTimeString()
+        : '--'
+
+      return proxyMetricsRequestFailed.value
+        ? `metrics 返回失败 · ${requestedAt}`
+        : `metrics 返回时间 · ${requestedAt}`
+    })
 
     const defaultModes = ['direct', 'rule', 'global']
     const modeList = computed(() => {
@@ -252,6 +285,21 @@ export default defineComponent({
         </div>
       )
 
+      const metricsDuration = (
+        <div
+          class={[
+            'flex h-8 shrink-0 items-center rounded-md border px-2 text-[11px] leading-none',
+            proxyMetricsRequestFailed.value
+              ? 'border-error/20 bg-error/10 text-error'
+              : 'border-base-content/10 bg-base-200/70 text-base-content/55',
+            !isLargeCtrlsBar.value && 'min-w-11 justify-center px-1.5',
+          ]}
+          title={metricsDurationTitle.value}
+        >
+          {metricsDurationLabel.value}
+        </div>
+      )
+
       const settingsModal = (
         <>
           <button
@@ -374,6 +422,7 @@ export default defineComponent({
           <div class="flex w-full gap-2">
             {modeSelect}
             {searchInput}
+            {metricsDuration}
             {settingsModal}
             {toggleCollapseAll}
             {latencyTestAll}
@@ -384,6 +433,7 @@ export default defineComponent({
           {hasProviders.value && tabs}
           {modeSelect}
           <div class="flex flex-1">{searchInput}</div>
+          {metricsDuration}
           {upgradeAllIcon}
           {settingsModal}
           {toggleCollapseAll}

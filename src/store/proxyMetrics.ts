@@ -9,6 +9,9 @@ let pendingRefresh: Promise<void> | undefined
 export const proxyMetricsMap = shallowRef<Record<string, ProxyMetricsNode>>({})
 export const proxyMetricsAvailable = ref(false)
 export const proxyMetricsUpdatedAt = ref(0)
+export const proxyMetricsRequestDurationMs = ref<number | null>(null)
+export const proxyMetricsRequestFailed = ref(false)
+export const proxyMetricsLastRequestAt = ref(0)
 
 export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => {
   const now = Date.now()
@@ -23,15 +26,20 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
 
   lastFetchTime = now
   pendingRefresh = (async () => {
+    const startedAt = performance.now()
     const response = await fetchProxyMetricsHelperAPI('24h')
+    proxyMetricsRequestDurationMs.value = Math.round(performance.now() - startedAt)
+    proxyMetricsLastRequestAt.value = Date.now()
 
     if (!response) {
       proxyMetricsAvailable.value = false
+      proxyMetricsRequestFailed.value = true
       return
     }
 
     proxyMetricsMap.value = response.nodes
     proxyMetricsAvailable.value = true
+    proxyMetricsRequestFailed.value = false
     proxyMetricsUpdatedAt.value = Date.parse(response.generatedAt) || Date.now()
   })().finally(() => {
     pendingRefresh = undefined

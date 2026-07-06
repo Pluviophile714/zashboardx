@@ -3,6 +3,8 @@ import type { NodeMetrics, ProbeSample } from './types.js'
 const emptyMetrics = (): NodeMetrics => ({
   availability: null,
   coverageSeconds: 0,
+  firstSampleAt: null,
+  lastSampleAt: null,
   sampleCount: 0,
   successCount: 0,
   failureCount: 0,
@@ -50,6 +52,8 @@ export const aggregateNodeMetrics = (
   return {
     availability: successCount / windowSamples.length,
     coverageSeconds: Math.max(0, Math.round((lastTimestamp - firstTimestamp) / 1000)),
+    firstSampleAt: windowSamples[0].timestamp,
+    lastSampleAt: windowSamples[windowSamples.length - 1].timestamp,
     sampleCount: windowSamples.length,
     successCount,
     failureCount,

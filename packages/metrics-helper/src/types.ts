@@ -18,6 +18,8 @@ export type DiscoveredProxyNode = {
 export type NodeMetrics = {
   availability: number | null
   coverageSeconds: number
+  firstSampleAt: string | null
+  lastSampleAt: string | null
   sampleCount: number
   successCount: number
   failureCount: number

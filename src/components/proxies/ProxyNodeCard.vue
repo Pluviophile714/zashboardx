@@ -367,6 +367,26 @@ const formatLatencyAvailabilityCoverage = (coverage: number, totalCount: number)
   return `覆盖 ${formatLatencyHistoryGap(coverage)}`
 }
 
+const formatMetricTimestamp = (timestamp?: string | number | null) => {
+  const parsed =
+    typeof timestamp === 'number' ? timestamp : timestamp ? Date.parse(timestamp) : Number.NaN
+
+  if (!Number.isFinite(parsed)) {
+    return '--'
+  }
+
+  const date = dayjs(parsed)
+  const format = date.year() === dayjs().year() ? 'MM-DD HH:mm' : 'YYYY-MM-DD HH:mm'
+
+  return date.format(format)
+}
+
+const formatMetricStartAt = (timestamp?: string | number | null) =>
+  `开始 ${formatMetricTimestamp(timestamp)}`
+
+const formatMetricLastAt = (timestamp?: string | number | null) =>
+  `最后 ${formatMetricTimestamp(timestamp)}`
+
 const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
   const recent = history.slice(-windowSize)
   const successItems = recent.filter((item) => item.delay > NOT_CONNECTED)
@@ -423,7 +443,9 @@ const getLatencyAvailabilityStats = (history: { delay: number; time?: string }[]
     availability,
     coverage,
     failedCount,
+    firstSampleAt: totalCount && Number.isFinite(firstTimestamp) ? firstTimestamp : null,
     isInsufficient,
+    lastSampleAt: totalCount && Number.isFinite(lastTimestamp) ? lastTimestamp : null,
     successCount,
     totalCount,
   }
@@ -838,7 +860,7 @@ const createLatencyDetailsTip = () => {
       ? formatSharedMetricsAvailability(sharedMetrics)
       : availabilityStats.availability === null
         ? '24h可用率: --'
-        : `24h可用率: ${availabilityStats.availability.toFixed(1)}% · ${availabilityStats.successCount}/${availabilityStats.totalCount}`
+        : `24h可用率: ${availabilityStats.availability.toFixed(1)}%`
     availability.title = sharedMetrics
       ? sharedMetricsResolution?.usesResolvedNode
         ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
@@ -850,8 +872,11 @@ const createLatencyDetailsTip = () => {
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
     coverage.textContent = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · 样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
-      : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · 本机缓存`
+      ? `${formatMetricStartAt(sharedMetrics.firstSampleAt)} · 24h样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
+      : `${formatMetricStartAt(availabilityStats.firstSampleAt)} · 本机缓存 ${availabilityStats.successCount}/${availabilityStats.totalCount}`
+    coverage.title = sharedMetrics
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricLastAt(sharedMetrics.lastSampleAt)}`
+      : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · ${formatMetricLastAt(availabilityStats.lastSampleAt)}`
     availabilityMain.append(availability)
     if (failure.textContent) {
       availabilityMain.append(failure)

@@ -67,8 +67,12 @@ test('stores probe samples and aggregates them by node', () => {
   assert.equal(metrics['HK-01'].lastSuccessAt, at(0))
   assert.equal(metrics['HK-01'].lastFailureAt, at(5))
   assert.equal(metrics['HK-01'].coverageSeconds, 5 * 60)
+  assert.equal(metrics['HK-01'].firstSampleAt, at(0))
+  assert.equal(metrics['HK-01'].lastSampleAt, at(5))
   assert.equal(metrics['JP-01'].availability, 1)
   assert.equal(metrics['JP-01'].lastDelay, 120)
+  assert.equal(metrics['JP-01'].firstSampleAt, at(10))
+  assert.equal(metrics['JP-01'].lastSampleAt, at(10))
 
   storage.close()
 })
@@ -119,6 +123,8 @@ test('aggregates delay ranges from successful samples only', () => {
   assert.equal(metrics.minDelay, 99)
   assert.equal(metrics.maxDelay, 200)
   assert.equal(metrics.lastDelay, 99)
+  assert.equal(metrics.firstSampleAt, at(0))
+  assert.equal(metrics.lastSampleAt, at(15))
   assert.equal(metrics.lastSuccessAt, at(15))
   assert.equal(metrics.lastFailureAt, at(10))
 

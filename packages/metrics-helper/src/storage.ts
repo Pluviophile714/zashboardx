@@ -230,6 +230,8 @@ export class MetricsStorage {
         Number.isFinite(firstTimestamp) && Number.isFinite(lastTimestamp)
           ? Math.max(0, Math.round((lastTimestamp - firstTimestamp) / 1000))
           : 0,
+      firstSampleAt: row.first_timestamp,
+      lastSampleAt: row.last_timestamp,
       sampleCount,
       successCount,
       failureCount,

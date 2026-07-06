@@ -77,23 +77,40 @@ test('serves health and node metrics as JSON', async () => {
     const nodesResponse = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
     const nodesBody = (await nodesResponse.json()) as {
       windowSeconds: number
-      nodes: Record<string, { availability: number | null; sampleCount: number }>
+      nodes: Record<
+        string,
+        {
+          availability: number | null
+          firstSampleAt: string | null
+          lastSampleAt: string | null
+          sampleCount: number
+        }
+      >
     }
 
     assert.equal(nodesResponse.status, 200)
     assert.equal(nodesBody.windowSeconds, 24 * 60 * 60)
     assert.equal(nodesBody.nodes['HK-01'].availability, 1)
+    assert.equal(nodesBody.nodes['HK-01'].firstSampleAt, at(0))
+    assert.equal(nodesBody.nodes['HK-01'].lastSampleAt, at(0))
     assert.equal(nodesBody.nodes['HK-01'].sampleCount, 1)
 
     const nodeResponse = await fetch(`${baseUrl}/api/metrics/nodes/HK-01?window=24h`)
     const nodeBody = (await nodeResponse.json()) as {
       name: string
-      metrics: { availability: number | null; sampleCount: number } | null
+      metrics: {
+        availability: number | null
+        firstSampleAt: string | null
+        lastSampleAt: string | null
+        sampleCount: number
+      } | null
     }
 
     assert.equal(nodeResponse.status, 200)
     assert.equal(nodeBody.name, 'HK-01')
     assert.equal(nodeBody.metrics?.availability, 1)
+    assert.equal(nodeBody.metrics?.firstSampleAt, at(0))
+    assert.equal(nodeBody.metrics?.lastSampleAt, at(0))
   } finally {
     server.close()
     storage.close()

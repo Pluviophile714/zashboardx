@@ -1,6 +1,8 @@
 export type ProxyMetricsNode = {
   availability: number | null
   coverageSeconds: number
+  firstSampleAt: string | null
+  lastSampleAt: string | null
   sampleCount: number
   successCount: number
   failureCount: number
@@ -18,6 +20,50 @@ export type ProxyMetricsResponse = {
   windowSeconds: number
   generatedAt: string
   nodes: Record<string, ProxyMetricsNode>
+}
+
+const parseTimestamp = (timestamp?: string | null) => {
+  const parsed = timestamp ? Date.parse(timestamp) : Number.NaN
+
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const maxTimestamp = (...timestamps: (string | null | undefined)[]) => {
+  const parsed = timestamps
+    .map(parseTimestamp)
+    .filter((timestamp): timestamp is number => timestamp !== null)
+
+  return parsed.length ? Math.max(...parsed) : null
+}
+
+const normalizeMetricsNode = (node: ProxyMetricsNode, generatedAt: string): ProxyMetricsNode => {
+  const explicitFirstSampleAt = parseTimestamp(node.firstSampleAt)
+  const explicitLastSampleAt = parseTimestamp(node.lastSampleAt)
+  const fallbackLastSampleAt =
+    explicitLastSampleAt ??
+    maxTimestamp(node.lastSuccessAt, node.lastFailureAt) ??
+    (node.sampleCount ? parseTimestamp(generatedAt) : null)
+  const fallbackFirstSampleAt =
+    explicitFirstSampleAt ??
+    (fallbackLastSampleAt !== null && node.sampleCount
+      ? Math.max(0, fallbackLastSampleAt - Math.max(0, node.coverageSeconds) * 1000)
+      : null)
+
+  return {
+    ...node,
+    firstSampleAt:
+      explicitFirstSampleAt !== null
+        ? node.firstSampleAt
+        : fallbackFirstSampleAt === null
+          ? null
+          : new Date(fallbackFirstSampleAt).toISOString(),
+    lastSampleAt:
+      explicitLastSampleAt !== null
+        ? node.lastSampleAt
+        : fallbackLastSampleAt === null
+          ? null
+          : new Date(fallbackLastSampleAt).toISOString(),
+  }
 }
 
 export const fetchProxyMetricsHelperAPI = async (
@@ -43,10 +89,17 @@ export const fetchProxyMetricsHelperAPI = async (
       return null
     }
 
+    const generatedAt = data.generatedAt || new Date().toISOString()
+
     return {
       windowSeconds: Number(data.windowSeconds) || 24 * 60 * 60,
-      generatedAt: data.generatedAt || new Date().toISOString(),
-      nodes: data.nodes,
+      generatedAt,
+      nodes: Object.fromEntries(
+        Object.entries(data.nodes).map(([name, node]) => [
+          name,
+          normalizeMetricsNode(node as ProxyMetricsNode, generatedAt),
+        ]),
+      ),
     }
   } catch {
     return null
