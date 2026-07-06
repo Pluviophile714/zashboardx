@@ -106,7 +106,12 @@ export class MihomoClient {
       .filter((name) => {
         const proxy = proxies[name]
 
-        return !groupNames.has(name) && !isGroupProxy(proxy) && !isBuiltinProxy(name, proxy)
+        return (
+          Boolean(proxy) &&
+          !groupNames.has(name) &&
+          !isGroupProxy(proxy) &&
+          !isBuiltinProxy(name, proxy)
+        )
       })
       .map((name) => {
         const historySamples = toHistorySamples(name, proxies[name], testUrl)

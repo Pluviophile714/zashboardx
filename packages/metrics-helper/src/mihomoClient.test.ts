@@ -23,7 +23,7 @@ test('discovers leaf proxy nodes from mihomo proxy groups', async () => {
         GLOBAL: {
           name: 'GLOBAL',
           type: 'Selector',
-          all: ['Auto', 'HK-01', 'DIRECT', 'REJECT'],
+          all: ['Auto', 'HK-01', 'DIRECT', 'REJECT', 'STALE-01'],
         },
         Auto: {
           name: 'Auto',
