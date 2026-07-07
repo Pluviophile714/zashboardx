@@ -134,11 +134,74 @@ test('maps selected group history to leaf nodes missing from top-level proxies',
   })
 
   const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+  const leaf = nodes.find((node) => node.name === 'HK-01')
 
-  assert.equal(nodes.length, 1)
-  assert.equal(nodes[0].name, 'HK-01')
-  assert.equal(nodes[0].type, null)
-  assert.deepEqual(nodes[0].historySamples, [
+  assert.equal(leaf?.type, null)
+  assert.deepEqual(leaf?.historySamples, [
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:00:00.000Z',
+      delay: 58,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:05:00.000Z',
+      delay: null,
+      success: false,
+      errorType: 'history_failed',
+    },
+  ])
+})
+
+test('keeps selected group history as group metrics as well as leaf metrics', async () => {
+  const fetchMock: typeof fetch = async () =>
+    jsonResponse({
+      proxies: {
+        Manual: {
+          name: 'Manual',
+          type: 'Selector',
+          all: ['HK-01'],
+          now: 'HK-01',
+          history: [
+            { time: '2026-07-06T03:00:00.000Z', delay: 58 },
+            { time: '2026-07-06T03:05:00.000Z', delay: 0 },
+          ],
+        },
+      },
+    })
+  const client = new MihomoClient({
+    baseUrl: 'http://mihomo.example:9090',
+    secret: '',
+    fetchImpl: fetchMock,
+  })
+
+  const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+  const group = nodes.find((node) => node.name === 'Manual')
+  const leaf = nodes.find((node) => node.name === 'HK-01')
+
+  assert.equal(group?.type, 'Selector')
+  assert.equal(leaf?.type, null)
+  assert.deepEqual(group?.historySamples, [
+    {
+      nodeName: 'Manual',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:00:00.000Z',
+      delay: 58,
+      success: true,
+    },
+    {
+      nodeName: 'Manual',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:05:00.000Z',
+      delay: null,
+      success: false,
+      errorType: 'history_failed',
+    },
+  ])
+  assert.deepEqual(leaf?.historySamples, [
     {
       nodeName: 'HK-01',
       testUrl: 'https://www.gstatic.com/generate_204',

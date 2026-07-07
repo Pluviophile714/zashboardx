@@ -124,6 +124,24 @@ export class MihomoClient {
       }
     }
 
+    for (const [name, proxy] of Object.entries(proxies)) {
+      if (!isGroupProxy(proxy) || isBuiltinProxy(name, proxy)) {
+        continue
+      }
+
+      const historySamples = toHistorySamples(name, proxy, testUrl)
+
+      if (!historySamples?.length) {
+        continue
+      }
+
+      discovered.set(name, {
+        name,
+        type: proxy.type ?? null,
+        historySamples,
+      })
+    }
+
     for (const proxy of Object.values(proxies)) {
       if (!isGroupProxy(proxy) || !proxy.now || !proxy.all?.includes(proxy.now)) {
         continue
@@ -174,7 +192,9 @@ export class MihomoClient {
         const proxy = proxies[node.name]
 
         return (
-          !groupNames.has(node.name) && !isGroupProxy(proxy) && !isBuiltinProxy(node.name, proxy)
+          !isBuiltinProxy(node.name, proxy) &&
+          (!groupNames.has(node.name) || Boolean(node.historySamples?.length)) &&
+          (!isGroupProxy(proxy) || Boolean(node.historySamples?.length))
         )
       })
       .sort((prev, next) => prev.name.localeCompare(next.name, 'zh-Hans-CN'))

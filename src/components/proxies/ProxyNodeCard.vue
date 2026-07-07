@@ -382,7 +382,7 @@ const formatMetricTimestamp = (timestamp?: string | number | null) => {
 }
 
 const formatMetricStartAt = (timestamp?: string | number | null) =>
-  `开始 ${formatMetricTimestamp(timestamp)}`
+  `24h首样本 ${formatMetricTimestamp(timestamp)}`
 
 const formatMetricLastAt = (timestamp?: string | number | null) =>
   `最后 ${formatMetricTimestamp(timestamp)}`
@@ -525,9 +525,9 @@ const getSharedMetricsResolution = () => {
   const resolvedName = getNowProxyNodeName(props.name)
   const smartOutbound = getSmartOutbound(resolvedName || props.name) || getSmartOutbound(props.name)
 
+  addName(props.name)
   addName(smartOutbound)
   addName(resolvedName !== props.name ? resolvedName : '')
-  addName(props.name)
 
   for (const name of names) {
     const metrics = proxyMetricsMap.value[name]
@@ -872,7 +872,7 @@ const createLatencyDetailsTip = () => {
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
     coverage.textContent = sharedMetrics
-      ? `${formatMetricStartAt(sharedMetrics.firstSampleAt)} · 24h样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
+      ? `${formatMetricStartAt(sharedMetrics.firstSampleAt)} · 样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
       : `${formatMetricStartAt(availabilityStats.firstSampleAt)} · 本机缓存 ${availabilityStats.successCount}/${availabilityStats.totalCount}`
     coverage.title = sharedMetrics
       ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricLastAt(sharedMetrics.lastSampleAt)}`
