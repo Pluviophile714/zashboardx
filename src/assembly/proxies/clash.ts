@@ -6,6 +6,7 @@ import {
   fetchProxyGroupLatencyAPI,
   fetchProxyLatencyAPI,
   fetchProxyProviderAPI,
+  proxyProviderHealthCheckAPI,
   selectProxyAPI,
 } from '@/api/clash'
 import { postProxyMetricsSamplesAPI } from '@/api/metricsHelper'
@@ -39,6 +40,13 @@ import {
 } from './index'
 
 let fetchTime = 0
+const providerLatencyCache = new Map<
+  string,
+  {
+    data: Record<string, number>
+    expiresAt: number
+  }
+>()
 
 export const fetchProxies = async () => {
   const nowTime = Date.now()
@@ -133,8 +141,38 @@ export const handlerProxySelect = async (proxyGroupName: string, proxyName: stri
   fetchProxies()
 }
 
+const getProviderNameByProxyName = (proxyName: string) =>
+  proxyProviederList.value.find((provider) =>
+    provider.proxies.some((proxy) => proxy.name === proxyName),
+  )?.name
+
+const fetchProviderLatencyResult = async (providerName: string) => {
+  const cached = providerLatencyCache.get(providerName)
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data
+  }
+
+  const { data } = await proxyProviderHealthCheckAPI(providerName)
+
+  providerLatencyCache.set(providerName, {
+    data,
+    expiresAt: Date.now() + 5000,
+  })
+
+  return data
+}
+
+const createLatencyResponse = (delay: number) => ({
+  data: {
+    delay,
+  },
+  status: 200,
+})
+
 const latencyTestForSingle = async (proxyName: string, url: string, timeout: number) => {
   const now = getNowProxyNodeName(proxyName)
+  const targetName = independentLatencyTest.value ? proxyName : now
 
   if (IPv6test.value) {
     try {
@@ -146,7 +184,21 @@ const latencyTestForSingle = async (proxyName: string, url: string, timeout: num
     }
   }
 
-  return await fetchProxyLatencyAPI(independentLatencyTest.value ? proxyName : now, url, timeout)
+  const res = await fetchProxyLatencyAPI(targetName, url, timeout)
+
+  if (res.status === 200) {
+    return res
+  }
+
+  const providerName = getProviderNameByProxyName(targetName)
+
+  if (!providerName) {
+    return res
+  }
+
+  const providerLatencyResult = await fetchProviderLatencyResult(providerName)
+
+  return createLatencyResponse(providerLatencyResult[targetName] ?? NOT_CONNECTED)
 }
 
 const getLatencyTestTargetName = (proxyName: string) =>
