@@ -156,6 +156,71 @@ test('maps selected group history to leaf nodes missing from top-level proxies',
   ])
 })
 
+test('maps provider proxy history to nodes missing from top-level proxies', async () => {
+  const fetchMock: typeof fetch = async (input) => {
+    const url = new URL(String(input))
+
+    if (url.pathname === '/providers/proxies') {
+      return jsonResponse({
+        providers: {
+          main: {
+            name: 'main',
+            vehicleType: 'HTTP',
+            proxies: [
+              {
+                name: 'HK-07',
+                type: 'Trojan',
+                history: [
+                  { time: '2026-07-07T02:00:00.000Z', delay: 63 },
+                  { time: '2026-07-07T02:05:00.000Z', delay: 0 },
+                ],
+              },
+            ],
+          },
+        },
+      })
+    }
+
+    return jsonResponse({
+      proxies: {
+        Manual: {
+          name: 'Manual',
+          type: 'Selector',
+          all: ['HK-07'],
+        },
+      },
+    })
+  }
+  const client = new MihomoClient({
+    baseUrl: 'http://mihomo.example:9090',
+    secret: '',
+    fetchImpl: fetchMock,
+  })
+
+  const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+  const providerNode = nodes.find((node) => node.name === 'HK-07')
+
+  assert.equal(providerNode?.type, 'Trojan')
+  assert.equal(providerNode?.probeable, false)
+  assert.deepEqual(providerNode?.historySamples, [
+    {
+      nodeName: 'HK-07',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-07T02:00:00.000Z',
+      delay: 63,
+      success: true,
+    },
+    {
+      nodeName: 'HK-07',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-07T02:05:00.000Z',
+      delay: null,
+      success: false,
+      errorType: 'history_failed',
+    },
+  ])
+})
+
 test('keeps selected group history as group metrics as well as leaf metrics', async () => {
   const fetchMock: typeof fetch = async () =>
     jsonResponse({

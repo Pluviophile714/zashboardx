@@ -66,7 +66,10 @@ export class ProbeRunner {
 
         const latestSampleAt = this.#storage.getLatestSampleTimestamp(node.name)
 
-        if (latestSampleAt === null || nowMs - latestSampleAt > staleMs) {
+        if (
+          node.probeable !== false &&
+          (latestSampleAt === null || nowMs - latestSampleAt > staleMs)
+        ) {
           fallbackNodes.push(node)
         }
       }

@@ -13,6 +13,7 @@ export type DiscoveredProxyNode = {
   name: string
   type: string | null
   historySamples?: ProbeSample[]
+  probeable?: boolean
 }
 
 export type NodeMetrics = {

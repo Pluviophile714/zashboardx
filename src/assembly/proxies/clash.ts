@@ -152,25 +152,35 @@ const latencyTestForSingle = async (proxyName: string, url: string, timeout: num
 const getLatencyTestTargetName = (proxyName: string) =>
   independentLatencyTest.value ? proxyName : getNowProxyNodeName(proxyName)
 
-const postFrontendLatencySample = (
-  proxyName: string,
+const postFrontendLatencySamples = (
+  latencyResults: Record<string, number>,
   url: string,
-  delay: number,
   timestamp = new Date().toISOString(),
 ) => {
-  const success = delay > NOT_CONNECTED
+  const samples = Object.entries(latencyResults).map(([proxyName, delay]) => {
+    const success = delay > NOT_CONNECTED
 
-  void postProxyMetricsSamplesAPI([
-    {
+    return {
       delay: success ? delay : null,
       errorType: success ? undefined : 'frontend_failed',
       nodeName: getLatencyTestTargetName(proxyName),
       success,
       testUrl: url,
       timestamp,
-    },
-  ])
+    }
+  })
+
+  if (samples.length > 0) {
+    void postProxyMetricsSamplesAPI(samples)
+  }
 }
+
+const postFrontendLatencySample = (
+  proxyName: string,
+  url: string,
+  delay: number,
+  timestamp = new Date().toISOString(),
+) => postFrontendLatencySamples({ [proxyName]: delay }, url, timestamp)
 
 const getNameForNotification = (name: string, url: string) => {
   if (independentLatencyTest.value) {
@@ -299,7 +309,8 @@ export const proxyGroupLatencyTest = async (proxyGroupName: string) => {
       })
     }
   }
-  await fetchProxyGroupLatencyAPI(proxyGroupName, url, timeout)
+  const { data: latencyResult } = await fetchProxyGroupLatencyAPI(proxyGroupName, url, timeout)
+  postFrontendLatencySamples(latencyResult, url)
   await fetchProxies()
 
   const total = all.length

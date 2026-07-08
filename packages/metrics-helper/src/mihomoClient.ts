@@ -21,6 +21,16 @@ type ProxiesResponse = {
   proxies?: Record<string, MihomoProxy>
 }
 
+type ProxyProvider = {
+  name?: string
+  vehicleType?: string
+  proxies?: MihomoProxy[]
+}
+
+type ProxyProvidersResponse = {
+  providers?: Record<string, ProxyProvider>
+}
+
 const builtinNames = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'GLOBAL', 'COMPATIBLE'])
 const builtinTypes = new Set(['direct', 'reject', 'rejectdrop', 'compatible'])
 
@@ -90,9 +100,25 @@ export class MihomoClient {
 
   async discoverProxyNodes(testUrl?: string): Promise<DiscoveredProxyNode[]> {
     const data = await this.#requestJson<ProxiesResponse>('/proxies')
+    const providerData =
+      (await this.#requestOptionalJson<ProxyProvidersResponse>('/providers/proxies')) ?? {}
     const proxies = data.proxies ?? {}
+    const providerProxies = new Map<string, MihomoProxy>()
     const groupNames = new Set<string>()
     const candidateNames = new Set<string>()
+
+    for (const provider of Object.values(providerData.providers ?? {})) {
+      if (provider.name === 'default' || provider.vehicleType === 'Compatible') {
+        continue
+      }
+
+      for (const proxy of provider.proxies ?? []) {
+        if (proxy.name && !isBuiltinProxy(proxy.name, proxy)) {
+          providerProxies.set(proxy.name, proxy)
+          candidateNames.add(proxy.name)
+        }
+      }
+    }
 
     for (const [name, proxy] of Object.entries(proxies)) {
       if (isGroupProxy(proxy)) {
@@ -106,7 +132,9 @@ export class MihomoClient {
     const discovered = new Map<string, DiscoveredProxyNode>()
 
     for (const name of candidateNames) {
-      const proxy = proxies[name]
+      const topLevelProxy = proxies[name]
+      const providerProxy = providerProxies.get(name)
+      const proxy = topLevelProxy ?? providerProxy
 
       if (
         Boolean(proxy) &&
@@ -119,6 +147,7 @@ export class MihomoClient {
         discovered.set(name, {
           name,
           type: proxy?.type ?? null,
+          ...(topLevelProxy ? {} : { probeable: false }),
           ...(historySamples ? { historySamples } : {}),
         })
       }
@@ -161,7 +190,8 @@ export class MihomoClient {
 
       const node = discovered.get(name) ?? {
         name,
-        type: proxies[name]?.type ?? null,
+        type: proxies[name]?.type ?? providerProxies.get(name)?.type ?? null,
+        ...(proxies[name] ? {} : { probeable: false }),
       }
 
       discovered.set(name, {
@@ -172,7 +202,7 @@ export class MihomoClient {
 
     return [...discovered.values()]
       .filter((node) => {
-        const proxy = proxies[node.name]
+        const proxy = proxies[node.name] ?? providerProxies.get(node.name)
 
         if (proxy) {
           return true
@@ -181,7 +211,7 @@ export class MihomoClient {
         return Boolean(node.historySamples?.length)
       })
       .map((node) => {
-        const proxy = proxies[node.name]
+        const proxy = proxies[node.name] ?? providerProxies.get(node.name)
 
         return {
           ...node,
@@ -189,7 +219,7 @@ export class MihomoClient {
         }
       })
       .filter((node) => {
-        const proxy = proxies[node.name]
+        const proxy = proxies[node.name] ?? providerProxies.get(node.name)
 
         return (
           !isBuiltinProxy(node.name, proxy) &&
@@ -250,6 +280,14 @@ export class MihomoClient {
     }
 
     return (await response.json()) as T
+  }
+
+  async #requestOptionalJson<T>(path: string): Promise<T | null> {
+    try {
+      return await this.#requestJson<T>(path)
+    } catch {
+      return null
+    }
   }
 
   #headers() {
