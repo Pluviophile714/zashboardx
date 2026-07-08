@@ -7,6 +7,7 @@ export type MetricsHelperConfig = {
   probeConcurrency: number
   probeTimeoutMs: number
   probeTestUrl: string
+  fallbackProbeStaleSeconds: number
   probeWindowHours: number
   retentionDays: number
   databasePath: string
@@ -35,6 +36,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): MetricsHelperC
   probeConcurrency: parseInteger(env.PROBE_CONCURRENCY, 8, 1),
   probeTimeoutMs: parseInteger(env.PROBE_TIMEOUT_MS, 5000, 500),
   probeTestUrl: env.PROBE_TEST_URL || 'https://www.gstatic.com/generate_204',
+  fallbackProbeStaleSeconds: parseInteger(env.FALLBACK_PROBE_STALE_SECONDS, 120, 30),
   probeWindowHours: parseInteger(env.PROBE_WINDOW_HOURS, 24, 1),
   retentionDays: parseInteger(env.METRICS_RETENTION_DAYS, 7, 1),
   databasePath: env.METRICS_DATABASE_PATH || '/data/metrics.sqlite',

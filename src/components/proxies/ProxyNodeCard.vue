@@ -104,7 +104,7 @@ import {
   proxySortType,
   truncateProxyName,
 } from '@/store/settings'
-import { proxyMetricsMap } from '@/store/proxyMetrics'
+import { proxyMetricsMap, proxyMetricsUpdatedAt } from '@/store/proxyMetrics'
 import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import { twMerge } from 'tailwind-merge'
@@ -116,7 +116,6 @@ import { getSmartOutbound } from './smartOutbound'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
-const LATENCY_AVAILABILITY_WINDOW = 24 * 60 * 60 * 1000
 const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
 const LATENCY_AVAILABILITY_MIN_SAMPLES = 12
 const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
@@ -381,11 +380,27 @@ const formatMetricTimestamp = (timestamp?: string | number | null) => {
   return date.format(format)
 }
 
-const formatMetricStartAt = (timestamp?: string | number | null) =>
-  `24h首样本 ${formatMetricTimestamp(timestamp)}`
+const formatMetricSampleRange = (
+  source: string,
+  firstTimestamp?: string | number | null,
+  lastTimestamp?: string | number | null,
+) => {
+  const first = formatMetricTimestamp(firstTimestamp)
+  const last = formatMetricTimestamp(lastTimestamp)
 
-const formatMetricLastAt = (timestamp?: string | number | null) =>
-  `最后 ${formatMetricTimestamp(timestamp)}`
+  if (first === '--' && last === '--') {
+    return `${source}首样本 -- · 最后 --`
+  }
+
+  if (first === last) {
+    return `${source}样本 ${first}`
+  }
+
+  return `${source}首样本 ${first} · 最后 ${last}`
+}
+
+const formatMetricUpdatedAt = (timestamp?: string | number | null) =>
+  `更新 ${formatMetricTimestamp(timestamp)}`
 
 const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
   const recent = history.slice(-windowSize)
@@ -412,76 +427,16 @@ const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_
   }
 }
 
-const getLatencyAvailabilityStats = (history: { delay: number; time?: string }[]) => {
-  const since = Date.now() - LATENCY_AVAILABILITY_WINDOW
-  let firstTimestamp = Number.POSITIVE_INFINITY
-  let lastTimestamp = 0
-  let successCount = 0
-  let totalCount = 0
-
-  for (const item of history) {
-    const timestamp = item.time ? Date.parse(item.time) : Number.NaN
-
-    if (!Number.isFinite(timestamp) || timestamp < since) continue
-
-    totalCount += 1
-    if (item.delay > NOT_CONNECTED) {
-      successCount += 1
-    }
-    firstTimestamp = Math.min(firstTimestamp, timestamp)
-    lastTimestamp = Math.max(lastTimestamp, timestamp)
-  }
-
-  const failedCount = totalCount - successCount
-  const coverage = totalCount > 1 ? lastTimestamp - firstTimestamp : 0
-  const availability = totalCount ? Math.round((successCount / totalCount) * 1000) / 10 : null
-  const isInsufficient =
-    totalCount > 0 &&
-    (totalCount < LATENCY_AVAILABILITY_MIN_SAMPLES || coverage < LATENCY_AVAILABILITY_MIN_COVERAGE)
-
-  return {
-    availability,
-    coverage,
-    failedCount,
-    firstSampleAt: totalCount && Number.isFinite(firstTimestamp) ? firstTimestamp : null,
-    isInsufficient,
-    lastSampleAt: totalCount && Number.isFinite(lastTimestamp) ? lastTimestamp : null,
-    successCount,
-    totalCount,
-  }
-}
-
-const getLatencyAvailabilityNote = (stats: ReturnType<typeof getLatencyAvailabilityStats>) => {
-  if (stats.totalCount === 0) {
-    return {
-      className: 'text-base-content/45',
-      text: '暂无记录',
-    }
-  }
-
-  if (stats.failedCount > 0) {
-    return {
-      className: 'text-high-latency',
-      text: `失败 ${stats.failedCount} 次`,
-    }
-  }
-
-  if (stats.isInsufficient) {
-    return {
-      className: 'text-medium-latency',
-      text: '样本不足',
-    }
-  }
-
-  return {
-    className: 'text-base-content/45',
-    text: '',
-  }
-}
-
 const formatSharedMetricsAvailability = (metrics: (typeof proxyMetricsMap.value)[string]) => {
-  if (metrics.availability === null) {
+  if (metrics.availability === null || !metrics.sampleCount) {
     return '24h可用率: --'
+  }
+
+  if (
+    metrics.sampleCount < LATENCY_AVAILABILITY_MIN_SAMPLES ||
+    metrics.coverageSeconds < LATENCY_AVAILABILITY_MIN_COVERAGE / 1000
+  ) {
+    return '24h可用率: 样本不足'
   }
 
   return `24h可用率: ${(metrics.availability * 100).toFixed(1)}%`
@@ -505,7 +460,7 @@ const getSharedMetricsNote = (metrics: (typeof proxyMetricsMap.value)[string]) =
   if (metrics.sampleCount < LATENCY_AVAILABILITY_MIN_SAMPLES || metrics.coverageSeconds < 3600) {
     return {
       className: 'text-medium-latency',
-      text: '样本不足',
+      text: '',
     }
   }
 
@@ -844,44 +799,50 @@ const createLatencyDetailsTip = () => {
 
     const sharedMetricsResolution = getSharedMetricsResolution()
     const sharedMetrics = sharedMetricsResolution?.metrics
-    const availabilityStats = getLatencyAvailabilityStats(availabilityHistory)
     const availabilityLine = document.createElement('div')
     const availabilityMain = document.createElement('div')
     const coverage = document.createElement('div')
+    const sampleDetail = document.createElement('div')
     const availability = document.createElement('span')
     const failure = document.createElement('span')
     const availabilityNote = sharedMetrics
       ? getSharedMetricsNote(sharedMetrics)
-      : getLatencyAvailabilityNote(availabilityStats)
+      : {
+          className: 'text-medium-latency',
+          text: '采集中',
+        }
 
     availabilityLine.className = 'mt-1 grid gap-0.5 text-xs text-base-content/65'
     availabilityMain.className = 'flex items-center justify-between gap-2'
     availability.textContent = sharedMetrics
       ? formatSharedMetricsAvailability(sharedMetrics)
-      : availabilityStats.availability === null
-        ? '24h可用率: --'
-        : `24h可用率: ${availabilityStats.availability.toFixed(1)}%`
+      : '24h可用率: --'
     availability.title = sharedMetrics
       ? sharedMetricsResolution?.usesResolvedNode
         ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
         : '基于 R5S 指标助手长期采集记录'
-      : '基于当前浏览器本地测速历史，不代表 R5S 全天候监控'
+      : 'R5S 指标助手暂无该节点记录，本机近30次只用于短期状态'
     failure.className = availabilityNote.className
     failure.textContent = availabilityNote.text
     coverage.className = compact
       ? 'text-[10px] text-base-content/45'
       : 'text-[11px] text-base-content/45'
+    sampleDetail.className = coverage.className
     coverage.textContent = sharedMetrics
-      ? `${formatMetricStartAt(sharedMetrics.firstSampleAt)} · 样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount}`
-      : `${formatMetricStartAt(availabilityStats.firstSampleAt)} · 本机缓存 ${availabilityStats.successCount}/${availabilityStats.totalCount}`
+      ? formatMetricSampleRange('R5S', sharedMetrics.firstSampleAt, sharedMetrics.lastSampleAt)
+      : formatMetricSampleRange('R5S', null, null)
+    sampleDetail.textContent = sharedMetrics
+      ? `R5S样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+      : `R5S样本 0/0 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
     coverage.title = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricLastAt(sharedMetrics.lastSampleAt)}`
-      : `${formatLatencyAvailabilityCoverage(availabilityStats.coverage, availabilityStats.totalCount)} · ${formatMetricLastAt(availabilityStats.lastSampleAt)}`
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+      : `等待 R5S 指标助手采集 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+    sampleDetail.title = coverage.title
     availabilityMain.append(availability)
     if (failure.textContent) {
       availabilityMain.append(failure)
     }
-    availabilityLine.append(availabilityMain, coverage)
+    availabilityLine.append(availabilityMain, coverage, sampleDetail)
     chart.append(availabilityLine)
     root.append(chart)
   }

@@ -1,7 +1,7 @@
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import type { MetricsStorage } from './storage.js'
-import type { HelperHealth } from './types.js'
+import type { HelperHealth, ProbeSample } from './types.js'
 
 type MetricsServerOptions = {
   storage: MetricsStorage
@@ -59,10 +59,93 @@ const sendStatus = (response: ServerResponse, statusCode: number, body: unknown)
   response.end(JSON.stringify(body))
 }
 
+const readJsonBody = async (request: IncomingMessage) =>
+  new Promise<unknown>((resolve, reject) => {
+    let body = ''
+
+    request.setEncoding('utf8')
+    request.on('data', (chunk: string) => {
+      body += chunk
+      if (body.length > 1024 * 1024) {
+        reject(new Error('body_too_large'))
+        request.destroy()
+      }
+    })
+    request.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {})
+      } catch {
+        reject(new Error('invalid_json'))
+      }
+    })
+    request.on('error', reject)
+  })
+
+const normalizePostedSample = (input: unknown): ProbeSample | null => {
+  if (!input || typeof input !== 'object') {
+    return null
+  }
+
+  const sample = input as Record<string, unknown>
+  const nodeName = typeof sample.nodeName === 'string' ? sample.nodeName.trim() : ''
+  const testUrl = typeof sample.testUrl === 'string' ? sample.testUrl.trim() : ''
+  const timestampValue = typeof sample.timestamp === 'string' ? sample.timestamp : ''
+  const timestampMs = Date.parse(timestampValue)
+  const delay =
+    typeof sample.delay === 'number'
+      ? sample.delay
+      : typeof sample.delay === 'string'
+        ? Number(sample.delay)
+        : Number.NaN
+
+  if (
+    !nodeName ||
+    nodeName.length > 512 ||
+    !testUrl ||
+    testUrl.length > 2048 ||
+    !Number.isFinite(timestampMs)
+  ) {
+    return null
+  }
+
+  const success = sample.success === undefined ? delay > 0 : sample.success === true
+  const normalizedDelay = success && Number.isFinite(delay) && delay > 0 ? Math.round(delay) : null
+  const errorType =
+    typeof sample.errorType === 'string' && sample.errorType.trim()
+      ? sample.errorType.trim().slice(0, 128)
+      : undefined
+
+  return {
+    nodeName,
+    testUrl,
+    timestamp: new Date(timestampMs).toISOString(),
+    delay: normalizedDelay,
+    success,
+    ...(success ? {} : { errorType: errorType ?? 'frontend_failed' }),
+  }
+}
+
+const extractPostedSamples = (body: unknown) => {
+  if (!body || typeof body !== 'object') {
+    return []
+  }
+
+  const rawSamples = (body as { samples?: unknown }).samples
+
+  if (!Array.isArray(rawSamples)) {
+    return []
+  }
+
+  return rawSamples
+    .slice(0, 1000)
+    .map(normalizePostedSample)
+    .filter((sample): sample is ProbeSample => sample !== null)
+}
+
 export const createMetricsServer = (options: MetricsServerOptions) =>
-  createServer((request, response) => {
+  createServer(async (request, response) => {
     response.setHeader('Access-Control-Allow-Origin', '*')
-    response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (request.method === 'OPTIONS') {
@@ -71,12 +154,36 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       return
     }
 
+    const url = new URL(request.url ?? '/', 'http://localhost')
+
+    if (request.method === 'POST' && url.pathname === '/api/metrics/samples') {
+      try {
+        const samples = extractPostedSamples(await readJsonBody(request))
+        let accepted = 0
+
+        for (const sample of samples) {
+          if (options.storage.insertProbeSample(sample)) {
+            accepted += 1
+          }
+        }
+
+        sendJson(response, {
+          accepted,
+          received: samples.length,
+        })
+      } catch (error) {
+        sendStatus(response, 400, {
+          error: error instanceof Error ? error.message : 'invalid_request',
+        })
+      }
+      return
+    }
+
     if (request.method !== 'GET') {
       sendStatus(response, 405, { error: 'method_not_allowed' })
       return
     }
 
-    const url = new URL(request.url ?? '/', 'http://localhost')
     const windowSeconds = parseWindowSeconds(
       url.searchParams.get('window'),
       options.defaultWindowSeconds,

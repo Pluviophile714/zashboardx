@@ -8,6 +8,7 @@ import {
   fetchProxyProviderAPI,
   selectProxyAPI,
 } from '@/api/clash'
+import { postProxyMetricsSamplesAPI } from '@/api/metricsHelper'
 import { disconnectByIdAPI } from '@/assembly/connections'
 import { GLOBAL, IPV6_TEST_URL, NOT_CONNECTED, PROXY_TYPE, SPEEDTEST_MODE } from '@/constant'
 import { getConnectionChains, isProxyGroup } from '@/helper'
@@ -148,6 +149,29 @@ const latencyTestForSingle = async (proxyName: string, url: string, timeout: num
   return await fetchProxyLatencyAPI(independentLatencyTest.value ? proxyName : now, url, timeout)
 }
 
+const getLatencyTestTargetName = (proxyName: string) =>
+  independentLatencyTest.value ? proxyName : getNowProxyNodeName(proxyName)
+
+const postFrontendLatencySample = (
+  proxyName: string,
+  url: string,
+  delay: number,
+  timestamp = new Date().toISOString(),
+) => {
+  const success = delay > NOT_CONNECTED
+
+  void postProxyMetricsSamplesAPI([
+    {
+      delay: success ? delay : null,
+      errorType: success ? undefined : 'frontend_failed',
+      nodeName: getLatencyTestTargetName(proxyName),
+      success,
+      testUrl: url,
+      timestamp,
+    },
+  ])
+}
+
 const getNameForNotification = (name: string, url: string) => {
   if (independentLatencyTest.value) {
     return `${name}\n@${url}`
@@ -162,6 +186,7 @@ export const proxyLatencyTest = async (
   timeout = speedtestTimeout.value,
 ) => {
   const res = await latencyTestForSingle(proxyName, url, timeout)
+  postFrontendLatencySample(proxyName, url, res.status === 200 ? res.data.delay : NOT_CONNECTED)
   await fetchProxies()
 
   if (res.status !== 200) {
@@ -175,14 +200,16 @@ export const proxyLatencyTest = async (
   }
 }
 
-const setHistory = (proxyName: string, delay: number) => {
+const setHistory = (proxyName: string, delay: number, url = speedtestUrlWithDefault.value) => {
   const history = getHistoryByName(proxyName)
   const now = new Date()
+  const timestamp = now.toISOString()
 
   history.push({
-    time: now.toISOString(),
+    time: timestamp,
     delay,
   })
+  postFrontendLatencySample(proxyName, url, delay, timestamp)
 }
 
 const TIP_KEY = 'testLatencyOneByOneWithTip'
@@ -203,9 +230,9 @@ const testLatencyOneByOneWithTip = async (
 
         if (res.status !== 200) {
           testFailed++
-          setHistory(name, NOT_CONNECTED)
+          setHistory(name, NOT_CONNECTED, url)
         } else {
-          setHistory(name, res.data.delay)
+          setHistory(name, res.data.delay, url)
         }
         testDone++
         showNotification({

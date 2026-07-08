@@ -96,6 +96,33 @@ export const hasDisplayHistoryByName = (proxyName: string, groupName?: string) =
   return !!getHistoryByName(proxyName, groupName)?.length
 }
 
+const coalesceLatencyHistory = (history: Proxy['history']) => {
+  const byTime = new Map<string, Proxy['history'][number]>()
+
+  for (const item of history) {
+    if (!item?.time) continue
+
+    const previous = byTime.get(item.time)
+
+    if (!previous) {
+      byTime.set(item.time, item)
+      continue
+    }
+
+    if (previous.delay <= NOT_CONNECTED || item.delay <= NOT_CONNECTED) {
+      byTime.set(item.time, {
+        ...item,
+        delay: NOT_CONNECTED,
+      })
+      continue
+    }
+
+    byTime.set(item.time, item.delay >= previous.delay ? item : previous)
+  }
+
+  return [...byTime.values()].sort((prev, next) => Date.parse(prev.time) - Date.parse(next.time))
+}
+
 export const getDisplayHistoryByName = (proxyName: string, groupName?: string, limit = 30) => {
   const key = getLatencyHistoryCacheKey(proxyName, groupName)
   const cachedHistory = latencyHistoryCache.value[key] ?? []
@@ -105,14 +132,8 @@ export const getDisplayHistoryByName = (proxyName: string, groupName?: string, l
     return cachedHistory.slice(-limit)
   }
 
-  const merged = [...cachedHistory, ...currentHistory]
+  const merged = coalesceLatencyHistory([...cachedHistory, ...currentHistory])
     .filter((item) => item?.time)
-    .sort((prev, next) => Date.parse(prev.time) - Date.parse(next.time))
-    .filter((item, index, list) => {
-      const next = list[index + 1]
-
-      return !next || item.time !== next.time || item.delay !== next.delay
-    })
     .slice(-limit)
 
   latencyHistoryCache.value[key] = merged

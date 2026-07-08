@@ -54,13 +54,19 @@ export class ProbeRunner {
     try {
       const nodes = await this.#client.discoverProxyNodes(this.#config.probeTestUrl)
       const fallbackNodes = []
+      const nowMs = Date.now()
+      const staleMs = this.#config.fallbackProbeStaleSeconds * 1000
 
       for (const node of nodes) {
         this.#storage.recordNode(node.name, node.type)
 
         if (node.historySamples?.length) {
           node.historySamples.forEach((sample) => this.#storage.insertProbeSample(sample))
-        } else {
+        }
+
+        const latestSampleAt = this.#storage.getLatestSampleTimestamp(node.name)
+
+        if (latestSampleAt === null || nowMs - latestSampleAt > staleMs) {
           fallbackNodes.push(node)
         }
       }

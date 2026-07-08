@@ -138,6 +138,28 @@ export class MetricsStorage {
     return row ? this.#nodeMetricsFromRow(row) : null
   }
 
+  getLatestSampleTimestamp(nodeName: string, testUrl?: string) {
+    const whereTestUrl = testUrl ? 'AND test_url = ?' : ''
+    const parameters = testUrl ? [nodeName, testUrl] : [nodeName]
+    const row = this.#db
+      .prepare(
+        `
+        SELECT MAX(timestamp) AS timestamp
+        FROM probe_samples
+        WHERE node_name = ? ${whereTestUrl}
+      `,
+      )
+      .get(...parameters) as { timestamp: string | null } | undefined
+
+    if (!row?.timestamp) {
+      return null
+    }
+
+    const timestamp = Date.parse(row.timestamp)
+
+    return Number.isFinite(timestamp) ? timestamp : null
+  }
+
   prune(retentionDays: number, nowMs = Date.now()) {
     const cutoff = new Date(nowMs - retentionDays * 24 * 60 * 60 * 1000).toISOString()
     const result = this.#db.prepare('DELETE FROM probe_samples WHERE timestamp < ?').run(cutoff)

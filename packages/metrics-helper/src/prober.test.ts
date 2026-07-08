@@ -40,6 +40,7 @@ const config: MetricsHelperConfig = {
   probeConcurrency: 2,
   probeTimeoutMs: 5000,
   probeTestUrl: 'https://www.gstatic.com/generate_204',
+  fallbackProbeStaleSeconds: 120,
   probeWindowHours: 24,
   retentionDays: 7,
   databasePath: ':memory:',
@@ -115,6 +116,52 @@ test('records mihomo history first and actively probes only nodes without histor
   assert.equal(metrics['JP-01'].lastDelay, 120)
   assert.equal(health.ok, true)
   assert.equal(health.lastProbeNodeCount, 2)
+
+  storage.close()
+})
+
+test('actively probes nodes whose mihomo history is stale', async () => {
+  const nowMs = Date.now()
+  const staleHistoryTime = new Date(nowMs - 10 * 60_000).toISOString()
+  const requestedDelayNodes: string[] = []
+  const fetchMock: typeof fetch = async (input) => {
+    const url = new URL(String(input))
+
+    if (url.pathname === '/proxies') {
+      return jsonResponse({
+        proxies: {
+          'HK-01': {
+            name: 'HK-01',
+            type: 'Shadowsocks',
+            history: [{ time: staleHistoryTime, delay: 88 }],
+          },
+        },
+      })
+    }
+
+    requestedDelayNodes.push(decodeURIComponent(url.pathname.split('/').at(-2) ?? ''))
+    return jsonResponse({ delay: 118 })
+  }
+  const storage = createStorage()
+  const health = createHealth()
+  const runner = new ProbeRunner({
+    client: new MihomoClient({
+      baseUrl: config.mihomoBaseUrl,
+      secret: '',
+      fetchImpl: fetchMock,
+    }),
+    storage,
+    config,
+    health,
+  })
+
+  await runner.runOnce()
+
+  const metrics = storage.getNodeMetrics(24 * 60 * 60, nowMs + 1000)
+
+  assert.deepEqual(requestedDelayNodes, ['HK-01'])
+  assert.equal(metrics['HK-01'].sampleCount, 2)
+  assert.equal(metrics['HK-01'].lastDelay, 118)
 
   storage.close()
 })

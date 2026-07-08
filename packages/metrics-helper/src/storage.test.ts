@@ -170,6 +170,33 @@ test('ignores duplicate probe samples from repeated scrapes', () => {
   storage.close()
 })
 
+test('finds latest sample timestamp across all test urls for a node', () => {
+  const storage = createStorage()
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/a',
+    timestamp: at(0),
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/b',
+    timestamp: at(5),
+    delay: 100,
+    success: true,
+  })
+
+  assert.equal(storage.getLatestSampleTimestamp('HK-01'), Date.parse(at(5)))
+  assert.equal(
+    storage.getLatestSampleTimestamp('HK-01', 'https://example.com/a'),
+    Date.parse(at(0)),
+  )
+
+  storage.close()
+})
+
 test('prunes samples older than retention days', () => {
   const storage = createStorage()
 

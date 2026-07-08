@@ -22,6 +22,18 @@ export type ProxyMetricsResponse = {
   nodes: Record<string, ProxyMetricsNode>
 }
 
+export type ProxyMetricsSample = {
+  nodeName: string
+  testUrl: string
+  timestamp: string
+  delay: number | null
+  success: boolean
+  errorType?: string
+}
+
+const proxyMetricsSampleQueue: ProxyMetricsSample[] = []
+let proxyMetricsSampleFlushTimer: ReturnType<typeof window.setTimeout> | undefined
+
 const parseTimestamp = (timestamp?: string | null) => {
   const parsed = timestamp ? Date.parse(timestamp) : Number.NaN
 
@@ -105,5 +117,66 @@ export const fetchProxyMetricsHelperAPI = async (
     return null
   } finally {
     window.clearTimeout(timeoutId)
+  }
+}
+
+const sendProxyMetricsSamplesAPI = async (samples: ProxyMetricsSample[], timeout = 3000) => {
+  if (!samples.length) {
+    return
+  }
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    await fetch('/api/metrics/samples', {
+      body: JSON.stringify({ samples }),
+      cache: 'no-store',
+      headers: {
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+      signal: controller.signal,
+    })
+  } catch {
+    // Metrics collection is best-effort; latency testing should never block on it.
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+const flushProxyMetricsSampleQueue = (timeout = 3000) => {
+  if (proxyMetricsSampleFlushTimer) {
+    window.clearTimeout(proxyMetricsSampleFlushTimer)
+    proxyMetricsSampleFlushTimer = undefined
+  }
+
+  const samples = proxyMetricsSampleQueue.splice(0, 1000)
+
+  void sendProxyMetricsSamplesAPI(samples, timeout)
+
+  if (proxyMetricsSampleQueue.length) {
+    proxyMetricsSampleFlushTimer = window.setTimeout(() => {
+      flushProxyMetricsSampleQueue(timeout)
+    }, 500)
+  }
+}
+
+export const postProxyMetricsSamplesAPI = async (samples: ProxyMetricsSample[], timeout = 3000) => {
+  if (!samples.length) {
+    return
+  }
+
+  proxyMetricsSampleQueue.push(...samples)
+
+  if (proxyMetricsSampleQueue.length >= 100) {
+    flushProxyMetricsSampleQueue(timeout)
+    return
+  }
+
+  if (!proxyMetricsSampleFlushTimer) {
+    proxyMetricsSampleFlushTimer = window.setTimeout(() => {
+      flushProxyMetricsSampleQueue(timeout)
+    }, 500)
   }
 }
