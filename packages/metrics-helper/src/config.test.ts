@@ -6,6 +6,8 @@ test('defaults to a short observer collection interval', () => {
   const config = loadConfig({} as NodeJS.ProcessEnv)
 
   assert.equal(config.probeIntervalSeconds, 30)
+  assert.equal(config.metricsCacheTtlSeconds, 10)
+  assert.equal(config.metricsCacheRefreshDebounceMs, 1500)
 })
 
 test('uses scrape interval as the preferred observer collection interval', () => {
@@ -23,4 +25,14 @@ test('keeps probe interval as a backward-compatible collection interval fallback
   } as NodeJS.ProcessEnv)
 
   assert.equal(config.probeIntervalSeconds, 120)
+})
+
+test('allows tuning metrics aggregation cache timing', () => {
+  const config = loadConfig({
+    METRICS_CACHE_REFRESH_DEBOUNCE_MS: '500',
+    METRICS_CACHE_TTL_SECONDS: '5',
+  } as NodeJS.ProcessEnv)
+
+  assert.equal(config.metricsCacheTtlSeconds, 5)
+  assert.equal(config.metricsCacheRefreshDebounceMs, 500)
 })

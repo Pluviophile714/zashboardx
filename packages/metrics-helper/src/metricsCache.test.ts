@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, test } from 'node:test'
+import { MetricsAggregationCache } from './metricsCache.js'
+import { MetricsStorage } from './storage.js'
+
+const tempDirs: string[] = []
+const at = (minute: number) => Date.UTC(2026, 6, 4, 0, minute, 0)
+
+const createStorage = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-cache-'))
+
+  tempDirs.push(dir)
+
+  const storage = new MetricsStorage(join(dir, 'metrics.sqlite'))
+
+  storage.init()
+
+  return storage
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('returns cached node metrics until the cache ttl expires', () => {
+  let nowMs = at(30)
+  const storage = createStorage()
+  const cache = new MetricsAggregationCache({
+    storage,
+    defaultWindowSeconds: 24 * 60 * 60,
+    ttlMs: 10_000,
+    refreshDebounceMs: 1500,
+    now: () => nowMs,
+  })
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: new Date(at(1)).toISOString(),
+    delay: 80,
+    success: true,
+  })
+
+  const first = cache.get()
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: new Date(at(2)).toISOString(),
+    delay: 82,
+    success: true,
+  })
+
+  nowMs += 5000
+  const cached = cache.get()
+
+  assert.equal(cached.nodes['HK-01'].sampleCount, 1)
+  assert.equal(cached.cacheGeneratedAt, first.cacheGeneratedAt)
+
+  nowMs += 6000
+  const refreshed = cache.get()
+
+  assert.equal(refreshed.nodes['HK-01'].sampleCount, 2)
+  assert.notEqual(refreshed.cacheGeneratedAt, first.cacheGeneratedAt)
+
+  cache.stop()
+  storage.close()
+})

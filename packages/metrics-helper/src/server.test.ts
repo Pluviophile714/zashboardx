@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
+import { MetricsAggregationCache } from './metricsCache.js'
 import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
@@ -182,6 +183,82 @@ test('accepts frontend latency samples and deduplicates repeated posts', async (
     assert.equal(nodeBody.metrics?.lastDelay, 121)
     assert.equal(nodeBody.metrics?.sampleCount, 1)
   } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('serves cached node metrics and refreshes cache after accepted frontend samples', async () => {
+  const storage = createStorage()
+  const metricsCache = new MetricsAggregationCache({
+    storage,
+    defaultWindowSeconds: 24 * 60 * 60,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+    now: () => Date.parse(at(30)),
+  })
+
+  metricsCache.refresh()
+
+  const server = createMetricsServer({
+    storage,
+    metricsCache,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const firstResponse = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
+    const firstBody = (await firstResponse.json()) as {
+      cached: boolean
+      cacheGeneratedAt: string
+      computeMs: number
+      nodes: Record<string, { sampleCount: number }>
+    }
+
+    assert.equal(firstBody.cached, true)
+    assert.equal(firstBody.nodes['HK-01'].sampleCount, 1)
+    assert.equal(firstBody.nodes['JP-01'], undefined)
+    assert.equal(typeof firstBody.cacheGeneratedAt, 'string')
+    assert.equal(typeof firstBody.computeMs, 'number')
+
+    await fetch(`${baseUrl}/api/metrics/samples`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        samples: [
+          {
+            nodeName: 'JP-01',
+            testUrl: 'https://www.gstatic.com/generate_204',
+            timestamp: at(5),
+            delay: 121,
+            success: true,
+          },
+        ],
+      }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const refreshedResponse = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
+    const refreshedBody = (await refreshedResponse.json()) as {
+      nodes: Record<string, { sampleCount: number }>
+    }
+
+    assert.equal(refreshedBody.nodes['JP-01'].sampleCount, 1)
+  } finally {
+    metricsCache.stop()
     server.close()
     storage.close()
   }

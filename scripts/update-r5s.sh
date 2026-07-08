@@ -28,6 +28,8 @@ write_stack_files() {
   PROBE_CONCURRENCY="$(read_env_value PROBE_CONCURRENCY "${PROBE_CONCURRENCY:-8}")"
   PROBE_TIMEOUT_MS="$(read_env_value PROBE_TIMEOUT_MS "${PROBE_TIMEOUT_MS:-5000}")"
   PROBE_TEST_URL="$(read_env_value PROBE_TEST_URL "${PROBE_TEST_URL:-https://www.gstatic.com/generate_204}")"
+  METRICS_CACHE_TTL_SECONDS="$(read_env_value METRICS_CACHE_TTL_SECONDS "${METRICS_CACHE_TTL_SECONDS:-10}")"
+  METRICS_CACHE_REFRESH_DEBOUNCE_MS="$(read_env_value METRICS_CACHE_REFRESH_DEBOUNCE_MS "${METRICS_CACHE_REFRESH_DEBOUNCE_MS:-1500}")"
 
   cat >"${APP_DIR}/.env" <<EOF
 PORT=${PORT}
@@ -40,6 +42,8 @@ PROBE_INTERVAL_SECONDS=${SCRAPE_INTERVAL_SECONDS}
 PROBE_CONCURRENCY=${PROBE_CONCURRENCY}
 PROBE_TIMEOUT_MS=${PROBE_TIMEOUT_MS}
 PROBE_TEST_URL=${PROBE_TEST_URL}
+METRICS_CACHE_TTL_SECONDS=${METRICS_CACHE_TTL_SECONDS}
+METRICS_CACHE_REFRESH_DEBOUNCE_MS=${METRICS_CACHE_REFRESH_DEBOUNCE_MS}
 EOF
 
   cat >"${APP_DIR}/compose.yaml" <<'EOF'
@@ -64,6 +68,8 @@ services:
       PROBE_CONCURRENCY: ${PROBE_CONCURRENCY}
       PROBE_TIMEOUT_MS: ${PROBE_TIMEOUT_MS}
       PROBE_TEST_URL: ${PROBE_TEST_URL}
+      METRICS_CACHE_TTL_SECONDS: ${METRICS_CACHE_TTL_SECONDS}
+      METRICS_CACHE_REFRESH_DEBOUNCE_MS: ${METRICS_CACHE_REFRESH_DEBOUNCE_MS}
     volumes:
       - ./metrics-data:/data
     restart: unless-stopped
@@ -81,7 +87,7 @@ if [ ! -f "${APP_DIR}/compose.yaml" ] || [ ! -f "${APP_DIR}/.env" ]; then
 fi
 
 cd "$APP_DIR"
-if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml" || ! grep -qxF "METRICS_IMAGE=${METRICS_IMAGE}" "${APP_DIR}/.env" || ! grep -q "^SCRAPE_INTERVAL_SECONDS=" "${APP_DIR}/.env"; then
+if ! grep -q "zashboardx-metrics" "${APP_DIR}/compose.yaml" || ! grep -qxF "METRICS_IMAGE=${METRICS_IMAGE}" "${APP_DIR}/.env" || ! grep -q "^SCRAPE_INTERVAL_SECONDS=" "${APP_DIR}/.env" || ! grep -q "^METRICS_CACHE_TTL_SECONDS=" "${APP_DIR}/.env"; then
   echo "Refreshing compose stack for zashboardx-metrics..."
   write_stack_files
 fi

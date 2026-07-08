@@ -8,6 +8,7 @@ type ProbeRunnerOptions = {
   storage: MetricsStorage
   config: MetricsHelperConfig
   health: HelperHealth
+  onAfterRun?: () => void
 }
 
 const runBounded = async <T>(
@@ -33,6 +34,7 @@ export class ProbeRunner {
   readonly #storage: MetricsStorage
   readonly #config: MetricsHelperConfig
   readonly #health: HelperHealth
+  readonly #onAfterRun?: () => void
   #timer?: NodeJS.Timeout
   #running = false
 
@@ -41,6 +43,7 @@ export class ProbeRunner {
     this.#storage = options.storage
     this.#config = options.config
     this.#health = options.health
+    this.#onAfterRun = options.onAfterRun
   }
 
   async runOnce() {
@@ -90,6 +93,7 @@ export class ProbeRunner {
       this.#health.lastProbeAt = new Date().toISOString()
       this.#health.lastProbeError = null
       this.#health.lastProbeNodeCount = nodes.length
+      this.#onAfterRun?.()
     } catch (error) {
       this.#health.ok = false
       this.#health.mihomoReachable = false

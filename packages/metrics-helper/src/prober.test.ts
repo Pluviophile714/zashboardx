@@ -44,6 +44,8 @@ const config: MetricsHelperConfig = {
   probeWindowHours: 24,
   retentionDays: 7,
   databasePath: ':memory:',
+  metricsCacheRefreshDebounceMs: 1500,
+  metricsCacheTtlSeconds: 10,
 }
 
 const createHealth = (): HelperHealth => ({

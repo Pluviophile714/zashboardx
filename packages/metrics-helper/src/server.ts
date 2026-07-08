@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
+import type { MetricsAggregationCache } from './metricsCache.js'
 import type { MetricsStorage } from './storage.js'
 import type { HelperHealth, ProbeSample } from './types.js'
 
@@ -7,6 +8,7 @@ type MetricsServerOptions = {
   storage: MetricsStorage
   health: HelperHealth
   defaultWindowSeconds: number
+  metricsCache?: MetricsAggregationCache
   now?: () => number
 }
 
@@ -167,6 +169,10 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
           }
         }
 
+        if (accepted > 0) {
+          options.metricsCache?.scheduleRefresh()
+        }
+
         sendJson(response, {
           accepted,
           received: samples.length,
@@ -196,11 +202,14 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
     }
 
     if (url.pathname === '/api/metrics/nodes') {
-      sendJson(response, {
-        windowSeconds,
-        generatedAt: new Date(nowMs).toISOString(),
-        nodes: options.storage.getNodeMetrics(windowSeconds, nowMs),
-      })
+      sendJson(
+        response,
+        options.metricsCache?.get(windowSeconds, nowMs) ?? {
+          windowSeconds,
+          generatedAt: new Date(nowMs).toISOString(),
+          nodes: options.storage.getNodeMetrics(windowSeconds, nowMs),
+        },
+      )
       return
     }
 
@@ -212,7 +221,9 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         windowSeconds,
         generatedAt: new Date(nowMs).toISOString(),
         name: nodeName,
-        metrics: options.storage.getSingleNodeMetrics(nodeName, windowSeconds, nowMs),
+        metrics:
+          options.metricsCache?.get(windowSeconds, nowMs).nodes[nodeName] ??
+          options.storage.getSingleNodeMetrics(nodeName, windowSeconds, nowMs),
       })
       return
     }

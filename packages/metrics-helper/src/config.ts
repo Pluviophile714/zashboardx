@@ -11,6 +11,8 @@ export type MetricsHelperConfig = {
   probeWindowHours: number
   retentionDays: number
   databasePath: string
+  metricsCacheTtlSeconds: number
+  metricsCacheRefreshDebounceMs: number
 }
 
 const parseInteger = (value: string | undefined, fallback: number, min: number) => {
@@ -40,4 +42,6 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): MetricsHelperC
   probeWindowHours: parseInteger(env.PROBE_WINDOW_HOURS, 24, 1),
   retentionDays: parseInteger(env.METRICS_RETENTION_DAYS, 7, 1),
   databasePath: env.METRICS_DATABASE_PATH || '/data/metrics.sqlite',
+  metricsCacheTtlSeconds: parseInteger(env.METRICS_CACHE_TTL_SECONDS, 10, 1),
+  metricsCacheRefreshDebounceMs: parseInteger(env.METRICS_CACHE_REFRESH_DEBOUNCE_MS, 1500, 0),
 })
