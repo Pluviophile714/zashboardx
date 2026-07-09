@@ -37,7 +37,7 @@ const runner = new ProbeRunner({
   storage,
   config,
   health,
-  onAfterRun: () => metricsCache.refresh(),
+  onAfterRun: () => metricsCache.markDirty(),
 })
 const server = createMetricsServer({
   storage,
@@ -50,6 +50,7 @@ server.listen(config.port, config.bindHost, () => {
   console.log(
     `zashboardx-metrics listening on ${config.bindHost}:${config.port}, mihomo=${config.mihomoBaseUrl}`,
   )
+  metricsCache.scheduleRefresh(0)
 })
 runner.start()
 

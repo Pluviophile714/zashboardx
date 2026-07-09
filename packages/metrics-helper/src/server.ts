@@ -170,7 +170,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         }
 
         if (accepted > 0) {
-          options.metricsCache?.scheduleRefresh()
+          options.metricsCache?.markDirty()
         }
 
         sendJson(response, {

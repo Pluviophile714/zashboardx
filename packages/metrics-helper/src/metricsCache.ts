@@ -25,6 +25,8 @@ export class MetricsAggregationCache {
   readonly #refreshDebounceMs: number
   readonly #now: () => number
   readonly #snapshots = new Map<number, MetricsSnapshot>()
+  readonly #dirtyWindows = new Set<number>()
+  readonly #refreshWindows = new Set<number>()
   #refreshTimer?: NodeJS.Timeout
 
   constructor(options: MetricsAggregationCacheOptions) {
@@ -38,11 +40,15 @@ export class MetricsAggregationCache {
   get(windowSeconds = this.#defaultWindowSeconds, nowMs = this.#now()) {
     const snapshot = this.#snapshots.get(windowSeconds)
 
-    if (snapshot && nowMs - Date.parse(snapshot.cacheGeneratedAt) <= this.#ttlMs) {
-      return snapshot
+    if (!snapshot) {
+      return this.refresh(windowSeconds, nowMs)
     }
 
-    return this.refresh(windowSeconds, nowMs)
+    if (this.#isStale(snapshot, nowMs) || this.#dirtyWindows.has(windowSeconds)) {
+      this.scheduleRefresh(this.#refreshDebounceMs, windowSeconds)
+    }
+
+    return snapshot
   }
 
   getSingleNodeMetrics(nodeName: string, windowSeconds = this.#defaultWindowSeconds) {
@@ -63,18 +69,32 @@ export class MetricsAggregationCache {
     }
 
     this.#snapshots.set(windowSeconds, snapshot)
+    this.#dirtyWindows.delete(windowSeconds)
 
     return snapshot
   }
 
-  scheduleRefresh(delayMs = this.#refreshDebounceMs) {
+  markDirty(windowSeconds = this.#defaultWindowSeconds) {
+    this.#dirtyWindows.add(windowSeconds)
+  }
+
+  scheduleRefresh(delayMs = this.#refreshDebounceMs, windowSeconds = this.#defaultWindowSeconds) {
+    this.#dirtyWindows.add(windowSeconds)
+    this.#refreshWindows.add(windowSeconds)
+
     if (this.#refreshTimer) {
-      clearTimeout(this.#refreshTimer)
+      return
     }
 
     this.#refreshTimer = setTimeout(() => {
       this.#refreshTimer = undefined
-      this.refresh()
+      const windows = [...this.#refreshWindows]
+
+      this.#refreshWindows.clear()
+
+      for (const windowSeconds of windows) {
+        this.refresh(windowSeconds)
+      }
     }, delayMs)
   }
 
@@ -83,5 +103,10 @@ export class MetricsAggregationCache {
       clearTimeout(this.#refreshTimer)
       this.#refreshTimer = undefined
     }
+    this.#refreshWindows.clear()
+  }
+
+  #isStale(snapshot: MetricsSnapshot, nowMs: number) {
+    return nowMs - Date.parse(snapshot.cacheGeneratedAt) > this.#ttlMs
   }
 }

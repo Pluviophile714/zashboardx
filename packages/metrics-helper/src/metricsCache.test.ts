@@ -27,14 +27,14 @@ afterEach(() => {
   }
 })
 
-test('returns cached node metrics until the cache ttl expires', () => {
+test('returns stale node metrics after ttl and refreshes asynchronously', async () => {
   let nowMs = at(30)
   const storage = createStorage()
   const cache = new MetricsAggregationCache({
     storage,
     defaultWindowSeconds: 24 * 60 * 60,
     ttlMs: 10_000,
-    refreshDebounceMs: 1500,
+    refreshDebounceMs: 0,
     now: () => nowMs,
   })
 
@@ -63,6 +63,13 @@ test('returns cached node metrics until the cache ttl expires', () => {
   assert.equal(cached.cacheGeneratedAt, first.cacheGeneratedAt)
 
   nowMs += 6000
+  const stale = cache.get()
+
+  assert.equal(stale.nodes['HK-01'].sampleCount, 1)
+  assert.equal(stale.cacheGeneratedAt, first.cacheGeneratedAt)
+
+  await new Promise((resolve) => setTimeout(resolve, 10))
+
   const refreshed = cache.get()
 
   assert.equal(refreshed.nodes['HK-01'].sampleCount, 2)
