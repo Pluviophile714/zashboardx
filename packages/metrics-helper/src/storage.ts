@@ -18,6 +18,10 @@ type NodeMetricsRow = {
   last_failure_at: string | null
 }
 
+type MetricsStorageInitOptions = {
+  readonly?: boolean
+}
+
 export class MetricsStorage {
   readonly #databasePath: string
   #database?: DatabaseSync
@@ -26,12 +30,18 @@ export class MetricsStorage {
     this.#databasePath = databasePath
   }
 
-  init() {
+  init(options: MetricsStorageInitOptions = {}) {
     if (this.#databasePath !== ':memory:') {
       mkdirSync(dirname(this.#databasePath), { recursive: true })
     }
 
     this.#database = new DatabaseSync(this.#databasePath)
+
+    if (options.readonly) {
+      this.#database.exec('PRAGMA query_only = ON;')
+      return
+    }
+
     this.#database.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS nodes (

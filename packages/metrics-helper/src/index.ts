@@ -23,6 +23,7 @@ storage.init()
 
 const metricsCache = new MetricsAggregationCache({
   storage,
+  databasePath: config.databasePath,
   defaultWindowSeconds: config.probeWindowHours * 60 * 60,
   refreshDebounceMs: config.metricsCacheRefreshDebounceMs,
   ttlMs: config.metricsCacheTtlSeconds * 1000,
