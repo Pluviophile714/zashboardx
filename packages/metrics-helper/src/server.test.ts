@@ -188,6 +188,77 @@ test('accepts frontend latency samples and deduplicates repeated posts', async (
   }
 })
 
+test('serves recent samples for one node from the requested window', async () => {
+  const storage = createStorage()
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(5),
+    delay: 90,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(15),
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(20),
+    delay: 100,
+    success: true,
+  })
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/samples?node=${encodeURIComponent('HK-01')}&window=15m&limit=30`,
+    )
+    const body = (await response.json()) as {
+      nodeName: string
+      samples: { delay: number | null; success: boolean; timestamp: string }[]
+      windowSeconds: number
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(body.nodeName, 'HK-01')
+    assert.equal(body.windowSeconds, 15 * 60)
+    assert.deepEqual(
+      body.samples.map((sample) => ({
+        delay: sample.delay,
+        success: sample.success,
+        timestamp: sample.timestamp,
+      })),
+      [
+        { delay: null, success: false, timestamp: at(15) },
+        { delay: 100, success: true, timestamp: at(20) },
+      ],
+    )
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
 test('serves cached node metrics and refreshes cache after accepted frontend samples', async () => {
   const storage = createStorage()
   const metricsCache = new MetricsAggregationCache({

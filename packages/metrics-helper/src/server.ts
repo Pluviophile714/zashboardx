@@ -43,6 +43,20 @@ const parseWindowSeconds = (value: string | null, fallback: number) => {
   return amount
 }
 
+const parseLimit = (value: string | null, fallback: number) => {
+  if (!value) {
+    return fallback
+  }
+
+  const amount = Number(value)
+
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    return fallback
+  }
+
+  return Math.min(200, amount)
+}
+
 const sendJson = (response: ServerResponse, body: unknown) => {
   response.writeHead(200, {
     'Access-Control-Allow-Origin': '*',
@@ -198,6 +212,28 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
 
     if (url.pathname === '/api/metrics/health') {
       sendJson(response, options.health)
+      return
+    }
+
+    if (url.pathname === '/api/metrics/samples') {
+      const nodeName = url.searchParams.get('node')?.trim() ?? ''
+
+      if (!nodeName || nodeName.length > 512) {
+        sendStatus(response, 400, { error: 'invalid_node' })
+        return
+      }
+
+      sendJson(response, {
+        windowSeconds,
+        generatedAt: new Date(nowMs).toISOString(),
+        nodeName,
+        samples: options.storage.getRecentProbeSamples(
+          nodeName,
+          windowSeconds,
+          parseLimit(url.searchParams.get('limit'), 30),
+          nowMs,
+        ),
+      })
       return
     }
 

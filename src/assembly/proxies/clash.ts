@@ -6,7 +6,7 @@ import {
   fetchProxyGroupLatencyAPI,
   fetchProxyLatencyAPI,
   fetchProxyProviderAPI,
-  proxyProviderHealthCheckAPI,
+  fetchProxyProviderLatencyAPI,
   selectProxyAPI,
 } from '@/api/clash'
 import { postProxyMetricsSamplesAPI } from '@/api/metricsHelper'
@@ -27,6 +27,7 @@ import { initSmartWeights } from '@/store/smart'
 import type { Proxy } from '@/types'
 import { last } from 'lodash'
 import pLimit from 'p-limit'
+import { isSingBoxCore } from '../version'
 import {
   getHistoryByName,
   getLatencyByName,
@@ -40,13 +41,6 @@ import {
 } from './index'
 
 let fetchTime = 0
-const providerLatencyCache = new Map<
-  string,
-  {
-    data: Record<string, number>
-    expiresAt: number
-  }
->()
 
 export const fetchProxies = async () => {
   const nowTime = Date.now()
@@ -69,6 +63,7 @@ export const fetchProxies = async () => {
 
   for (const provider of providers) {
     for (const proxy of provider.proxies) {
+      proxy['provider-name'] ||= provider.name
       allProviderProxies[proxy.name] = proxy
     }
   }
@@ -141,42 +136,40 @@ export const handlerProxySelect = async (proxyGroupName: string, proxyName: stri
   fetchProxies()
 }
 
-const getProviderNameByProxyName = (proxyName: string) =>
-  proxyProviederList.value.find((provider) =>
-    provider.proxies.some((proxy) => proxy.name === proxyName),
-  )?.name
+const getProviderNameByProxy = (proxyName: string) => {
+  const hinted = proxyMap.value[proxyName]?.['provider-name']
 
-const fetchProviderLatencyResult = async (providerName: string) => {
-  const cached = providerLatencyCache.get(providerName)
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data
+  if (hinted) {
+    return proxyProviederList.value.some((provider) => provider.name === hinted) ? hinted : ''
   }
 
-  const { data } = await proxyProviderHealthCheckAPI(providerName)
-
-  providerLatencyCache.set(providerName, {
-    data,
-    expiresAt: Date.now() + 5000,
-  })
-
-  return data
+  return (
+    proxyProviederList.value.find((provider) =>
+      provider.proxies.some((proxy) => proxy.name === proxyName),
+    )?.name ?? ''
+  )
 }
 
-const createLatencyResponse = (delay: number) => ({
-  data: {
-    delay,
-  },
-  status: 200,
-})
+// provider 节点走 provider 作用域的 healthcheck 端点,避免节点不在
+// 全局 /proxies 映射(或同名冲突)导致测速失败
+const fetchNodeLatency = (proxyName: string, url: string, timeout: number) => {
+  if (!isSingBoxCore.value) {
+    const providerName = getProviderNameByProxy(proxyName)
+
+    if (providerName) {
+      return fetchProxyProviderLatencyAPI(providerName, proxyName, url, timeout)
+    }
+  }
+
+  return fetchProxyLatencyAPI(proxyName, url, timeout)
+}
 
 const latencyTestForSingle = async (proxyName: string, url: string, timeout: number) => {
   const now = getNowProxyNodeName(proxyName)
-  const targetName = independentLatencyTest.value ? proxyName : now
 
   if (IPv6test.value) {
     try {
-      const { data: ipv6LatencyResult } = await fetchProxyLatencyAPI(now, IPV6_TEST_URL, 2000)
+      const { data: ipv6LatencyResult } = await fetchNodeLatency(now, IPV6_TEST_URL, 2000)
 
       IPv6Map.value[now] = ipv6LatencyResult.delay > NOT_CONNECTED
     } catch {
@@ -184,21 +177,7 @@ const latencyTestForSingle = async (proxyName: string, url: string, timeout: num
     }
   }
 
-  const res = await fetchProxyLatencyAPI(targetName, url, timeout)
-
-  if (res.status === 200) {
-    return res
-  }
-
-  const providerName = getProviderNameByProxyName(targetName)
-
-  if (!providerName) {
-    return res
-  }
-
-  const providerLatencyResult = await fetchProviderLatencyResult(providerName)
-
-  return createLatencyResponse(providerLatencyResult[targetName] ?? NOT_CONNECTED)
+  return await fetchNodeLatency(independentLatencyTest.value ? proxyName : now, url, timeout)
 }
 
 const getLatencyTestTargetName = (proxyName: string) =>

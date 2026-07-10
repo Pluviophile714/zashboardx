@@ -197,6 +197,45 @@ test('finds latest sample timestamp across all test urls for a node', () => {
   storage.close()
 })
 
+test('returns recent probe samples inside the requested window', () => {
+  const storage = createStorage()
+
+  for (const minute of [0, 5, 10, 15, 20]) {
+    storage.insertProbeSample({
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com',
+      timestamp: at(minute),
+      delay: minute === 15 ? null : 80 + minute,
+      success: minute !== 15,
+      ...(minute === 15 ? { errorType: 'timeout' } : {}),
+    })
+  }
+
+  storage.insertProbeSample({
+    nodeName: 'JP-01',
+    testUrl: 'https://example.com',
+    timestamp: at(20),
+    delay: 120,
+    success: true,
+  })
+
+  const samples = storage.getRecentProbeSamples('HK-01', 15 * 60, 3, Date.parse(at(30)))
+
+  assert.deepEqual(
+    samples.map((sample) => ({
+      delay: sample.delay,
+      success: sample.success,
+      timestamp: sample.timestamp,
+    })),
+    [
+      { delay: null, success: false, timestamp: at(15) },
+      { delay: 100, success: true, timestamp: at(20) },
+    ],
+  )
+
+  storage.close()
+})
+
 test('prunes samples older than retention days', () => {
   const storage = createStorage()
 

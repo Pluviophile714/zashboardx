@@ -31,6 +31,13 @@ export type ProxyMetricsSample = {
   errorType?: string
 }
 
+export type ProxyMetricsSamplesResponse = {
+  windowSeconds: number
+  generatedAt: string
+  nodeName: string
+  samples: ProxyMetricsSample[]
+}
+
 const proxyMetricsSampleQueue: ProxyMetricsSample[] = []
 let proxyMetricsSampleFlushTimer: ReturnType<typeof window.setTimeout> | undefined
 
@@ -112,6 +119,80 @@ export const fetchProxyMetricsHelperAPI = async (
           normalizeMetricsNode(node as ProxyMetricsNode, generatedAt),
         ]),
       ),
+    }
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+const normalizeMetricsSample = (sample: unknown): ProxyMetricsSample | null => {
+  if (!sample || typeof sample !== 'object') {
+    return null
+  }
+
+  const raw = sample as Partial<ProxyMetricsSample>
+  const nodeName = typeof raw.nodeName === 'string' ? raw.nodeName : ''
+  const testUrl = typeof raw.testUrl === 'string' ? raw.testUrl : ''
+  const timestamp = typeof raw.timestamp === 'string' ? raw.timestamp : ''
+  const timestampMs = Date.parse(timestamp)
+  const delay = typeof raw.delay === 'number' && Number.isFinite(raw.delay) ? raw.delay : null
+
+  if (!nodeName || !testUrl || !Number.isFinite(timestampMs)) {
+    return null
+  }
+
+  return {
+    nodeName,
+    testUrl,
+    timestamp: new Date(timestampMs).toISOString(),
+    delay,
+    success: raw.success === true,
+    ...(typeof raw.errorType === 'string' && raw.errorType ? { errorType: raw.errorType } : {}),
+  }
+}
+
+export const fetchProxyMetricsSamplesAPI = async (
+  nodeName: string,
+  metricsWindow = '24h',
+  limit = 30,
+  timeout = 3000,
+): Promise<ProxyMetricsSamplesResponse | null> => {
+  if (!nodeName) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      node: nodeName,
+      window: metricsWindow,
+    })
+    const response = await fetch(`/api/metrics/samples?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as Partial<ProxyMetricsSamplesResponse>
+    const samples = Array.isArray(data.samples)
+      ? data.samples.map(normalizeMetricsSample).filter((sample): sample is ProxyMetricsSample => {
+          return sample !== null
+        })
+      : []
+
+    return {
+      generatedAt: data.generatedAt || new Date().toISOString(),
+      nodeName: typeof data.nodeName === 'string' ? data.nodeName : nodeName,
+      samples,
+      windowSeconds: Number(data.windowSeconds) || 24 * 60 * 60,
     }
   } catch {
     return null

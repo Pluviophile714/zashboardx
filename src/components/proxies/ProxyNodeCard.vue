@@ -92,7 +92,6 @@ import {
   getIPv6ByName,
   getNowProxyNodeName,
   getTestUrl,
-  hasDisplayHistoryByName,
   proxyLatencyTest,
   proxyMap,
 } from '@/assembly/proxies'
@@ -104,7 +103,13 @@ import {
   proxySortType,
   truncateProxyName,
 } from '@/store/settings'
-import { proxyMetricsMap, proxyMetricsUpdatedAt } from '@/store/proxyMetrics'
+import {
+  getProxyMetricsSamplesCacheKey,
+  proxyMetricsMap,
+  proxyMetricsSamplesMap,
+  proxyMetricsUpdatedAt,
+  refreshProxyMetricsSamples,
+} from '@/store/proxyMetrics'
 import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import { twMerge } from 'tailwind-merge'
@@ -120,6 +125,8 @@ const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
 const LATENCY_AVAILABILITY_MIN_SAMPLES = 12
 const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
+const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
+const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
 const CHART_WIDTH = 160
 const CHART_HEIGHT = 58
 const CHART_PADDING_X = 8
@@ -188,7 +195,13 @@ const latencyStabilityBar = computed(() => {
   }))
 })
 
-const hasLatencyDetailsHistory = () => hasDisplayHistoryByName(props.name, props.groupName)
+const hasLatencyDetailsHistory = () => {
+  if (getSharedMetricsResolution()?.metrics?.sampleCount) {
+    return true
+  }
+
+  return getLocalLatencyDetailsHistory().length > 0
+}
 
 const checkNodeTextTruncation = (e: Event) => {
   checkTruncation(e)
@@ -499,6 +512,114 @@ const getSharedMetricsResolution = () => {
   return null
 }
 
+const getMetricsCandidateNames = () => {
+  const names: string[] = []
+  const addName = (name?: string) => {
+    if (name && !names.includes(name)) {
+      names.push(name)
+    }
+  }
+  const resolvedName = getNowProxyNodeName(props.name)
+  const smartOutbound = getSmartOutbound(resolvedName || props.name) || getSmartOutbound(props.name)
+
+  addName(props.name)
+  addName(smartOutbound)
+  addName(resolvedName !== props.name ? resolvedName : '')
+
+  return names
+}
+
+const getR5sLatencySampleSourceName = () =>
+  getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
+
+const getLocalLatencyDetailsHistory = () => {
+  const cutoff = Date.now() - LATENCY_DETAILS_LOCAL_MAX_AGE
+
+  return getDisplayHistoryByName(
+    props.name,
+    props.groupName,
+    LATENCY_AVAILABILITY_MAX_SAMPLES,
+  ).filter((item) => {
+    const timestamp = Date.parse(item.time)
+
+    return Number.isFinite(timestamp) && timestamp >= cutoff
+  })
+}
+
+const getR5sLatencyHistory = () => {
+  const metricsResolution = getSharedMetricsResolution()
+  const sourceName = metricsResolution?.sourceName ?? getR5sLatencySampleSourceName()
+
+  if (!sourceName) {
+    return null
+  }
+
+  const samples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ] ?? []
+
+  if (!samples.length && !metricsResolution?.metrics?.sampleCount) {
+    return null
+  }
+
+  return {
+    history: samples.map((sample) => ({
+      delay: sample.success && sample.delay ? sample.delay : NOT_CONNECTED,
+      time: sample.timestamp,
+    })),
+    label: 'R5S近30次',
+    sourceName,
+  }
+}
+
+const getLatencyDetailsHistorySource = () => {
+  const r5sHistory = getR5sLatencyHistory()
+
+  if (r5sHistory) {
+    return r5sHistory
+  }
+
+  return {
+    history: getLocalLatencyDetailsHistory(),
+    label: '本机近30次',
+    sourceName: props.name,
+  }
+}
+
+const refreshR5sLatencyDetailsSamples = () => {
+  const sourceName = getR5sLatencySampleSourceName()
+
+  if (!sourceName) {
+    return Promise.resolve(null)
+  }
+
+  return refreshProxyMetricsSamples(sourceName, {
+    limit: LATENCY_DETAIL_SEGMENTS,
+    window: '24h',
+  })
+}
+
+const waitForR5sLatencyDetailsSamples = async () => {
+  const sourceName = getR5sLatencySampleSourceName()
+  const metrics = getSharedMetricsResolution()?.metrics
+
+  if (!sourceName || !metrics?.sampleCount) {
+    return
+  }
+
+  const cacheKey = getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+
+  if (proxyMetricsSamplesMap.value[cacheKey]?.length) {
+    return
+  }
+
+  await Promise.race([
+    refreshR5sLatencyDetailsSamples(),
+    new Promise((resolve) => window.setTimeout(resolve, LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT)),
+  ]).catch(() => undefined)
+}
+
 const formatCardAvailability = (availability: number) => {
   const percent = availability * 100
 
@@ -631,6 +752,7 @@ const buildSparklineSvg = (
 const buildLatencyStatusTimeline = (
   history: { delay: number; time?: string }[],
   compact = false,
+  sourceLabel = '本机近30次',
 ) => {
   const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
@@ -640,10 +762,9 @@ const buildLatencyStatusTimeline = (
   const timeline = document.createElement('div')
   const header = document.createElement('div')
   const strip = document.createElement('div')
-  const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const sampleCount = recentHistory.length
-  const sampledSuccessRate =
-    stats && sampleCount ? Math.round((stats.successTests / sampleCount) * 100) : 0
+  const successTests = recentHistory.filter((item) => item.delay > NOT_CONNECTED).length
+  const sampledSuccessRate = sampleCount > 0 ? Math.round((successTests / sampleCount) * 100) : 0
 
   timeline.className = compact
     ? 'mt-2 rounded-md bg-base-200/40 p-1.5'
@@ -653,19 +774,24 @@ const buildLatencyStatusTimeline = (
     : 'mb-1.5 flex items-center justify-between text-[11px] text-base-content/55'
 
   const oldestLabel = document.createElement('span')
-  oldestLabel.textContent = '本机近30次'
+  oldestLabel.textContent = sourceLabel
   const successLabel = document.createElement('span')
   successLabel.className =
-    stats && sampledSuccessRate >= 80
+    sampleCount && sampledSuccessRate >= 80
       ? 'text-low-latency'
-      : stats && sampledSuccessRate >= 50
+      : sampleCount && sampledSuccessRate >= 50
         ? 'text-medium-latency'
-        : 'text-high-latency'
-  successLabel.textContent = stats
-    ? `${sampledSuccessRate}% 可用 · ${sampleCount}/${stats.totalTests} 记录`
+        : sampleCount
+          ? 'text-high-latency'
+          : 'text-base-content/45'
+  successLabel.textContent = sampleCount
+    ? `${sampledSuccessRate}% 可用 · ${sampleCount}/${LATENCY_DETAIL_SEGMENTS} 记录`
     : '暂无记录'
   const newestLabel = document.createElement('span')
-  newestLabel.textContent = '现在'
+  const newestTimestamp = recentHistory.at(-1)?.time
+  newestLabel.textContent = newestTimestamp
+    ? `最后 ${dayjs(newestTimestamp).format('MM-DD HH:mm')}`
+    : '暂无'
   header.append(oldestLabel, successLabel, newestLabel)
 
   strip.className = 'flex w-full items-end gap-1'
@@ -728,14 +854,12 @@ const buildLatencyStatusTimeline = (
 
 const createLatencyDetailsTip = () => {
   const compact = isCompactLatencyDetails()
-  const availabilityHistory = getDisplayHistoryByName(
-    props.name,
-    props.groupName,
-    LATENCY_AVAILABILITY_MAX_SAMPLES,
-  )
-  const history = availabilityHistory.slice(-LATENCY_DETAIL_SEGMENTS)
+  const detailHistorySource = getLatencyDetailsHistorySource()
+  const history = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
   const newestFirst = [...history].reverse()
   const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
+  const sharedMetricsResolution = getSharedMetricsResolution()
+  const sharedMetrics = sharedMetricsResolution?.metrics
   const root = document.createElement('div')
 
   root.className = compact
@@ -749,23 +873,30 @@ const createLatencyDetailsTip = () => {
   title.textContent = node.value?.name ?? props.name
   root.append(title)
 
-  if (stats) {
+  if (stats || history.length || sharedMetrics) {
     const chart = document.createElement('div')
     chart.className = compact ? 'rounded-lg bg-base-300/50 p-1.5' : 'rounded-lg bg-base-300/50 p-2'
 
-    const statLine = document.createElement('div')
-    statLine.className = 'mb-1 flex items-center justify-between text-xs text-base-content/75'
+    if (stats) {
+      const statLine = document.createElement('div')
+      statLine.className = 'mb-1 flex items-center justify-between text-xs text-base-content/75'
 
-    const min = document.createElement('span')
-    min.textContent = `${stats.min}ms`
-    const avg = document.createElement('span')
-    avg.textContent = `avg: ${stats.avg}ms`
-    const max = document.createElement('span')
-    max.textContent = `${stats.max}ms`
-    statLine.append(min, avg, max)
-    chart.append(statLine)
+      const min = document.createElement('span')
+      min.textContent = `${stats.min}ms`
+      const avg = document.createElement('span')
+      avg.textContent = `avg: ${stats.avg}ms`
+      const max = document.createElement('span')
+      max.textContent = `${stats.max}ms`
+      statLine.append(min, avg, max)
+      chart.append(statLine)
+    } else {
+      const emptyStat = document.createElement('div')
+      emptyStat.className = 'mb-1 text-center text-xs text-base-content/55'
+      emptyStat.textContent = history.length ? '近30次暂无成功测速' : 'R5S近30次等待样本'
+      chart.append(emptyStat)
+    }
 
-    const svg = buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS, compact)
+    const svg = stats ? buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS, compact) : null
     const sparkline = document.createElement('div')
 
     sparkline.className = compact ? 'text-base-content/60' : 'text-base-content/80'
@@ -774,31 +905,31 @@ const createLatencyDetailsTip = () => {
       `<div class="flex ${compact ? 'h-6' : 'h-14'} items-center justify-center text-xs text-base-content/50">not enough data</div>`
     chart.append(sparkline)
 
-    chart.append(buildLatencyStatusTimeline(history, compact))
+    chart.append(buildLatencyStatusTimeline(history, compact, detailHistorySource.label))
 
-    const stabilityLine = document.createElement('div')
-    const jitter = document.createElement('span')
-    jitter.textContent = `jitter: ${stats.jitter}ms`
+    if (stats) {
+      const stabilityLine = document.createElement('div')
+      const jitter = document.createElement('span')
+      jitter.textContent = `jitter: ${stats.jitter}ms`
 
-    const lossMetric = getSmartLossMetric()
-    const lossRate = getPrimarySmartLossRate(lossMetric)
+      const lossMetric = getSmartLossMetric()
+      const lossRate = getPrimarySmartLossRate(lossMetric)
 
-    const loss = document.createElement('span')
+      const loss = document.createElement('span')
 
-    stabilityLine.className =
-      'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/75'
-    jitter.className = 'justify-self-start'
-    loss.className = `font-semibold ${getSmartLossRateClass(lossMetric)}`
-    loss.textContent = `loss: ${formatSmartLossRate(lossRate)}`
-    if (lossMetric?.current !== undefined && lossMetric?.cumulative !== undefined) {
-      loss.title = `当前 ${formatSmartLossRate(lossMetric.current)} · 累计 ${formatSmartLossRate(lossMetric.cumulative)}`
+      stabilityLine.className =
+        'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/75'
+      jitter.className = 'justify-self-start'
+      loss.className = `font-semibold ${getSmartLossRateClass(lossMetric)}`
+      loss.textContent = `loss: ${formatSmartLossRate(lossRate)}`
+      if (lossMetric?.current !== undefined && lossMetric?.cumulative !== undefined) {
+        loss.title = `当前 ${formatSmartLossRate(lossMetric.current)} · 累计 ${formatSmartLossRate(lossMetric.cumulative)}`
+      }
+      stabilityLine.append(jitter, loss)
+
+      chart.append(stabilityLine)
     }
-    stabilityLine.append(jitter, loss)
 
-    chart.append(stabilityLine)
-
-    const sharedMetricsResolution = getSharedMetricsResolution()
-    const sharedMetrics = sharedMetricsResolution?.metrics
     const availabilityLine = document.createElement('div')
     const availabilityMain = document.createElement('div')
     const coverage = document.createElement('div')
@@ -916,13 +1047,21 @@ const createLatencyDetailsTip = () => {
   return root
 }
 
-const handlerLatencyDetailsTip = (e: Event) => {
+const handlerLatencyDetailsTip = async (e: Event) => {
   if (!hasLatencyDetailsHistory()) return
 
   const compact = isCompactLatencyDetails()
   const anchor = e.currentTarget as HTMLElement | null
 
   if (!anchor) return
+
+  await waitForR5sLatencyDetailsSamples()
+
+  if (!hasLatencyDetailsHistory()) return
+
+  if (!compact && !isHoveringElement(anchor) && !isHoveringElement(cardRef.value)) {
+    return
+  }
 
   const tipEvent = Object.create(e, {
     currentTarget: {

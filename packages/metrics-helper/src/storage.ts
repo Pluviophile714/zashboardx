@@ -170,6 +170,45 @@ export class MetricsStorage {
     return Number.isFinite(timestamp) ? timestamp : null
   }
 
+  getRecentProbeSamples(nodeName: string, windowSeconds: number, limit = 30, nowMs = Date.now()) {
+    const windowStart = new Date(nowMs - windowSeconds * 1000).toISOString()
+    const now = new Date(nowMs).toISOString()
+    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)))
+    const rows = this.#db
+      .prepare(
+        `
+        SELECT node_name, test_url, timestamp, delay, success, error_type
+        FROM probe_samples
+        WHERE node_name = ?
+          AND timestamp >= ?
+          AND timestamp <= ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `,
+      )
+      .all(nodeName, windowStart, now, boundedLimit) as {
+      delay: number | null
+      error_type: string | null
+      node_name: string
+      success: number
+      test_url: string
+      timestamp: string
+    }[]
+
+    return rows.reverse().map((row): ProbeSample => {
+      const success = row.success === 1
+
+      return {
+        nodeName: row.node_name,
+        testUrl: row.test_url,
+        timestamp: row.timestamp,
+        delay: row.delay === null ? null : Number(row.delay),
+        success,
+        ...(success || !row.error_type ? {} : { errorType: row.error_type }),
+      }
+    })
+  }
+
   prune(retentionDays: number, nowMs = Date.now()) {
     const cutoff = new Date(nowMs - retentionDays * 24 * 60 * 60 * 1000).toISOString()
     const result = this.#db.prepare('DELETE FROM probe_samples WHERE timestamp < ?').run(cutoff)

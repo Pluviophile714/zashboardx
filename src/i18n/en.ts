@@ -73,6 +73,8 @@ const en = {
   endpointLabel: 'Endpoint',
   activeLabel: 'Active',
   availableLabel: 'Available',
+  dragOrClickToAdd: 'Drag or click to add',
+  addRow: 'Add row',
   sshConfiguration: 'SSH Configuration',
   terminalType: 'Terminal type',
   rememberSSHOptions: 'Remember SSH options',
@@ -185,6 +187,11 @@ const en = {
   sourcePort: 'Source port',
   destination: 'Resolved address',
   destinationType: 'Resolved type',
+  geoip: 'GeoIP',
+  geoipCountryDatabaseURL: 'GeoIP country database URL',
+  geoipASNDatabaseURL: 'GeoIP ASN database URL',
+  geoipDatabaseURLTip:
+    'Used to resolve the GeoIP info (country / ASN) of connection IPs locally. The mmdb is loaded from this URL and cached in the browser. Leave empty to use the default.',
   inboundUser: 'Inbound user',
   outboundType: 'Outbound type',
   fromOutbound: 'From outbound',
@@ -407,6 +414,10 @@ const en = {
   uploadSettingsIconReflectListRemoved:
     'Custom icon data was too large and has been removed during upload. Please reduce it and try again.',
   syncSettingsSuccess: 'Settings synced successfully',
+  syncSettingsConfirm:
+    'The backend has stored settings that will override the following local settings:\n\n{keys}\n\nDo you want to apply them?',
+  importSettingsConfirm:
+    'The imported settings will override the following local settings:\n\n{keys}\n\nDo you want to apply them?',
   deleteUploadedSettingsSuccess: 'Uploaded settings deleted successfully',
   deleteUploadedSettingsConfirm:
     'Are you sure you want to delete the uploaded settings on the backend? This action cannot be undone.',

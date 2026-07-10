@@ -75,6 +75,8 @@ const ru: LANG_MESSAGE = {
   endpointLabel: 'Конечная точка',
   activeLabel: 'Активен',
   availableLabel: 'Доступен',
+  dragOrClickToAdd: 'Перетащите или нажмите, чтобы добавить',
+  addRow: 'Добавить строку',
   sshConfiguration: 'Настройка SSH',
   terminalType: 'Тип терминала',
   rememberSSHOptions: 'Запомнить параметры SSH',
@@ -187,6 +189,11 @@ const ru: LANG_MESSAGE = {
   sourcePort: 'Исходный порт',
   destination: 'Разрешенный адрес',
   destinationType: 'Тип разрешения',
+  geoip: 'GeoIP',
+  geoipCountryDatabaseURL: 'URL базы стран GeoIP',
+  geoipASNDatabaseURL: 'URL базы ASN GeoIP',
+  geoipDatabaseURLTip:
+    'Используется для локального определения информации GeoIP (страна / ASN) для IP-адресов соединений. Файл mmdb загружается по этому адресу и кэшируется в браузере. Оставьте пустым для значения по умолчанию.',
   inboundUser: 'Входящий пользователь',
   outboundType: 'Тип исходящего',
   fromOutbound: 'Из исходящего',
@@ -409,6 +416,10 @@ const ru: LANG_MESSAGE = {
   uploadSettingsIconReflectListRemoved:
     'Данные пользовательских иконок слишком велики и были удалены при загрузке. Уменьшите их размер и попробуйте снова.',
   syncSettingsSuccess: 'Настройки успешно синхронизированы',
+  syncSettingsConfirm:
+    'В бэкенде сохранены настройки, которые перезапишут следующие локальные настройки:\n\n{keys}\n\nПрименить их?',
+  importSettingsConfirm:
+    'Импортированные настройки перезапишут следующие локальные настройки:\n\n{keys}\n\nПрименить их?',
   deleteUploadedSettingsSuccess: 'Загруженные настройки успешно удалены',
   deleteUploadedSettingsConfirm:
     'Вы уверены, что хотите удалить загруженные на бэкенд настройки? Это действие нельзя отменить.',
