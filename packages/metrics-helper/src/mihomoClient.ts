@@ -84,6 +84,16 @@ const toHistorySamples = (
     })
   }
 
+  if (proxy.type?.replace(/[\s-]/g, '').toLowerCase() === 'smart') {
+    const rounds = new Map<string, ProbeSample>()
+
+    for (const sample of samples) {
+      rounds.set(sample.timestamp.slice(0, 19), sample)
+    }
+
+    return rounds.size ? [...rounds.values()] : undefined
+  }
+
   return samples.length ? samples : undefined
 }
 

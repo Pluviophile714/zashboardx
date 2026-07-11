@@ -337,6 +337,53 @@ test('does not copy selected group history into an already discovered leaf node'
   ])
 })
 
+test('keeps one group sample per concurrent smart test round', async () => {
+  const fetchMock: typeof fetch = async () =>
+    jsonResponse({
+      proxies: {
+        Smart: {
+          name: 'Smart',
+          type: 'Smart',
+          all: ['US-01', 'US-02', 'US-03'],
+          now: 'Smart - Select',
+          history: [
+            { time: '2026-07-11T03:00:00.010Z', delay: 158 },
+            { time: '2026-07-11T03:00:00.020Z', delay: 165 },
+            { time: '2026-07-11T03:00:00.030Z', delay: 170 },
+            { time: '2026-07-11T03:01:30.010Z', delay: 161 },
+            { time: '2026-07-11T03:01:30.020Z', delay: 166 },
+            { time: '2026-07-11T03:01:30.030Z', delay: 174 },
+          ],
+        },
+      },
+    })
+  const client = new MihomoClient({
+    baseUrl: 'http://mihomo.example:9090',
+    secret: '',
+    fetchImpl: fetchMock,
+  })
+
+  const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+  const smart = nodes.find((node) => node.name === 'Smart')
+
+  assert.deepEqual(smart?.historySamples, [
+    {
+      nodeName: 'Smart',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-11T03:00:00.030Z',
+      delay: 170,
+      success: true,
+    },
+    {
+      nodeName: 'Smart',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-11T03:01:30.030Z',
+      delay: 174,
+      success: true,
+    },
+  ])
+})
+
 test('probes a proxy node through the delay endpoint', async () => {
   const requested: string[] = []
   const fetchMock: typeof fetch = async (input) => {
