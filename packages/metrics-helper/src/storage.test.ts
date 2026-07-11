@@ -170,6 +170,86 @@ test('ignores duplicate probe samples from repeated scrapes', () => {
   storage.close()
 })
 
+test('keeps only the latest smart group sample in the same test round second', () => {
+  const storage = createStorage()
+
+  storage.recordNode('US-Smart', 'Smart')
+
+  assert.equal(
+    storage.insertProbeSample({
+      nodeName: 'US-Smart',
+      testUrl: 'https://example.com',
+      timestamp: '2026-07-11T03:00:00.010Z',
+      delay: 158,
+      success: true,
+    }),
+    true,
+  )
+  assert.equal(
+    storage.insertProbeSample({
+      nodeName: 'US-Smart',
+      testUrl: 'https://example.com',
+      timestamp: '2026-07-11T03:00:00.030Z',
+      delay: 170,
+      success: true,
+    }),
+    true,
+  )
+  assert.equal(
+    storage.insertProbeSample({
+      nodeName: 'US-Smart',
+      testUrl: 'https://example.com',
+      timestamp: '2026-07-11T03:00:00.020Z',
+      delay: 165,
+      success: true,
+    }),
+    false,
+  )
+
+  assert.deepEqual(
+    storage.getRecentProbeSamples('US-Smart', 60, 30, Date.parse('2026-07-11T03:00:30Z')),
+    [
+      {
+        nodeName: 'US-Smart',
+        testUrl: 'https://example.com',
+        timestamp: '2026-07-11T03:00:00.030Z',
+        delay: 170,
+        success: true,
+      },
+    ],
+  )
+
+  storage.close()
+})
+
+test('keeps distinct same-second samples for non-smart nodes', () => {
+  const storage = createStorage()
+
+  storage.recordNode('US-01', 'ss')
+  for (const [timestamp, delay] of [
+    ['2026-07-11T03:00:00.010Z', 158],
+    ['2026-07-11T03:00:00.030Z', 170],
+  ] as const) {
+    assert.equal(
+      storage.insertProbeSample({
+        nodeName: 'US-01',
+        testUrl: 'https://example.com',
+        timestamp,
+        delay,
+        success: true,
+      }),
+      true,
+    )
+  }
+
+  assert.equal(
+    storage.getRecentProbeSamples('US-01', 60, 30, Date.parse('2026-07-11T03:00:30Z')).length,
+    2,
+  )
+
+  storage.close()
+})
+
 test('finds latest sample timestamp across all test urls for a node', () => {
   const storage = createStorage()
 

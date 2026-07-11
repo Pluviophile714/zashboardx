@@ -91,6 +91,55 @@ export class MetricsStorage {
 
   insertProbeSample(sample: ProbeSample) {
     this.recordNode(sample.nodeName, null)
+
+    const node = this.#db
+      .prepare('SELECT type FROM nodes WHERE node_name = ?')
+      .get(sample.nodeName) as { type: string | null }
+    const isSmart = node.type?.replace(/[\s-]/g, '').toLowerCase() === 'smart'
+
+    if (isSmart) {
+      const timestampSecond = sample.timestamp.slice(0, 19)
+      const existingRound = this.#db
+        .prepare(
+          `
+          SELECT id, timestamp
+          FROM probe_samples
+          WHERE node_name = ?
+            AND test_url = ?
+            AND substr(timestamp, 1, 19) = ?
+          ORDER BY timestamp DESC, id DESC
+          LIMIT 1
+        `,
+        )
+        .get(sample.nodeName, sample.testUrl, timestampSecond) as
+        | { id: number; timestamp: string }
+        | undefined
+
+      if (existingRound) {
+        if (sample.timestamp <= existingRound.timestamp) {
+          return false
+        }
+
+        this.#db
+          .prepare(
+            `
+            UPDATE probe_samples
+            SET timestamp = ?, delay = ?, success = ?, error_type = ?
+            WHERE id = ?
+          `,
+          )
+          .run(
+            sample.timestamp,
+            sample.delay,
+            sample.success ? 1 : 0,
+            sample.errorType ?? null,
+            existingRound.id,
+          )
+
+        return true
+      }
+    }
+
     const existing = this.#db
       .prepare(
         `
