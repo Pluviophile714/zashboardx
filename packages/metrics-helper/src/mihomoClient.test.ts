@@ -285,6 +285,58 @@ test('keeps selected group history as group metrics as well as leaf metrics', as
   ])
 })
 
+test('does not copy selected group history into an already discovered leaf node', async () => {
+  const fetchMock: typeof fetch = async () =>
+    jsonResponse({
+      proxies: {
+        Manual: {
+          name: 'Manual',
+          type: 'Selector',
+          all: ['HK-01'],
+          now: 'HK-01',
+          history: [
+            { time: '2026-07-06T03:00:10.000Z', delay: 58 },
+            { time: '2026-07-06T03:01:10.000Z', delay: 59 },
+          ],
+        },
+        Fallback: {
+          name: 'Fallback',
+          type: 'Fallback',
+          all: ['HK-01'],
+          now: 'HK-01',
+          history: [
+            { time: '2026-07-06T03:00:20.000Z', delay: 60 },
+            { time: '2026-07-06T03:01:20.000Z', delay: 61 },
+          ],
+        },
+        'HK-01': {
+          name: 'HK-01',
+          type: 'Trojan',
+          history: [{ time: '2026-07-06T03:00:00.000Z', delay: 55 }],
+        },
+      },
+    })
+  const client = new MihomoClient({
+    baseUrl: 'http://mihomo.example:9090',
+    secret: '',
+    fetchImpl: fetchMock,
+  })
+
+  const nodes = await client.discoverProxyNodes('https://www.gstatic.com/generate_204')
+  const leaf = nodes.find((node) => node.name === 'HK-01')
+
+  assert.equal(leaf?.type, 'Trojan')
+  assert.deepEqual(leaf?.historySamples, [
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://www.gstatic.com/generate_204',
+      timestamp: '2026-07-06T03:00:00.000Z',
+      delay: 55,
+      success: true,
+    },
+  ])
+})
+
 test('probes a proxy node through the delay endpoint', async () => {
   const requested: string[] = []
   const fetchMock: typeof fetch = async (input) => {

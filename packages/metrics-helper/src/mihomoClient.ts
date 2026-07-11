@@ -178,7 +178,7 @@ export class MihomoClient {
 
       const name = proxy.now
 
-      if (groupNames.has(name) || isBuiltinProxy(name, proxies[name])) {
+      if (discovered.has(name) || groupNames.has(name) || isBuiltinProxy(name, proxies[name])) {
         continue
       }
 
