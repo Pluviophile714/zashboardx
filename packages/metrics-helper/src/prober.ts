@@ -64,7 +64,9 @@ export class ProbeRunner {
         this.#storage.recordNode(node.name, node.type)
 
         if (node.historySamples?.length) {
-          node.historySamples.forEach((sample) => this.#storage.insertProbeSample(sample))
+          node.historySamples.forEach((sample) =>
+            this.#storage.insertProbeSample(sample, { collapseFallbackRound: true }),
+          )
         }
 
         const latestSampleAt = this.#storage.getLatestSampleTimestamp(node.name)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, test } from 'node:test'
 import { MetricsStorage } from './storage.js'
 import type { ProbeSample } from './types.js'
@@ -248,6 +249,180 @@ test('keeps distinct same-second samples for non-smart nodes', () => {
   )
 
   storage.close()
+})
+
+test('keeps only the final fallback group sample from a two-second test round', () => {
+  const storage = createStorage()
+
+  storage.recordNode('SG-Fallback', 'Fallback')
+
+  for (const [timestamp, delay] of [
+    ['2026-07-11T03:00:00.010Z', 84],
+    ['2026-07-11T03:00:00.410Z', 86],
+    ['2026-07-11T03:01:30.000Z', 81],
+  ] as const) {
+    assert.equal(
+      storage.insertProbeSample(
+        {
+          nodeName: 'SG-Fallback',
+          testUrl: 'https://example.com',
+          timestamp,
+          delay,
+          success: true,
+        },
+        { collapseFallbackRound: true },
+      ),
+      true,
+    )
+  }
+
+  assert.deepEqual(
+    storage.getRecentProbeSamples('SG-Fallback', 120, 30, Date.parse('2026-07-11T03:02:00Z')),
+    [
+      {
+        nodeName: 'SG-Fallback',
+        testUrl: 'https://example.com',
+        timestamp: '2026-07-11T03:00:00.410Z',
+        delay: 86,
+        success: true,
+      },
+      {
+        nodeName: 'SG-Fallback',
+        testUrl: 'https://example.com',
+        timestamp: '2026-07-11T03:01:30.000Z',
+        delay: 81,
+        success: true,
+      },
+    ],
+  )
+
+  storage.close()
+})
+
+test('keeps close fallback samples from ordinary writes as distinct measurements', () => {
+  const storage = createStorage()
+
+  storage.recordNode('SG-Fallback', 'Fallback')
+
+  for (const [timestamp, delay] of [
+    ['2026-07-11T03:00:00.010Z', 84],
+    ['2026-07-11T03:00:00.410Z', 86],
+  ] as const) {
+    storage.insertProbeSample({
+      nodeName: 'SG-Fallback',
+      testUrl: 'https://example.com',
+      timestamp,
+      delay,
+      success: true,
+    })
+  }
+
+  assert.equal(
+    storage.getRecentProbeSamples('SG-Fallback', 60, 30, Date.parse('2026-07-11T03:00:30Z')).length,
+    2,
+  )
+
+  storage.close()
+})
+
+test('removes legacy fallback duplicates without removing ordinary node samples', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-'))
+
+  tempDirs.push(dir)
+
+  const databasePath = join(dir, 'metrics.sqlite')
+  const database = new DatabaseSync(databasePath)
+
+  database.exec(`
+    CREATE TABLE nodes (
+      node_name TEXT PRIMARY KEY,
+      type TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL
+    );
+    CREATE TABLE probe_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      node_name TEXT NOT NULL,
+      test_url TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      delay INTEGER,
+      success INTEGER NOT NULL,
+      error_type TEXT
+    );
+    CREATE TABLE metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `)
+  database
+    .prepare('INSERT INTO nodes (node_name, type, first_seen, last_seen) VALUES (?, ?, ?, ?)')
+    .run('SG-Fallback', 'Fallback', at(0), at(0))
+  database
+    .prepare('INSERT INTO nodes (node_name, type, first_seen, last_seen) VALUES (?, ?, ?, ?)')
+    .run('SG-01', 'ss', at(0), at(0))
+  const insert = database.prepare(
+    'INSERT INTO probe_samples (node_name, test_url, timestamp, delay, success) VALUES (?, ?, ?, ?, ?)',
+  )
+
+  insert.run('SG-Fallback', 'https://example.com', '2026-07-11T03:00:00.010Z', 84, 1)
+  insert.run('SG-Fallback', 'https://example.com', '2026-07-11T03:00:00.410Z', 86, 1)
+  insert.run('SG-01', 'https://example.com', '2026-07-11T03:00:00.010Z', 84, 1)
+  insert.run('SG-01', 'https://example.com', '2026-07-11T03:00:00.410Z', 86, 1)
+  database.close()
+
+  const storage = new MetricsStorage(databasePath)
+
+  storage.init()
+
+  assert.equal(
+    storage.getRecentProbeSamples('SG-Fallback', 60, 30, Date.parse('2026-07-11T03:00:30Z')).length,
+    1,
+  )
+  assert.equal(
+    storage.getRecentProbeSamples('SG-01', 60, 30, Date.parse('2026-07-11T03:00:30Z')).length,
+    2,
+  )
+
+  storage.close()
+})
+
+test('runs the legacy fallback cleanup only once', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-'))
+
+  tempDirs.push(dir)
+
+  const databasePath = join(dir, 'metrics.sqlite')
+  const firstStorage = new MetricsStorage(databasePath)
+
+  firstStorage.init()
+  firstStorage.recordNode('SG-Fallback', 'Fallback')
+  firstStorage.insertProbeSample({
+    nodeName: 'SG-Fallback',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-11T03:00:00.010Z',
+    delay: 84,
+    success: true,
+  })
+  firstStorage.insertProbeSample({
+    nodeName: 'SG-Fallback',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-11T03:00:00.410Z',
+    delay: 86,
+    success: true,
+  })
+  firstStorage.close()
+
+  const reopenedStorage = new MetricsStorage(databasePath)
+
+  reopenedStorage.init()
+
+  assert.equal(
+    reopenedStorage.getRecentProbeSamples('SG-Fallback', 60, 30, Date.parse('2026-07-11T03:00:30Z'))
+      .length,
+    2,
+  )
+
+  reopenedStorage.close()
 })
 
 test('finds latest sample timestamp across all test urls for a node', () => {

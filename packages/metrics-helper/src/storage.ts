@@ -3,6 +3,8 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { NodeMetrics, ProbeSample } from './types.js'
 
+const FALLBACK_ROUND_WINDOW_MS = 2_000
+
 type NodeMetricsRow = {
   node_name: string
   first_timestamp: string
@@ -68,9 +70,18 @@ export class MetricsStorage {
         value TEXT NOT NULL
       );
     `)
+    const schemaVersionRow = this.#database
+      .prepare('SELECT value FROM metadata WHERE key = ?')
+      .get('schema_version') as { value: string } | undefined
+    const schemaVersion = Number(schemaVersionRow?.value ?? 0)
+
+    if (!Number.isFinite(schemaVersion) || schemaVersion < 2) {
+      this.#removeLegacyFallbackRoundDuplicates()
+    }
+
     this.#database
       .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
-      .run('schema_version', '1')
+      .run('schema_version', '2')
   }
 
   recordNode(nodeName: string, type: string | null) {
@@ -89,13 +100,15 @@ export class MetricsStorage {
       .run(nodeName, type, now, now)
   }
 
-  insertProbeSample(sample: ProbeSample) {
+  insertProbeSample(sample: ProbeSample, options: { collapseFallbackRound?: boolean } = {}) {
     this.recordNode(sample.nodeName, null)
 
     const node = this.#db
       .prepare('SELECT type FROM nodes WHERE node_name = ?')
       .get(sample.nodeName) as { type: string | null }
-    const isSmart = node.type?.replace(/[\s-]/g, '').toLowerCase() === 'smart'
+    const normalizedType = node.type?.replace(/[\s-]/g, '').toLowerCase()
+    const isSmart = normalizedType === 'smart'
+    const isFallback = normalizedType === 'fallback'
 
     if (isSmart) {
       const timestampSecond = sample.timestamp.slice(0, 19)
@@ -114,6 +127,53 @@ export class MetricsStorage {
         .get(sample.nodeName, sample.testUrl, timestampSecond) as
         | { id: number; timestamp: string }
         | undefined
+
+      if (existingRound) {
+        if (sample.timestamp <= existingRound.timestamp) {
+          return false
+        }
+
+        this.#db
+          .prepare(
+            `
+            UPDATE probe_samples
+            SET timestamp = ?, delay = ?, success = ?, error_type = ?
+            WHERE id = ?
+          `,
+          )
+          .run(
+            sample.timestamp,
+            sample.delay,
+            sample.success ? 1 : 0,
+            sample.errorType ?? null,
+            existingRound.id,
+          )
+
+        return true
+      }
+    }
+
+    if (isFallback && options.collapseFallbackRound) {
+      const timestampMs = Date.parse(sample.timestamp)
+      const existingRound = this.#db
+        .prepare(
+          `
+          SELECT id, timestamp
+          FROM probe_samples
+          WHERE node_name = ?
+            AND test_url = ?
+            AND timestamp >= ?
+            AND timestamp <= ?
+          ORDER BY timestamp DESC, id DESC
+          LIMIT 1
+        `,
+        )
+        .get(
+          sample.nodeName,
+          sample.testUrl,
+          new Date(timestampMs - FALLBACK_ROUND_WINDOW_MS).toISOString(),
+          new Date(timestampMs + FALLBACK_ROUND_WINDOW_MS).toISOString(),
+        ) as { id: number; timestamp: string } | undefined
 
       if (existingRound) {
         if (sample.timestamp <= existingRound.timestamp) {
@@ -276,6 +336,44 @@ export class MetricsStorage {
     }
 
     return this.#database
+  }
+
+  #removeLegacyFallbackRoundDuplicates() {
+    const fallbackNodes = this.#db
+      .prepare(
+        `
+        SELECT node_name
+        FROM nodes
+        WHERE lower(replace(replace(COALESCE(type, ''), ' ', ''), '-', '')) = 'fallback'
+      `,
+      )
+      .all() as { node_name: string }[]
+    const removeDuplicates = this.#db.prepare(
+      `
+        WITH ordered AS (
+          SELECT
+            sample.id,
+            sample.timestamp,
+            LEAD(sample.timestamp) OVER (
+              PARTITION BY sample.test_url
+              ORDER BY sample.timestamp, sample.id
+            ) AS next_timestamp
+          FROM probe_samples AS sample
+          WHERE sample.node_name = ?
+        )
+        DELETE FROM probe_samples
+        WHERE id IN (
+          SELECT id
+          FROM ordered
+          WHERE next_timestamp IS NOT NULL
+            AND (julianday(next_timestamp) - julianday(timestamp)) * 86400000 <= ?
+        )
+      `,
+    )
+
+    for (const node of fallbackNodes) {
+      removeDuplicates.run(node.node_name, FALLBACK_ROUND_WINDOW_MS)
+    }
   }
 
   #metricRows(windowSeconds: number, nowMs: number, nodeName?: string) {
