@@ -176,6 +176,58 @@ test('actively probes nodes whose mihomo history is stale', async () => {
   storage.close()
 })
 
+test('keeps policy groups observer-only when their mihomo history is stale', async () => {
+  const nowMs = Date.now()
+  const staleHistoryTime = new Date(nowMs - 10 * 60_000).toISOString()
+  const requestedDelayNodes: string[] = []
+  const fetchMock: typeof fetch = async (input) => {
+    const url = new URL(String(input))
+
+    if (url.pathname === '/proxies') {
+      return jsonResponse({
+        proxies: {
+          'HK-Smart-Fallback': {
+            name: 'HK-Smart-Fallback',
+            type: 'Fallback',
+            all: ['HK-Smart', 'HK-Manual'],
+            now: 'HK-Smart',
+            history: [{ time: staleHistoryTime, delay: 88 }],
+          },
+        },
+      })
+    }
+
+    if (url.pathname === '/providers/proxies') {
+      return jsonResponse({ providers: {} })
+    }
+
+    requestedDelayNodes.push(decodeURIComponent(url.pathname.split('/').at(-2) ?? ''))
+    return jsonResponse({ delay: 118 })
+  }
+  const storage = createStorage()
+  const health = createHealth()
+  const runner = new ProbeRunner({
+    client: new MihomoClient({
+      baseUrl: config.mihomoBaseUrl,
+      secret: '',
+      fetchImpl: fetchMock,
+    }),
+    storage,
+    config,
+    health,
+  })
+
+  await runner.runOnce()
+
+  const metrics = storage.getNodeMetrics(24 * 60 * 60, nowMs + 1000)
+
+  assert.deepEqual(requestedDelayNodes, [])
+  assert.equal(metrics['HK-Smart-Fallback'].sampleCount, 1)
+  assert.equal(metrics['HK-Smart-Fallback'].lastDelay, 88)
+
+  storage.close()
+})
+
 test('does not actively probe provider-only nodes through the proxy delay endpoint', async () => {
   const nowMs = Date.now()
   const staleHistoryTime = new Date(nowMs - 10 * 60_000).toISOString()

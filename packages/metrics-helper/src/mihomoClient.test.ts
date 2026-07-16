@@ -248,6 +248,7 @@ test('keeps selected group history as group metrics as well as leaf metrics', as
   const leaf = nodes.find((node) => node.name === 'HK-01')
 
   assert.equal(group?.type, 'Selector')
+  assert.equal(group?.probeable, false)
   assert.equal(leaf?.type, null)
   assert.deepEqual(group?.historySamples, [
     {

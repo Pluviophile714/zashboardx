@@ -84,6 +84,7 @@ import {
   getSmartLossRateClass,
   resolveSmartLossMetric,
 } from '@/helper/smartLossMetrics'
+import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
@@ -600,24 +601,21 @@ const refreshR5sLatencyDetailsSamples = () => {
   })
 }
 
-const waitForR5sLatencyDetailsSamples = async () => {
+const getR5sLatencyDetailsSamplesRefresh = () => {
   const sourceName = getR5sLatencySampleSourceName()
   const metrics = getSharedMetricsResolution()?.metrics
 
   if (!sourceName || !metrics?.sampleCount) {
-    return
+    return null
   }
 
   const cacheKey = getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
 
   if (proxyMetricsSamplesMap.value[cacheKey]?.length) {
-    return
+    return null
   }
 
-  await Promise.race([
-    refreshR5sLatencyDetailsSamples(),
-    new Promise((resolve) => window.setTimeout(resolve, LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT)),
-  ]).catch(() => undefined)
+  return refreshR5sLatencyDetailsSamples()
 }
 
 const formatCardAvailability = (availability: number) => {
@@ -1055,14 +1053,6 @@ const handlerLatencyDetailsTip = async (e: Event) => {
 
   if (!anchor) return
 
-  await waitForR5sLatencyDetailsSamples()
-
-  if (!hasLatencyDetailsHistory()) return
-
-  if (!compact && !isHoveringElement(anchor) && !isHoveringElement(cardRef.value)) {
-    return
-  }
-
   const tipEvent = Object.create(e, {
     currentTarget: {
       value: anchor,
@@ -1071,49 +1061,61 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
   const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
   const placement = compact ? mobilePlacement : 'top'
+  const refresh = getR5sLatencyDetailsSamplesRefresh() ?? Promise.resolve(null)
 
-  showTip(tipEvent, createLatencyDetailsTip(), {
-    animation: 'fade',
-    appendTo: document.body,
-    delay: [0, 120],
-    duration: [70, 50],
-    interactive: true,
-    interactiveBorder: compact ? 10 : 8,
-    interactiveDebounce: 40,
-    hideOnClick: false,
-    maxWidth: 'none',
-    offset: [0, 8],
-    onShown: (instance) => {
-      bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
-    },
-    onDestroy: cleanupLatencyDetailsTip,
-    placement,
-    popperOptions: {
-      strategy: 'fixed',
-      modifiers: [
-        {
-          name: 'preventOverflow',
-          options: {
-            boundary: 'viewport',
-            padding: 8,
-            tether: false,
-          },
+  await openWithDeferredRefresh({
+    refresh,
+    waitMs: LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT,
+    open: () => {
+      if (!hasLatencyDetailsHistory()) return null
+      if (!compact && !isHoveringElement(anchor) && !isHoveringElement(cardRef.value)) return null
+
+      return showTip(tipEvent, createLatencyDetailsTip(), {
+        animation: 'fade',
+        appendTo: document.body,
+        delay: [0, 120],
+        duration: [70, 50],
+        interactive: true,
+        interactiveBorder: compact ? 10 : 8,
+        interactiveDebounce: 40,
+        hideOnClick: false,
+        maxWidth: 'none',
+        offset: [0, 8],
+        onShown: (instance) => {
+          bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
         },
-        {
-          name: 'flip',
-          options: {
-            boundary: 'viewport',
-            fallbackPlacements:
-              compact && placement === 'bottom'
-                ? ['bottom', 'top', 'right', 'left']
-                : ['top', 'bottom', 'right', 'left'],
-            padding: 8,
-          },
+        onDestroy: cleanupLatencyDetailsTip,
+        placement,
+        popperOptions: {
+          strategy: 'fixed',
+          modifiers: [
+            {
+              name: 'preventOverflow',
+              options: {
+                boundary: 'viewport',
+                padding: 8,
+                tether: false,
+              },
+            },
+            {
+              name: 'flip',
+              options: {
+                boundary: 'viewport',
+                fallbackPlacements:
+                  compact && placement === 'bottom'
+                    ? ['bottom', 'top', 'right', 'left']
+                    : ['top', 'bottom', 'right', 'left'],
+                padding: 8,
+              },
+            },
+          ],
         },
-      ],
+        trigger: 'mouseenter',
+        touch: ['hold', 500],
+      })
     },
-    trigger: 'mouseenter',
-    touch: ['hold', 500],
+    isActive: (instance) => Boolean(instance && !instance.state.isDestroyed),
+    update: (instance) => instance?.setContent(createLatencyDetailsTip()),
   })
 }
 

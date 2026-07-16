@@ -11,7 +11,7 @@ export const useTooltip = () => {
 
   const showTip = (event: Event, content: string | HTMLElement, config: Partial<Props> = {}) => {
     if (currentTarget === event.currentTarget) {
-      return
+      return tippyInstance
     }
 
     tippyInstance?.destroy()
@@ -48,6 +48,7 @@ export const useTooltip = () => {
     })
 
     currentTarget = event.currentTarget as HTMLElement
+    return tippyInstance
   }
 
   const hideTip = () => {

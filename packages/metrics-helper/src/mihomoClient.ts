@@ -177,6 +177,7 @@ export class MihomoClient {
       discovered.set(name, {
         name,
         type: proxy.type ?? null,
+        probeable: false,
         historySamples,
       })
     }
