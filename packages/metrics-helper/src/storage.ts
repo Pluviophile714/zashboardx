@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { NodeMetrics, ProbeSample } from './types.js'
+import type { NodeMetrics, ProbeSample, ProbeTimelineBucket } from './types.js'
 
 const FALLBACK_ROUND_WINDOW_MS = 2_000
 
@@ -18,6 +18,16 @@ type NodeMetricsRow = {
   last_delay: number | null
   last_success_at: string | null
   last_failure_at: string | null
+}
+
+type ProbeTimelineRow = {
+  bucket_index: number
+  sample_count: number
+  success_count: number
+  failure_count: number
+  avg_delay: number | null
+  min_delay: number | null
+  max_delay: number | null
 }
 
 type MetricsStorageInitOptions = {
@@ -255,6 +265,72 @@ export class MetricsStorage {
     const row = this.#metricRows(windowSeconds, nowMs, nodeName)[0]
 
     return row ? this.#nodeMetricsFromRow(row) : null
+  }
+
+  getNodeTimeline(
+    nodeName: string,
+    windowSeconds: number,
+    bucketCount = 96,
+    nowMs = Date.now(),
+  ): ProbeTimelineBucket[] {
+    const normalizedNowMs = Math.floor(nowMs / 1000) * 1000
+    const windowStartMs = normalizedNowMs - windowSeconds * 1000
+    const bucketSeconds = windowSeconds / bucketCount
+    const windowStart = new Date(windowStartMs).toISOString()
+    const now = new Date(normalizedNowMs).toISOString()
+    const rows = this.#db
+      .prepare(
+        `
+        WITH bucketed AS (
+          SELECT
+            MIN(
+              ?,
+              CAST((unixepoch(timestamp) - ?) / ? AS INTEGER)
+            ) AS bucket_index,
+            success,
+            delay
+          FROM probe_samples
+          WHERE node_name = ?
+            AND timestamp >= ?
+            AND timestamp <= ?
+        )
+        SELECT
+          bucket_index,
+          COUNT(*) AS sample_count,
+          SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
+          SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failure_count,
+          AVG(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS avg_delay,
+          MIN(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS min_delay,
+          MAX(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS max_delay
+        FROM bucketed
+        GROUP BY bucket_index
+        ORDER BY bucket_index ASC
+      `,
+      )
+      .all(
+        bucketCount - 1,
+        Math.floor(windowStartMs / 1000),
+        bucketSeconds,
+        nodeName,
+        windowStart,
+        now,
+      ) as ProbeTimelineRow[]
+    const rowsByBucket = new Map(rows.map((row) => [Number(row.bucket_index), row]))
+
+    return Array.from({ length: bucketCount }, (_, bucketIndex) => {
+      const row = rowsByBucket.get(bucketIndex)
+
+      return {
+        start: new Date(windowStartMs + bucketIndex * bucketSeconds * 1000).toISOString(),
+        end: new Date(windowStartMs + (bucketIndex + 1) * bucketSeconds * 1000).toISOString(),
+        sampleCount: row ? Number(row.sample_count) : 0,
+        successCount: row ? Number(row.success_count) : 0,
+        failureCount: row ? Number(row.failure_count) : 0,
+        avgDelay: row?.avg_delay === null || row === undefined ? null : Number(row.avg_delay),
+        minDelay: row?.min_delay === null || row === undefined ? null : Number(row.min_delay),
+        maxDelay: row?.max_delay === null || row === undefined ? null : Number(row.max_delay),
+      }
+    })
   }
 
   getLatestSampleTimestamp(nodeName: string, testUrl?: string) {

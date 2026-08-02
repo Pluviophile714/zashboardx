@@ -9,6 +9,17 @@ export type ProbeSample = {
   errorType?: string
 }
 
+export type ProbeTimelineBucket = {
+  start: string
+  end: string
+  sampleCount: number
+  successCount: number
+  failureCount: number
+  avgDelay: number | null
+  minDelay: number | null
+  maxDelay: number | null
+}
+
 export type DiscoveredProxyNode = {
   name: string
   type: string | null

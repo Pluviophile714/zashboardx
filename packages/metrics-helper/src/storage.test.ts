@@ -518,3 +518,110 @@ test('prunes samples older than retention days', () => {
 
   storage.close()
 })
+
+test('aggregates one node into ordered timeline buckets and preserves gaps', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse('2026-07-05T00:00:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:02:00.000Z',
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:06:00.000Z',
+    delay: 120,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:08:00.000Z',
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:31:00.000Z',
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.insertProbeSample({
+    nodeName: 'JP-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:08:00.000Z',
+    delay: 60,
+    success: true,
+  })
+
+  const buckets = storage.getNodeTimeline('HK-01', 24 * 60 * 60, 96, nowMs)
+
+  assert.equal(buckets.length, 96)
+  assert.deepEqual(buckets[0], {
+    start: '2026-07-04T00:00:00.000Z',
+    end: '2026-07-04T00:15:00.000Z',
+    sampleCount: 3,
+    successCount: 2,
+    failureCount: 1,
+    avgDelay: 100,
+    minDelay: 80,
+    maxDelay: 120,
+  })
+  assert.deepEqual(buckets[1], {
+    start: '2026-07-04T00:15:00.000Z',
+    end: '2026-07-04T00:30:00.000Z',
+    sampleCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    avgDelay: null,
+    minDelay: null,
+    maxDelay: null,
+  })
+  assert.deepEqual(buckets[2], {
+    start: '2026-07-04T00:30:00.000Z',
+    end: '2026-07-04T00:45:00.000Z',
+    sampleCount: 1,
+    successCount: 0,
+    failureCount: 1,
+    avgDelay: null,
+    minDelay: null,
+    maxDelay: null,
+  })
+  storage.close()
+})
+
+test('includes exact window endpoints in timeline buckets', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse('2026-07-05T00:00:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-04T00:00:00.000Z',
+    delay: 75,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-05T00:00:00.000Z',
+    delay: 125,
+    success: true,
+  })
+
+  const buckets = storage.getNodeTimeline('HK-01', 24 * 60 * 60, 96, nowMs)
+
+  assert.equal(buckets[0].start, '2026-07-04T00:00:00.000Z')
+  assert.equal(buckets[0].sampleCount, 1)
+  assert.equal(buckets[95].end, '2026-07-05T00:00:00.000Z')
+  assert.equal(buckets[95].sampleCount, 1)
+  assert.equal(buckets[95].avgDelay, 125)
+  storage.close()
+})
