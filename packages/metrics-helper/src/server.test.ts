@@ -342,6 +342,116 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
   }
 })
 
+test('serves a fixed 24-hour timeline for a Unicode node name', async () => {
+  const storage = createStorage()
+  const nodeName = '\ud83c\udded\ud83c\uddf0 HKG \u9999\u6e2f 07 [\u4e3b]'
+
+  storage.insertProbeSample({
+    nodeName,
+    testUrl: 'https://example.com',
+    timestamp: at(30),
+    delay: 95,
+    success: true,
+  })
+
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 15 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/timeline?node=${encodeURIComponent(nodeName)}&window=24h`,
+    )
+    const body = (await response.json()) as {
+      bucketSeconds: number
+      buckets: { sampleCount: number }[]
+      generatedAt: string
+      nodeName: string
+      windowSeconds: number
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(body.windowSeconds, 86_400)
+    assert.equal(body.generatedAt, at(30))
+    assert.equal(body.nodeName, nodeName)
+    assert.equal(body.bucketSeconds, 900)
+    assert.equal(body.buckets.length, 96)
+    assert.equal(body.buckets[95].sampleCount, 1)
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('validates timeline requests and retains the global method check', async () => {
+  const storage = createStorage()
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const missingNodeResponse = await fetch(`${baseUrl}/api/metrics/timeline?window=24h`)
+    const missingNodeBody = (await missingNodeResponse.json()) as { error: string }
+
+    assert.equal(missingNodeResponse.status, 400)
+    assert.equal(missingNodeResponse.headers.get('cache-control'), 'no-store')
+    assert.equal(missingNodeBody.error, 'invalid_node')
+
+    const longNodeResponse = await fetch(
+      `${baseUrl}/api/metrics/timeline?node=${'x'.repeat(513)}&window=24h`,
+    )
+    const longNodeBody = (await longNodeResponse.json()) as { error: string }
+
+    assert.equal(longNodeResponse.status, 400)
+    assert.equal(longNodeBody.error, 'invalid_node')
+
+    const unsupportedWindowResponse = await fetch(
+      `${baseUrl}/api/metrics/timeline?node=HK-01&window=7d`,
+    )
+    const unsupportedWindowBody = (await unsupportedWindowResponse.json()) as { error: string }
+
+    assert.equal(unsupportedWindowResponse.status, 400)
+    assert.equal(unsupportedWindowBody.error, 'unsupported_window')
+
+    const postResponse = await fetch(`${baseUrl}/api/metrics/timeline?node=HK-01&window=24h`, {
+      method: 'POST',
+    })
+    const postBody = (await postResponse.json()) as { error: string }
+
+    assert.equal(postResponse.status, 405)
+    assert.equal(postResponse.headers.get('cache-control'), 'no-store')
+    assert.equal(postBody.error, 'method_not_allowed')
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
 test('returns 404 for unknown metric routes', async () => {
   const storage = createStorage()
   const server = createMetricsServer({

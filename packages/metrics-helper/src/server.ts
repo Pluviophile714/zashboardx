@@ -215,6 +215,29 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       return
     }
 
+    if (url.pathname === '/api/metrics/timeline') {
+      const nodeName = url.searchParams.get('node')?.trim() ?? ''
+      const requestedWindow = url.searchParams.get('window') ?? '24h'
+
+      if (!nodeName || nodeName.length > 512) {
+        sendStatus(response, 400, { error: 'invalid_node' })
+        return
+      }
+      if (requestedWindow !== '24h') {
+        sendStatus(response, 400, { error: 'unsupported_window' })
+        return
+      }
+
+      sendJson(response, {
+        windowSeconds: 86_400,
+        generatedAt: new Date(nowMs).toISOString(),
+        nodeName,
+        bucketSeconds: 900,
+        buckets: options.storage.getNodeTimeline(nodeName, 86_400, 96, nowMs),
+      })
+      return
+    }
+
     if (url.pathname === '/api/metrics/samples') {
       const nodeName = url.searchParams.get('node')?.trim() ?? ''
 
