@@ -106,17 +106,26 @@ import {
 } from '@/store/settings'
 import {
   getProxyMetricsSamplesCacheKey,
+  getProxyMetricsTimelineCacheKey,
+  invalidateProxyMetricsTimeline,
   proxyMetricsMap,
   proxyMetricsSamplesMap,
+  proxyMetricsTimelineMap,
   proxyMetricsUpdatedAt,
   refreshProxyMetricsSamples,
+  refreshProxyMetricsTimeline,
 } from '@/store/proxyMetrics'
 import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
+import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
+import {
+  createLatencyTimelineChartSection,
+  type LatencyTimelineChartState,
+} from './latencyTimelineChart'
 import ProxyIcon from './ProxyIcon.vue'
 import { getSmartOutbound } from './smartOutbound'
 
@@ -210,6 +219,10 @@ const checkNodeTextTruncation = (e: Event) => {
 
 let latencyDetailsCloseTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyDetailsTipCleanup: (() => void) | undefined
+let activeLatencyDetailsTip: Instance | null = null
+let activeLatencyDetailsSourceName = ''
+let latencyTimelineRequestGeneration = 0
+const unavailableLatencyTimelineKeys = new Set<string>()
 
 const clearLatencyDetailsCloseTimer = () => {
   if (!latencyDetailsCloseTimer) return
@@ -532,6 +545,21 @@ const getMetricsCandidateNames = () => {
 
 const getR5sLatencySampleSourceName = () =>
   getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
+
+const getLatencyTimelineChartState = (sourceName: string): LatencyTimelineChartState => {
+  const cacheKey = getProxyMetricsTimelineCacheKey(sourceName)
+  const timeline = proxyMetricsTimelineMap.value[cacheKey]
+
+  if (timeline) {
+    return timeline.buckets.some((bucket) => bucket.sampleCount > 0)
+      ? { status: 'ready', timeline }
+      : { status: 'empty' }
+  }
+
+  return unavailableLatencyTimelineKeys.has(cacheKey)
+    ? { status: 'unavailable' }
+    : { status: 'loading' }
+}
 
 const getLocalLatencyDetailsHistory = () => {
   const cutoff = Date.now() - LATENCY_DETAILS_LOCAL_MAX_AGE
@@ -858,11 +886,12 @@ const createLatencyDetailsTip = () => {
   const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const sharedMetricsResolution = getSharedMetricsResolution()
   const sharedMetrics = sharedMetricsResolution?.metrics
+  const timelineSourceName = getR5sLatencySampleSourceName()
   const root = document.createElement('div')
 
   root.className = compact
-    ? 'max-h-[min(68vh,28rem)] w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
-    : 'w-76 max-w-[calc(100vw-2rem)] rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
+    ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
+    : 'flex max-h-[calc(100vh-1rem)] w-[25rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
 
   const title = document.createElement('div')
   title.className = compact
@@ -873,7 +902,61 @@ const createLatencyDetailsTip = () => {
 
   if (stats || history.length || sharedMetrics) {
     const chart = document.createElement('div')
-    chart.className = compact ? 'rounded-lg bg-base-300/50 p-1.5' : 'rounded-lg bg-base-300/50 p-2'
+    chart.className = compact
+      ? 'shrink-0 rounded-lg bg-base-300/50 p-1.5'
+      : 'shrink-0 rounded-lg bg-base-300/50 p-2'
+
+    const availabilityLine = document.createElement('div')
+    const availabilityMain = document.createElement('div')
+    const coverage = document.createElement('div')
+    const sampleDetail = document.createElement('div')
+    const availability = document.createElement('span')
+    const failure = document.createElement('span')
+    const availabilityNote = sharedMetrics
+      ? getSharedMetricsNote(sharedMetrics)
+      : {
+          className: 'text-medium-latency',
+          text: '采集中',
+        }
+
+    availabilityLine.className = 'grid gap-0.5 text-xs text-base-content/65'
+    availabilityMain.className = 'flex items-center justify-between gap-2'
+    availability.textContent = sharedMetrics
+      ? formatSharedMetricsAvailability(sharedMetrics)
+      : '24h可用率: --'
+    availability.title = sharedMetrics
+      ? sharedMetricsResolution?.usesResolvedNode
+        ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
+        : '基于 R5S 指标助手长期采集记录'
+      : 'R5S 指标助手暂无该节点记录，本机近30次只用于短期状态'
+    failure.className = availabilityNote.className
+    failure.textContent = availabilityNote.text
+    coverage.className = compact
+      ? 'text-[10px] text-base-content/45'
+      : 'text-[11px] text-base-content/45'
+    sampleDetail.className = coverage.className
+    coverage.textContent = sharedMetrics
+      ? formatMetricSampleRange('R5S', sharedMetrics.firstSampleAt, sharedMetrics.lastSampleAt)
+      : formatMetricSampleRange('R5S', null, null)
+    sampleDetail.textContent = sharedMetrics
+      ? `R5S样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+      : `R5S样本 0/0 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+    coverage.title = sharedMetrics
+      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+      : `等待 R5S 指标助手采集 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
+    sampleDetail.title = coverage.title
+    availabilityMain.append(availability)
+    if (failure.textContent) {
+      availabilityMain.append(failure)
+    }
+    availabilityLine.append(availabilityMain, coverage, sampleDetail)
+    chart.append(availabilityLine)
+    chart.append(
+      createLatencyTimelineChartSection(getLatencyTimelineChartState(timelineSourceName), {
+        compact,
+        sourceLabel: timelineSourceName !== props.name ? timelineSourceName : undefined,
+      }),
+    )
 
     if (stats) {
       const statLine = document.createElement('div')
@@ -928,58 +1011,13 @@ const createLatencyDetailsTip = () => {
       chart.append(stabilityLine)
     }
 
-    const availabilityLine = document.createElement('div')
-    const availabilityMain = document.createElement('div')
-    const coverage = document.createElement('div')
-    const sampleDetail = document.createElement('div')
-    const availability = document.createElement('span')
-    const failure = document.createElement('span')
-    const availabilityNote = sharedMetrics
-      ? getSharedMetricsNote(sharedMetrics)
-      : {
-          className: 'text-medium-latency',
-          text: '采集中',
-        }
-
-    availabilityLine.className = 'mt-1 grid gap-0.5 text-xs text-base-content/65'
-    availabilityMain.className = 'flex items-center justify-between gap-2'
-    availability.textContent = sharedMetrics
-      ? formatSharedMetricsAvailability(sharedMetrics)
-      : '24h可用率: --'
-    availability.title = sharedMetrics
-      ? sharedMetricsResolution?.usesResolvedNode
-        ? `基于当前最终节点 ${sharedMetricsResolution.sourceName} 的 R5S 指标助手记录`
-        : '基于 R5S 指标助手长期采集记录'
-      : 'R5S 指标助手暂无该节点记录，本机近30次只用于短期状态'
-    failure.className = availabilityNote.className
-    failure.textContent = availabilityNote.text
-    coverage.className = compact
-      ? 'text-[10px] text-base-content/45'
-      : 'text-[11px] text-base-content/45'
-    sampleDetail.className = coverage.className
-    coverage.textContent = sharedMetrics
-      ? formatMetricSampleRange('R5S', sharedMetrics.firstSampleAt, sharedMetrics.lastSampleAt)
-      : formatMetricSampleRange('R5S', null, null)
-    sampleDetail.textContent = sharedMetrics
-      ? `R5S样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-      : `R5S样本 0/0 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-    coverage.title = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-      : `等待 R5S 指标助手采集 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-    sampleDetail.title = coverage.title
-    availabilityMain.append(availability)
-    if (failure.textContent) {
-      availabilityMain.append(failure)
-    }
-    availabilityLine.append(availabilityMain, coverage, sampleDetail)
-    chart.append(availabilityLine)
     root.append(chart)
   }
 
   const list = document.createElement('div')
   list.className = compact
-    ? 'mt-1.5 flex max-h-32 flex-col gap-0.5 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
-    : 'mt-2 flex max-h-52 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
+    ? 'mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
+    : 'mt-2 flex min-h-20 max-h-52 flex-1 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
 
   if (!newestFirst.length) {
     const empty = document.createElement('div')
@@ -1062,6 +1100,31 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
   const placement = compact ? mobilePlacement : 'top'
   const refresh = getR5sLatencyDetailsSamplesRefresh() ?? Promise.resolve(null)
+  const timelineSourceName = getR5sLatencySampleSourceName()
+  const timelineCacheKey = getProxyMetricsTimelineCacheKey(timelineSourceName)
+  const requestGeneration = (latencyTimelineRequestGeneration += 1)
+  const timelineRefresh = refreshProxyMetricsTimeline(timelineSourceName)
+
+  void timelineRefresh.then((timeline) => {
+    if (timeline) {
+      unavailableLatencyTimelineKeys.delete(timelineCacheKey)
+    } else {
+      unavailableLatencyTimelineKeys.add(timelineCacheKey)
+    }
+
+    const instance = activeLatencyDetailsTip
+
+    if (
+      requestGeneration !== latencyTimelineRequestGeneration ||
+      activeLatencyDetailsSourceName !== timelineSourceName ||
+      !instance ||
+      instance.state.isDestroyed
+    ) {
+      return
+    }
+
+    instance.setContent(createLatencyDetailsTip())
+  })
 
   await openWithDeferredRefresh({
     refresh,
@@ -1070,7 +1133,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       if (!hasLatencyDetailsHistory()) return null
       if (!compact && !isHoveringElement(anchor) && !isHoveringElement(cardRef.value)) return null
 
-      return showTip(tipEvent, createLatencyDetailsTip(), {
+      const instance = showTip(tipEvent, createLatencyDetailsTip(), {
         animation: 'fade',
         appendTo: document.body,
         delay: [0, 120],
@@ -1084,7 +1147,14 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         onShown: (instance) => {
           bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
         },
-        onDestroy: cleanupLatencyDetailsTip,
+        onDestroy: (destroyedInstance) => {
+          if (activeLatencyDetailsTip === destroyedInstance) {
+            activeLatencyDetailsTip = null
+            activeLatencyDetailsSourceName = ''
+            latencyTimelineRequestGeneration += 1
+          }
+          cleanupLatencyDetailsTip()
+        },
         placement,
         popperOptions: {
           strategy: 'fixed',
@@ -1113,6 +1183,10 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         trigger: 'mouseenter',
         touch: ['hold', 500],
       })
+
+      activeLatencyDetailsTip = instance
+      activeLatencyDetailsSourceName = timelineSourceName
+      return instance
     },
     isActive: (instance) => Boolean(instance && !instance.state.isDestroyed),
     update: (instance) => instance?.setContent(createLatencyDetailsTip()),
@@ -1126,9 +1200,13 @@ const handlerLatencyTest = async () => {
   isLatencyTesting.value = true
   try {
     await proxyLatencyTest(props.name, getTestUrl(props.groupName), undefined, props.groupName)
-    isLatencyTesting.value = false
   } catch {
+    // The existing latency notification reports the failure.
+  } finally {
     isLatencyTesting.value = false
+    for (const name of getMetricsCandidateNames()) {
+      invalidateProxyMetricsTimeline(name)
+    }
   }
 
   if (
