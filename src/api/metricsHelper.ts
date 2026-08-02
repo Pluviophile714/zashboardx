@@ -38,6 +38,25 @@ export type ProxyMetricsSamplesResponse = {
   samples: ProxyMetricsSample[]
 }
 
+export type ProxyMetricsTimelineBucket = {
+  start: string
+  end: string
+  sampleCount: number
+  successCount: number
+  failureCount: number
+  avgDelay: number | null
+  minDelay: number | null
+  maxDelay: number | null
+}
+
+export type ProxyMetricsTimelineResponse = {
+  windowSeconds: number
+  generatedAt: string
+  nodeName: string
+  bucketSeconds: number
+  buckets: ProxyMetricsTimelineBucket[]
+}
+
 const proxyMetricsSampleQueue: ProxyMetricsSample[] = []
 let proxyMetricsSampleFlushTimer: ReturnType<typeof window.setTimeout> | undefined
 
@@ -53,6 +72,73 @@ const maxTimestamp = (...timestamps: (string | null | undefined)[]) => {
     .filter((timestamp): timestamp is number => timestamp !== null)
 
   return parsed.length ? Math.max(...parsed) : null
+}
+
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+const normalizeTimelineDelay = (value: unknown) => {
+  if (value === null) {
+    return null
+  }
+
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+export const normalizeMetricsTimelineBucket = (
+  value: unknown,
+): ProxyMetricsTimelineBucket | null => {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const bucket = value as Record<string, unknown>
+  const startMs = typeof bucket.start === 'string' ? Date.parse(bucket.start) : Number.NaN
+  const endMs = typeof bucket.end === 'string' ? Date.parse(bucket.end) : Number.NaN
+
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return null
+  }
+  if (
+    !isNonNegativeInteger(bucket.sampleCount) ||
+    !isNonNegativeInteger(bucket.successCount) ||
+    !isNonNegativeInteger(bucket.failureCount) ||
+    bucket.successCount + bucket.failureCount !== bucket.sampleCount
+  ) {
+    return null
+  }
+
+  const avgDelay = normalizeTimelineDelay(bucket.avgDelay)
+  const minDelay = normalizeTimelineDelay(bucket.minDelay)
+  const maxDelay = normalizeTimelineDelay(bucket.maxDelay)
+
+  if (avgDelay === undefined || minDelay === undefined || maxDelay === undefined) {
+    return null
+  }
+  if (bucket.successCount === 0) {
+    if (avgDelay !== null || minDelay !== null || maxDelay !== null) {
+      return null
+    }
+  } else if (
+    avgDelay === null ||
+    minDelay === null ||
+    maxDelay === null ||
+    minDelay > avgDelay ||
+    avgDelay > maxDelay
+  ) {
+    return null
+  }
+
+  return {
+    start: new Date(startMs).toISOString(),
+    end: new Date(endMs).toISOString(),
+    sampleCount: bucket.sampleCount,
+    successCount: bucket.successCount,
+    failureCount: bucket.failureCount,
+    avgDelay,
+    minDelay,
+    maxDelay,
+  }
 }
 
 const normalizeMetricsNode = (node: ProxyMetricsNode, generatedAt: string): ProxyMetricsNode => {
@@ -193,6 +279,82 @@ export const fetchProxyMetricsSamplesAPI = async (
       nodeName: typeof data.nodeName === 'string' ? data.nodeName : nodeName,
       samples,
       windowSeconds: Number(data.windowSeconds) || 24 * 60 * 60,
+    }
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+export const fetchProxyMetricsTimelineAPI = async (
+  nodeName: string,
+  metricsWindow = '24h',
+  timeout = 3000,
+): Promise<ProxyMetricsTimelineResponse | null> => {
+  if (!nodeName) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const params = new URLSearchParams({
+      node: nodeName,
+      window: metricsWindow,
+    })
+    const response = await fetch(`/api/metrics/timeline?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as Partial<ProxyMetricsTimelineResponse>
+    const generatedAtMs =
+      typeof data.generatedAt === 'string' ? Date.parse(data.generatedAt) : Number.NaN
+
+    if (
+      data.windowSeconds !== 86_400 ||
+      data.bucketSeconds !== 900 ||
+      data.nodeName !== nodeName ||
+      !Number.isFinite(generatedAtMs) ||
+      !Array.isArray(data.buckets) ||
+      data.buckets.length !== 96
+    ) {
+      return null
+    }
+
+    const buckets = data.buckets.map(normalizeMetricsTimelineBucket)
+
+    if (buckets.some((bucket) => bucket === null)) {
+      return null
+    }
+
+    const normalizedBuckets = buckets as ProxyMetricsTimelineBucket[]
+
+    for (let index = 0; index < normalizedBuckets.length; index += 1) {
+      const bucket = normalizedBuckets[index]
+      const startMs = Date.parse(bucket.start)
+      const endMs = Date.parse(bucket.end)
+
+      if (
+        endMs - startMs !== 900_000 ||
+        (index > 0 && normalizedBuckets[index - 1].end !== bucket.start)
+      ) {
+        return null
+      }
+    }
+
+    return {
+      windowSeconds: data.windowSeconds,
+      generatedAt: new Date(generatedAtMs).toISOString(),
+      nodeName: data.nodeName,
+      bucketSeconds: data.bucketSeconds,
+      buckets: normalizedBuckets,
     }
   } catch {
     return null

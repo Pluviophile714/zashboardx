@@ -1,21 +1,27 @@
 import {
   fetchProxyMetricsHelperAPI,
   fetchProxyMetricsSamplesAPI,
+  fetchProxyMetricsTimelineAPI,
   type ProxyMetricsNode,
   type ProxyMetricsSample,
+  type ProxyMetricsTimelineResponse,
 } from '@/api/metricsHelper'
 import { ref, shallowRef } from 'vue'
 
 const PROXY_METRICS_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_SAMPLES_CACHE_TTL = 30 * 1000
+const PROXY_METRICS_TIMELINE_CACHE_TTL = 30 * 1000
 
 let lastFetchTime = 0
 let pendingRefresh: Promise<void> | undefined
 const proxyMetricsSamplesFetchTimeMap = new Map<string, number>()
 const pendingSamplesRefreshMap = new Map<string, Promise<ProxyMetricsSample[] | null>>()
+const proxyMetricsTimelineFetchTimeMap = new Map<string, number>()
+const pendingTimelineRefreshMap = new Map<string, Promise<ProxyMetricsTimelineResponse | null>>()
 
 export const proxyMetricsMap = shallowRef<Record<string, ProxyMetricsNode>>({})
 export const proxyMetricsSamplesMap = shallowRef<Record<string, ProxyMetricsSample[]>>({})
+export const proxyMetricsTimelineMap = shallowRef<Record<string, ProxyMetricsTimelineResponse>>({})
 export const proxyMetricsAvailable = ref(false)
 export const proxyMetricsUpdatedAt = ref(0)
 export const proxyMetricsRequestDurationMs = ref<number | null>(null)
@@ -113,3 +119,68 @@ export const getProxyMetricsSamplesCacheKey = (
   metricsWindow = '24h',
   limit = 30,
 ) => `${metricsWindow}\n${limit}\n${nodeName}`
+
+export const getProxyMetricsTimelineCacheKey = (nodeName: string, metricsWindow = '24h') =>
+  `${metricsWindow}\n${nodeName}`
+
+export const refreshProxyMetricsTimeline = async (
+  nodeName: string,
+  options: { force?: boolean; window?: string } = {},
+) => {
+  if (!nodeName) {
+    return null
+  }
+
+  const metricsWindow = options.window ?? '24h'
+  const key = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
+  const now = Date.now()
+  const cached = proxyMetricsTimelineMap.value[key]
+
+  if (
+    cached &&
+    !options.force &&
+    now - (proxyMetricsTimelineFetchTimeMap.get(key) ?? 0) < PROXY_METRICS_TIMELINE_CACHE_TTL
+  ) {
+    return cached
+  }
+
+  const pending = pendingTimelineRefreshMap.get(key)
+
+  if (pending) {
+    return pending
+  }
+
+  const request = (async () => {
+    const response = await fetchProxyMetricsTimelineAPI(nodeName, metricsWindow)
+
+    if (!response) {
+      return null
+    }
+
+    proxyMetricsTimelineFetchTimeMap.set(key, Date.now())
+    proxyMetricsTimelineMap.value = {
+      ...proxyMetricsTimelineMap.value,
+      [key]: response,
+    }
+
+    return response
+  })().finally(() => {
+    pendingTimelineRefreshMap.delete(key)
+  })
+
+  pendingTimelineRefreshMap.set(key, request)
+
+  return request
+}
+
+export const invalidateProxyMetricsTimeline = (nodeName: string) => {
+  if (!nodeName) {
+    return
+  }
+
+  for (const key of proxyMetricsTimelineFetchTimeMap.keys()) {
+    if (key.endsWith(`\n${nodeName}`)) {
+      proxyMetricsTimelineFetchTimeMap.delete(key)
+    }
+  }
+}

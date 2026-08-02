@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { normalizeMetricsTimelineBucket } from '../../api/metricsHelper.ts'
+
+const validBucket = {
+  start: '2026-07-04T00:00:00.000Z',
+  end: '2026-07-04T00:15:00.000Z',
+  sampleCount: 3,
+  successCount: 2,
+  failureCount: 1,
+  avgDelay: 100,
+  minDelay: 80,
+  maxDelay: 120,
+}
+
+test('normalizes a valid timeline bucket', () => {
+  assert.deepEqual(normalizeMetricsTimelineBucket(validBucket), validBucket)
+})
+
+test('rejects inconsistent or invalid timeline counts', () => {
+  assert.equal(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      successCount: 3,
+    }),
+    null,
+  )
+  assert.equal(normalizeMetricsTimelineBucket({ ...validBucket, sampleCount: -1 }), null)
+  assert.equal(normalizeMetricsTimelineBucket({ ...validBucket, failureCount: 0.5 }), null)
+})
+
+test('rejects invalid or reversed timeline timestamps', () => {
+  assert.equal(normalizeMetricsTimelineBucket({ ...validBucket, start: 'not-a-date' }), null)
+  assert.equal(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      end: validBucket.start,
+    }),
+    null,
+  )
+})
+
+test('rejects inconsistent timeline latency values', () => {
+  assert.equal(normalizeMetricsTimelineBucket({ ...validBucket, avgDelay: Number.NaN }), null)
+  assert.equal(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      avgDelay: 70,
+      minDelay: 80,
+    }),
+    null,
+  )
+  assert.equal(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      successCount: 0,
+      failureCount: 3,
+    }),
+    null,
+  )
+  assert.deepEqual(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      successCount: 0,
+      failureCount: 3,
+      avgDelay: null,
+      minDelay: null,
+      maxDelay: null,
+    }),
+    {
+      ...validBucket,
+      successCount: 0,
+      failureCount: 3,
+      avgDelay: null,
+      minDelay: null,
+      maxDelay: null,
+    },
+  )
+})
