@@ -123,7 +123,7 @@ import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from 
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import {
@@ -221,6 +221,9 @@ let latencyDetailsCloseTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyDetailsTipCleanup: (() => void) | undefined
 let activeLatencyDetailsTip: Instance | null = null
 let activeLatencyDetailsSourceName = ''
+let activeLatencyDetailsAnchor: HTMLElement | null = null
+let activeLatencyDetailsCompact = false
+let stopLatencyDetailsMetricsWatch: (() => void) | undefined
 let latencyTimelineRequestGeneration = 0
 const unavailableLatencyTimelineKeys = new Set<string>()
 const LATENCY_DETAILS_VIEWPORT_PADDING = 8
@@ -633,6 +636,49 @@ const getR5sLatencyDetailsSamplesRefresh = () => {
   }
 
   return refreshR5sLatencyDetailsSamples()
+}
+
+const refreshActiveR5sLatencyDetails = () => {
+  const instance = activeLatencyDetailsTip
+  const sourceName = activeLatencyDetailsSourceName
+  const anchor = activeLatencyDetailsAnchor
+
+  if (!instance || instance.state.isDestroyed || !sourceName || !anchor) {
+    return
+  }
+
+  void refreshProxyMetricsSamples(sourceName, {
+    force: true,
+    limit: LATENCY_DETAIL_SEGMENTS,
+    window: '24h',
+  }).then(() => {
+    if (
+      activeLatencyDetailsTip !== instance ||
+      activeLatencyDetailsSourceName !== sourceName ||
+      instance.state.isDestroyed
+    ) {
+      return
+    }
+
+    instance.setContent(createLatencyDetailsTip())
+    repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
+  })
+}
+
+const startActiveLatencyDetailsRefresh = () => {
+  stopLatencyDetailsMetricsWatch?.()
+  stopLatencyDetailsMetricsWatch = watch(proxyMetricsUpdatedAt, (updatedAt, previousUpdatedAt) => {
+    if (!updatedAt || updatedAt === previousUpdatedAt) {
+      return
+    }
+
+    refreshActiveR5sLatencyDetails()
+  })
+}
+
+const stopActiveLatencyDetailsRefresh = () => {
+  stopLatencyDetailsMetricsWatch?.()
+  stopLatencyDetailsMetricsWatch = undefined
 }
 
 const formatCardAvailability = (availability: number) => {
@@ -1148,6 +1194,8 @@ const handlerLatencyDetailsTip = async (e: Event) => {
           if (activeLatencyDetailsTip === destroyedInstance) {
             activeLatencyDetailsTip = null
             activeLatencyDetailsSourceName = ''
+            activeLatencyDetailsAnchor = null
+            stopActiveLatencyDetailsRefresh()
             latencyTimelineRequestGeneration += 1
           }
           cleanupLatencyDetailsTip()
@@ -1184,6 +1232,9 @@ const handlerLatencyDetailsTip = async (e: Event) => {
 
       activeLatencyDetailsTip = instance
       activeLatencyDetailsSourceName = timelineSourceName
+      activeLatencyDetailsAnchor = anchor
+      activeLatencyDetailsCompact = compact
+      startActiveLatencyDetailsRefresh()
       return instance
     },
     isActive: (instance) => Boolean(instance && !instance.state.isDestroyed),
@@ -1234,7 +1285,10 @@ onMounted(() => {
   }
 })
 
-onUnmounted(cleanupLatencyDetailsTip)
+onUnmounted(() => {
+  stopActiveLatencyDetailsRefresh()
+  cleanupLatencyDetailsTip()
+})
 </script>
 
 <style scoped>

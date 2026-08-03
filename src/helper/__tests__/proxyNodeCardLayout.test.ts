@@ -66,3 +66,9 @@ test('uses a short desktop hover delay without changing the mobile long-press tr
   assert.match(proxyNodeCardSource, /delay: \[500, 120\]/)
   assert.match(proxyNodeCardSource, /touch: \['hold', 500\]/)
 })
+
+test('refreshes the open R5S detail list when the shared 24h metrics update', () => {
+  assert.match(proxyNodeCardSource, /watch\(\s*proxyMetricsUpdatedAt/)
+  assert.match(proxyNodeCardSource, /refreshProxyMetricsSamples\(sourceName, \{[\s\S]*force: true/)
+  assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
+})
