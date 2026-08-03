@@ -72,3 +72,10 @@ test('refreshes the open R5S detail list when the shared 24h metrics update', ()
   assert.match(proxyNodeCardSource, /refreshProxyMetricsSamples\(sourceName, \{[\s\S]*force: true/)
   assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
 })
+
+test('forces a fresh R5S sample request whenever node details open', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /const getR5sLatencyDetailsSamplesRefresh = \(\) => \{[\s\S]*return refreshR5sLatencyDetailsSamples\(true\)/,
+  )
+})

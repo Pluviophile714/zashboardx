@@ -608,7 +608,7 @@ const getLatencyDetailsHistorySource = () => {
   }
 }
 
-const refreshR5sLatencyDetailsSamples = () => {
+const refreshR5sLatencyDetailsSamples = (force = false) => {
   const sourceName = getR5sLatencySampleSourceName()
 
   if (!sourceName) {
@@ -616,6 +616,7 @@ const refreshR5sLatencyDetailsSamples = () => {
   }
 
   return refreshProxyMetricsSamples(sourceName, {
+    force,
     limit: LATENCY_DETAIL_SEGMENTS,
     window: '24h',
   })
@@ -629,13 +630,7 @@ const getR5sLatencyDetailsSamplesRefresh = () => {
     return null
   }
 
-  const cacheKey = getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-
-  if (proxyMetricsSamplesMap.value[cacheKey]?.length) {
-    return null
-  }
-
-  return refreshR5sLatencyDetailsSamples()
+  return refreshR5sLatencyDetailsSamples(true)
 }
 
 const refreshActiveR5sLatencyDetails = () => {
