@@ -4,7 +4,7 @@ import { buildProxyMetricsTimelineChartModel } from '@/helper/proxyMetricsTimeli
 export type LatencyTimelineChartState =
   | { status: 'loading' }
   | { status: 'unavailable' }
-  | { status: 'empty' }
+  | { status: 'empty'; timeline: ProxyMetricsTimelineResponse }
   | { status: 'ready'; timeline: ProxyMetricsTimelineResponse }
 
 type LatencyTimelineChartOptions = {
@@ -90,11 +90,6 @@ export const createLatencyTimelineChartSection = (
     appendEmptyState(body, 'R5S 24h 趋势暂不可用')
     return section
   }
-  if (state.status === 'empty') {
-    appendEmptyState(body, '24h 趋势暂无样本')
-    return section
-  }
-
   const width = 360
   const height = options.compact ? 116 : 150
   const timeline = state.timeline
@@ -103,7 +98,7 @@ export const createLatencyTimelineChartSection = (
     height,
     padding: {
       top: 8,
-      right: 8,
+      right: 16,
       bottom: 20,
       left: 35,
     },
@@ -235,6 +230,15 @@ export const createLatencyTimelineChartSection = (
   tooltip.className =
     'pointer-events-none absolute top-1 z-10 hidden min-w-36 rounded-md border border-base-content/10 bg-base-100/95 px-2 py-1.5 text-[10px] text-base-content/70 shadow-lg backdrop-blur-sm'
   body.append(svg, tooltip)
+
+  if (state.status === 'empty') {
+    const empty = document.createElement('div')
+
+    empty.className =
+      'pointer-events-none absolute inset-0 flex items-center justify-center pb-5 text-xs text-base-content/50'
+    empty.textContent = '24h 趋势暂无样本'
+    body.append(empty)
+  }
 
   const updateHover = (event: PointerEvent) => {
     const rect = svg.getBoundingClientRect()

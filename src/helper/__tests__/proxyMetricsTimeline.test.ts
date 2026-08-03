@@ -119,3 +119,23 @@ test('encodes failure ratios without treating empty buckets as failures', () => 
     ],
   )
 })
+
+test('keeps five time ticks and latency ticks for an empty 24h timeline', () => {
+  const response = timeline(
+    Array.from({ length: 96 }, (_, index) =>
+      bucket(index, {
+        sampleCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        avgDelay: null,
+        minDelay: null,
+        maxDelay: null,
+      }),
+    ),
+  )
+  const model = buildProxyMetricsTimelineChartModel(response, options)
+
+  assert.equal(model.axes.xTicks.length, 5)
+  assert.equal(model.axes.yTicks.length, 3)
+  assert.deepEqual(model.averagePaths, [])
+})

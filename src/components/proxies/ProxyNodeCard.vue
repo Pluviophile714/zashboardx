@@ -137,10 +137,6 @@ const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
 const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
-const CHART_WIDTH = 160
-const CHART_HEIGHT = 58
-const CHART_PADDING_X = 8
-const CHART_PADDING_Y = 8
 const { t } = useI18n()
 const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
@@ -223,6 +219,7 @@ let activeLatencyDetailsTip: Instance | null = null
 let activeLatencyDetailsSourceName = ''
 let latencyTimelineRequestGeneration = 0
 const unavailableLatencyTimelineKeys = new Set<string>()
+const LATENCY_DETAILS_VIEWPORT_PADDING = 8
 
 const clearLatencyDetailsCloseTimer = () => {
   if (!latencyDetailsCloseTimer) return
@@ -321,19 +318,6 @@ const getLatencyTextClass = (delay: number) => {
     return 'text-medium-latency'
   }
   return 'text-high-latency'
-}
-
-const getLatencyColorValue = (delay: number) => {
-  if (!delay || delay === NOT_CONNECTED) {
-    return 'color-mix(in oklch, var(--color-base-content) 45%, transparent)'
-  }
-  if (delay < lowLatency.value) {
-    return 'oklch(0.648 0.15 160)'
-  }
-  if (delay < mediumLatency.value) {
-    return 'rgb(250, 210, 75)'
-  }
-  return 'rgb(244, 96, 108)'
 }
 
 const getLatencyTimelineAccent = (delay?: number) => {
@@ -553,7 +537,7 @@ const getLatencyTimelineChartState = (sourceName: string): LatencyTimelineChartS
   if (timeline) {
     return timeline.buckets.some((bucket) => bucket.sampleCount > 0)
       ? { status: 'ready', timeline }
-      : { status: 'empty' }
+      : { status: 'empty', timeline }
   }
 
   return unavailableLatencyTimelineKeys.has(cacheKey)
@@ -704,75 +688,53 @@ const cardAvailabilityClass = computed(() => {
 
 const isCompactLatencyDetails = () => window.matchMedia('(max-width: 640px)').matches
 
-const buildSparklineSvg = (
-  history: { delay: number }[],
-  windowSize = LATENCY_BAR_SEGMENTS,
-  compact = false,
-) => {
-  const recent = history.slice(-windowSize)
-  const stats = getLatencyStats(history, windowSize)
+const repositionLatencyDetailsTip = (instance: Instance, anchor: HTMLElement, compact: boolean) => {
+  window.requestAnimationFrame(() => {
+    if (instance.state.isDestroyed) return
 
-  if (!stats || stats.successTests < 2) {
-    return null
-  }
+    if (!compact) {
+      const anchorRect = anchor.getBoundingClientRect()
+      const availableAbove = Math.max(0, anchorRect.top - LATENCY_DETAILS_VIEWPORT_PADDING)
+      const availableBelow = Math.max(
+        0,
+        window.innerHeight - anchorRect.bottom - LATENCY_DETAILS_VIEWPORT_PADDING,
+      )
+      const availableLeft = Math.max(0, anchorRect.left - LATENCY_DETAILS_VIEWPORT_PADDING)
+      const availableRight = Math.max(
+        0,
+        window.innerWidth - anchorRect.right - LATENCY_DETAILS_VIEWPORT_PADDING,
+      )
+      const root = instance.popper.querySelector('.tippy-content > div') as HTMLElement | null
 
-  const successfulRecent = recent.filter((item) => item.delay > NOT_CONNECTED)
-  const visualRange = Math.max(stats.max - stats.min, 80, Math.round(stats.avg * 0.25))
-  let lowerBound = Math.max(0, stats.avg - visualRange / 2)
-  let upperBound = lowerBound + visualRange
+      if (root) {
+        root.style.maxHeight = `${window.innerHeight - LATENCY_DETAILS_VIEWPORT_PADDING * 2}px`
+      }
 
-  if (lowerBound > stats.min) {
-    lowerBound = stats.min
-    upperBound = lowerBound + visualRange
-  }
-  if (upperBound < stats.max) {
-    upperBound = stats.max
-    lowerBound = Math.max(0, upperBound - visualRange)
-  }
+      const contentWidth = root?.getBoundingClientRect().width ?? 0
+      const placement: 'top' | 'bottom' | 'right' | 'left' =
+        availableRight >= contentWidth
+          ? 'right'
+          : availableLeft >= contentWidth
+            ? 'left'
+            : availableAbove >= availableBelow
+              ? 'top'
+              : 'bottom'
+      const maxHeight =
+        placement === 'top'
+          ? availableAbove
+          : placement === 'bottom'
+            ? availableBelow
+            : window.innerHeight - LATENCY_DETAILS_VIEWPORT_PADDING * 2
 
-  const chartHeight = compact ? 12 : CHART_HEIGHT
-  const chartPaddingY = compact ? 2 : CHART_PADDING_Y
-  const plotWidth = CHART_WIDTH - CHART_PADDING_X * 2
-  const plotHeight = chartHeight - chartPaddingY * 2
-  const xStep = plotWidth / (successfulRecent.length - 1)
-  const points = successfulRecent.map((item, index) => {
-    const normalized = (item.delay - lowerBound) / (upperBound - lowerBound || 1)
-    const clamped = Math.min(1, Math.max(0, normalized))
+      if (root) {
+        root.style.maxHeight = `${Math.floor(maxHeight)}px`
+      }
 
-    return {
-      x: CHART_PADDING_X + index * xStep,
-      y: chartPaddingY + (1 - clamped) * plotHeight,
-      delay: item.delay,
+      instance.setProps({ placement })
     }
+
+    void instance.popperInstance?.update()
   })
-
-  const path = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(' ')
-
-  const areaPath = `${path} L ${CHART_WIDTH - CHART_PADDING_X} ${chartHeight - chartPaddingY} L ${CHART_PADDING_X} ${chartHeight - chartPaddingY} Z`
-  const color = getLatencyColorValue(stats.avg)
-  const circles = points
-    .map(
-      (point) =>
-        `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="${compact ? '0.9' : '1.45'}" fill="${color}" fill-opacity="${compact ? '0.9' : '1'}" />`,
-    )
-    .join('')
-
-  return `
-    <svg viewBox="0 0 ${CHART_WIDTH} ${chartHeight}" class="${compact ? 'h-6' : 'h-14'} w-full" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="latency-area-${props.name.replace(/[^a-zA-Z0-9_-]/g, '-')}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.1" />
-          <stop offset="100%" stop-color="${color}" stop-opacity="0.02" />
-        </linearGradient>
-      </defs>
-      <line x1="${CHART_PADDING_X}" y1="${chartHeight / 2}" x2="${CHART_WIDTH - CHART_PADDING_X}" y2="${chartHeight / 2}" stroke="currentColor" stroke-opacity="${compact ? '0.08' : '0.12'}" stroke-dasharray="4 4" />
-      ${compact ? '' : `<path d="${areaPath}" fill="url(#latency-area-${props.name.replace(/[^a-zA-Z0-9_-]/g, '-')})" />`}
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="${compact ? '1' : '1.25'}" stroke-opacity="${compact ? '0.9' : '1'}" stroke-linecap="round" stroke-linejoin="round" />
-      ${circles}
-    </svg>
-  `
 }
 
 const buildLatencyStatusTimeline = (
@@ -890,13 +852,13 @@ const createLatencyDetailsTip = () => {
   const root = document.createElement('div')
 
   root.className = compact
-    ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
+    ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-0.5rem)] flex-col overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
     : 'flex max-h-[calc(100vh-1rem)] w-[25rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
 
   const title = document.createElement('div')
   title.className = compact
-    ? 'mb-1.5 truncate text-center text-sm font-bold'
-    : 'mb-2 truncate text-center text-base font-bold'
+    ? 'mb-1.5 shrink-0 truncate text-center text-sm font-bold'
+    : 'mb-2 shrink-0 truncate text-center text-base font-bold'
   title.textContent = node.value?.name ?? props.name
   root.append(title)
 
@@ -958,9 +920,11 @@ const createLatencyDetailsTip = () => {
       }),
     )
 
+    chart.append(buildLatencyStatusTimeline(history, compact, detailHistorySource.label))
+
     if (stats) {
       const statLine = document.createElement('div')
-      statLine.className = 'mb-1 flex items-center justify-between text-xs text-base-content/75'
+      statLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
 
       const min = document.createElement('span')
       min.textContent = `${stats.min}ms`
@@ -972,21 +936,10 @@ const createLatencyDetailsTip = () => {
       chart.append(statLine)
     } else {
       const emptyStat = document.createElement('div')
-      emptyStat.className = 'mb-1 text-center text-xs text-base-content/55'
+      emptyStat.className = 'mt-1 text-center text-xs text-base-content/55'
       emptyStat.textContent = history.length ? '近30次暂无成功测速' : 'R5S近30次等待样本'
       chart.append(emptyStat)
     }
-
-    const svg = stats ? buildSparklineSvg(history, LATENCY_DETAIL_SEGMENTS, compact) : null
-    const sparkline = document.createElement('div')
-
-    sparkline.className = compact ? 'text-base-content/60' : 'text-base-content/80'
-    sparkline.innerHTML =
-      svg ??
-      `<div class="flex ${compact ? 'h-6' : 'h-14'} items-center justify-center text-xs text-base-content/50">not enough data</div>`
-    chart.append(sparkline)
-
-    chart.append(buildLatencyStatusTimeline(history, compact, detailHistorySource.label))
 
     if (stats) {
       const stabilityLine = document.createElement('div')
@@ -1124,6 +1077,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
     }
 
     instance.setContent(createLatencyDetailsTip())
+    repositionLatencyDetailsTip(instance, anchor, compact)
   })
 
   await openWithDeferredRefresh({
@@ -1136,7 +1090,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       const instance = showTip(tipEvent, createLatencyDetailsTip(), {
         animation: 'fade',
         appendTo: document.body,
-        delay: [0, 120],
+        delay: [500, 120],
         duration: [70, 50],
         interactive: true,
         interactiveBorder: compact ? 10 : 8,
@@ -1146,6 +1100,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         offset: [0, 8],
         onShown: (instance) => {
           bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
+          repositionLatencyDetailsTip(instance, anchor, compact)
         },
         onDestroy: (destroyedInstance) => {
           if (activeLatencyDetailsTip === destroyedInstance) {
@@ -1162,6 +1117,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             {
               name: 'preventOverflow',
               options: {
+                altAxis: true,
                 boundary: 'viewport',
                 padding: 8,
                 tether: false,
@@ -1189,7 +1145,12 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       return instance
     },
     isActive: (instance) => Boolean(instance && !instance.state.isDestroyed),
-    update: (instance) => instance?.setContent(createLatencyDetailsTip()),
+    update: (instance) => {
+      instance?.setContent(createLatencyDetailsTip())
+      if (instance) {
+        repositionLatencyDetailsTip(instance, anchor, compact)
+      }
+    },
   })
 }
 

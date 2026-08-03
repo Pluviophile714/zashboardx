@@ -169,9 +169,9 @@ export const buildProxyMetricsTimelineChartModel = (
     return `${upper} ${lower} Z`
   })
   const yTickValues = [yMin, Math.round((yMin + yMax) / 2), yMax]
-  const xTickIndices = [0, Math.floor((bucketCount - 1) / 2), bucketCount - 1].filter(
-    (value, index, values) => values.indexOf(value) === index,
-  )
+  const xTickIndices = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => Math.round((bucketCount - 1) * ratio))
+    .filter((value, index, values) => values.indexOf(value) === index)
 
   return {
     axes: {
