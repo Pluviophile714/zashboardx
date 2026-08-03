@@ -79,7 +79,7 @@ export const createLatencyTimelineChartSection = (
     header.append(source)
   }
 
-  body.className = options.compact ? 'relative h-[116px]' : 'relative h-[150px]'
+  body.className = options.compact ? 'relative h-[96px]' : 'relative h-[150px]'
   section.append(header, body)
 
   if (state.status === 'loading') {
@@ -91,7 +91,7 @@ export const createLatencyTimelineChartSection = (
     return section
   }
   const width = 360
-  const height = options.compact ? 116 : 150
+  const height = options.compact ? 96 : 150
   const timeline = state.timeline
   const model = buildProxyMetricsTimelineChartModel(timeline, {
     width,

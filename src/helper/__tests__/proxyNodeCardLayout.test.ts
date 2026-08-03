@@ -28,6 +28,26 @@ test('keeps the final timeline time label inside the mobile detail popover', () 
   assert.match(timelineChartSource, /right: 16/)
 })
 
+test('keeps compact node details accessible without the desktop-only sample list', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /\? 'flex max-h-\[min\(68vh,28rem\)\].*touch-pan-y.*overflow-y-auto.*overscroll-contain/,
+  )
+  assert.match(proxyNodeCardSource, /if \(compact\) return root\r?\n\r?\n\s*const list/)
+  assert.match(proxyNodeCardSource, /list\.className =\s*\r?\n\s*'mt-2 flex min-h-20 max-h-52/)
+  assert.match(proxyNodeCardSource, /content\.style\.padding = '0'/)
+})
+
+test('keeps compact node details focused on the chart instead of desktop metadata', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /if \(!compact\) \{\r?\n\s*availabilityLine\.append\(coverage, sampleDetail\)/,
+  )
+  assert.match(proxyNodeCardSource, /if \(stats\) \{\r?\n\s*const statLine/)
+  assert.match(proxyNodeCardSource, /if \(stats && !compact\) \{\r?\n\s*const stabilityLine/)
+  assert.match(timelineChartSource, /options\.compact \? 'relative h-\[96px\]'/)
+})
+
 test('repositions an expanded desktop detail popover within the available viewport space', () => {
   assert.match(proxyNodeCardSource, /repositionLatencyDetailsTip/)
   assert.match(proxyNodeCardSource, /instance\.setProps\(\{ placement \}\)/)

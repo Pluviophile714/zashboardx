@@ -85,6 +85,10 @@ import {
   resolveSmartLossMetric,
 } from '@/helper/smartLossMetrics'
 import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
+import {
+  getCompactLatencyDetailsPlacement,
+  getLatencyDetailsViewportSize,
+} from '@/helper/latencyDetailsViewport'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
@@ -220,6 +224,7 @@ let activeLatencyDetailsSourceName = ''
 let latencyTimelineRequestGeneration = 0
 const unavailableLatencyTimelineKeys = new Set<string>()
 const LATENCY_DETAILS_VIEWPORT_PADDING = 8
+const LATENCY_DETAILS_POPOVER_GAP = 8
 
 const clearLatencyDetailsCloseTimer = () => {
   if (!latencyDetailsCloseTimer) return
@@ -692,22 +697,46 @@ const repositionLatencyDetailsTip = (instance: Instance, anchor: HTMLElement, co
   window.requestAnimationFrame(() => {
     if (instance.state.isDestroyed) return
 
-    if (!compact) {
-      const anchorRect = anchor.getBoundingClientRect()
+    const anchorRect = anchor.getBoundingClientRect()
+    const viewport = getLatencyDetailsViewportSize(
+      window.innerWidth,
+      window.innerHeight,
+      window.visualViewport,
+    )
+    const content = instance.popper.querySelector('.tippy-content') as HTMLElement | null
+    const root = instance.popper.querySelector('.tippy-content > div') as HTMLElement | null
+
+    if (compact) {
+      if (content) {
+        content.style.padding = '0'
+      }
+
+      const { placement, maxHeight } = getCompactLatencyDetailsPlacement(
+        anchorRect,
+        viewport,
+        LATENCY_DETAILS_VIEWPORT_PADDING,
+        LATENCY_DETAILS_POPOVER_GAP,
+      )
+
+      if (root) {
+        root.style.maxHeight = `${maxHeight}px`
+      }
+
+      instance.setProps({ placement })
+    } else {
       const availableAbove = Math.max(0, anchorRect.top - LATENCY_DETAILS_VIEWPORT_PADDING)
       const availableBelow = Math.max(
         0,
-        window.innerHeight - anchorRect.bottom - LATENCY_DETAILS_VIEWPORT_PADDING,
+        viewport.height - anchorRect.bottom - LATENCY_DETAILS_VIEWPORT_PADDING,
       )
       const availableLeft = Math.max(0, anchorRect.left - LATENCY_DETAILS_VIEWPORT_PADDING)
       const availableRight = Math.max(
         0,
-        window.innerWidth - anchorRect.right - LATENCY_DETAILS_VIEWPORT_PADDING,
+        viewport.width - anchorRect.right - LATENCY_DETAILS_VIEWPORT_PADDING,
       )
-      const root = instance.popper.querySelector('.tippy-content > div') as HTMLElement | null
 
       if (root) {
-        root.style.maxHeight = `${window.innerHeight - LATENCY_DETAILS_VIEWPORT_PADDING * 2}px`
+        root.style.maxHeight = `${viewport.height - LATENCY_DETAILS_VIEWPORT_PADDING * 2}px`
       }
 
       const contentWidth = root?.getBoundingClientRect().width ?? 0
@@ -724,7 +753,7 @@ const repositionLatencyDetailsTip = (instance: Instance, anchor: HTMLElement, co
           ? availableAbove
           : placement === 'bottom'
             ? availableBelow
-            : window.innerHeight - LATENCY_DETAILS_VIEWPORT_PADDING * 2
+            : viewport.height - LATENCY_DETAILS_VIEWPORT_PADDING * 2
 
       if (root) {
         root.style.maxHeight = `${Math.floor(maxHeight)}px`
@@ -852,7 +881,7 @@ const createLatencyDetailsTip = () => {
   const root = document.createElement('div')
 
   root.className = compact
-    ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-0.5rem)] flex-col overflow-hidden rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
+    ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-0.5rem)] touch-pan-y flex-col overflow-y-auto overscroll-contain rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
     : 'flex max-h-[calc(100vh-1rem)] w-[25rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
 
   const title = document.createElement('div')
@@ -911,7 +940,10 @@ const createLatencyDetailsTip = () => {
     if (failure.textContent) {
       availabilityMain.append(failure)
     }
-    availabilityLine.append(availabilityMain, coverage, sampleDetail)
+    availabilityLine.append(availabilityMain)
+    if (!compact) {
+      availabilityLine.append(coverage, sampleDetail)
+    }
     chart.append(availabilityLine)
     chart.append(
       createLatencyTimelineChartSection(getLatencyTimelineChartState(timelineSourceName), {
@@ -941,7 +973,7 @@ const createLatencyDetailsTip = () => {
       chart.append(emptyStat)
     }
 
-    if (stats) {
+    if (stats && !compact) {
       const stabilityLine = document.createElement('div')
       const jitter = document.createElement('span')
       jitter.textContent = `jitter: ${stats.jitter}ms`
@@ -967,10 +999,11 @@ const createLatencyDetailsTip = () => {
     root.append(chart)
   }
 
+  if (compact) return root
+
   const list = document.createElement('div')
-  list.className = compact
-    ? 'mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
-    : 'mt-2 flex min-h-20 max-h-52 flex-1 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
+  list.className =
+    'mt-2 flex min-h-20 max-h-52 flex-1 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
 
   if (!newestFirst.length) {
     const empty = document.createElement('div')
@@ -1049,8 +1082,17 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       value: anchor,
     },
   }) as Event
-  const cardRect = (cardRef.value as HTMLElement | undefined)?.getBoundingClientRect()
-  const mobilePlacement = cardRect && cardRect.top < window.innerHeight * 0.42 ? 'bottom' : 'top'
+  const viewport = getLatencyDetailsViewportSize(
+    window.innerWidth,
+    window.innerHeight,
+    window.visualViewport,
+  )
+  const mobilePlacement = getCompactLatencyDetailsPlacement(
+    anchor.getBoundingClientRect(),
+    viewport,
+    LATENCY_DETAILS_VIEWPORT_PADDING,
+    LATENCY_DETAILS_POPOVER_GAP,
+  ).placement
   const placement = compact ? mobilePlacement : 'top'
   const refresh = getR5sLatencyDetailsSamplesRefresh() ?? Promise.resolve(null)
   const timelineSourceName = getR5sLatencySampleSourceName()
@@ -1097,7 +1139,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         interactiveDebounce: 40,
         hideOnClick: false,
         maxWidth: 'none',
-        offset: [0, 8],
+        offset: [0, LATENCY_DETAILS_POPOVER_GAP],
         onShown: (instance) => {
           bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
           repositionLatencyDetailsTip(instance, anchor, compact)
