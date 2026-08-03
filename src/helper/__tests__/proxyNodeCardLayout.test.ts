@@ -36,7 +36,10 @@ test('repositions an expanded desktop detail popover within the available viewpo
 })
 
 test('keeps the node title from shrinking when a detail popover is height constrained', () => {
-  assert.match(proxyNodeCardSource, /title\.className = compact\n\s*\? 'mb-1\.5 shrink-0 truncate/)
+  assert.match(
+    proxyNodeCardSource,
+    /title\.className = compact\r?\n\s*\? 'mb-1\.5 shrink-0 truncate/,
+  )
 })
 
 test('uses a short desktop hover delay without changing the mobile long-press trigger', () => {
