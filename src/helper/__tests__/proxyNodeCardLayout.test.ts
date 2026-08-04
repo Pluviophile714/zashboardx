@@ -16,7 +16,7 @@ registerHooks({
   },
 })
 
-const { createLatencyTimelineChartSection } =
+const { createLatencyTimelineChartSection, getLatencyTimelineInputMode } =
   await import('../../components/proxies/latencyTimelineChart.ts')
 
 type TestEvent = {
@@ -166,6 +166,7 @@ const renderTimelineChart = (
     onInteraction?: () => void
     onWindowChange?: (window: '1h' | '6h' | '24h') => void
     compact?: boolean
+    inputMode?: 'coarse' | 'fine'
   } = {},
 ) => {
   Object.defineProperty(globalThis, 'document', {
@@ -186,6 +187,7 @@ const renderTimelineChart = (
     },
     {
       compact: callbacks.compact ?? false,
+      inputMode: callbacks.inputMode ?? 'fine',
       onBucketActivate: callbacks.onBucketActivate,
       onBucketChange: callbacks.onBucketChange,
       onInteraction: callbacks.onInteraction,
@@ -258,6 +260,11 @@ test('uses the same focused information hierarchy on desktop and mobile', () => 
   )
   assert.doesNotMatch(proxyNodeCardSource, /const stabilityLine = document\.createElement/)
   assert.match(timelineChartSource, /getProxyMetricsTimelineHeight\(options\.compact\)/)
+})
+
+test('wires input capability independently from compact layout', () => {
+  assert.match(proxyNodeCardSource, /inputMode: getLatencyTimelineInputMode\(\)/)
+  assert.match(timelineChartSource, /options\.inputMode === 'coarse'/)
 })
 
 test('keeps 24h bucket details outside the plot on desktop and mobile', () => {
@@ -389,6 +396,7 @@ test('uses the populated information card as the mobile activation target', () =
   const bucketActivations: number[] = []
   const { chartHitArea, svg, tooltip } = renderTimelineChart({
     compact: true,
+    inputMode: 'coarse',
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
   })
 
@@ -407,6 +415,7 @@ test('keeps mobile chart drags from activating while preserving card tap entry',
   const bucketActivations: number[] = []
   const { chartHitArea, svg, tooltip } = renderTimelineChart({
     compact: true,
+    inputMode: 'coarse',
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
   })
 
@@ -428,6 +437,109 @@ test('keeps mobile chart drags from activating while preserving card tap entry',
   )
   tooltip.dispatchEvent(createEvent('click'))
   assert.deepEqual(bucketActivations, [1])
+})
+
+test('selects activation surface from pointer capability instead of compact layout', () => {
+  const narrowFineDesktop = renderTimelineChart({
+    compact: true,
+    inputMode: 'fine',
+  })
+  const fineActivations: number[] = []
+  const fineChart = renderTimelineChart({
+    compact: true,
+    inputMode: 'fine',
+    onBucketActivate: (bucket) => fineActivations.push(bucket.sampleCount),
+  })
+
+  fineChart.svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  fineChart.chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(fineActivations, [1])
+  assert.equal(narrowFineDesktop.tooltip.getAttribute('role'), null)
+
+  const coarseWideTouchActivations: number[] = []
+  const coarseWideTouch = renderTimelineChart({
+    compact: false,
+    inputMode: 'coarse',
+    onBucketActivate: (bucket) => coarseWideTouchActivations.push(bucket.sampleCount),
+  })
+
+  coarseWideTouch.svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  coarseWideTouch.chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  coarseWideTouch.tooltip.dispatchEvent(createEvent('click'))
+  assert.deepEqual(coarseWideTouchActivations, [1])
+  assert.equal(coarseWideTouch.tooltip.getAttribute('role'), 'button')
+})
+
+test('derives coarse input safely from pointer media and touch points', () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+
+  try {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { matchMedia: () => ({ matches: true }) },
+    })
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { maxTouchPoints: 0 },
+    })
+    assert.equal(getLatencyTimelineInputMode(), 'coarse')
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { matchMedia: () => ({ matches: false }) },
+    })
+    assert.equal(getLatencyTimelineInputMode(), 'fine')
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {},
+    })
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { maxTouchPoints: 2 },
+    })
+    assert.equal(getLatencyTimelineInputMode(), 'coarse')
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
+    else delete (globalThis as { window?: unknown }).window
+    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
+    else delete (globalThis as { navigator?: unknown }).navigator
+  }
+})
+
+test('reports mobile information-card pointer and touch gesture activity', () => {
+  let interactions = 0
+  const { tooltip } = renderTimelineChart({
+    compact: false,
+    inputMode: 'coarse',
+    onInteraction: () => {
+      interactions += 1
+    },
+  })
+
+  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('pointermove', { clientX: 30, clientY: 10, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('pointercancel', { pointerId: 1 }))
+  assert.equal(interactions, 3)
+
+  interactions = 0
+  tooltip.dispatchEvent(
+    createEvent('touchstart', {
+      changedTouches: createTouchList({ clientX: 10, clientY: 10, identifier: 2 }),
+    }),
+  )
+  tooltip.dispatchEvent(
+    createEvent('touchmove', {
+      changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 2 }),
+    }),
+  )
+  tooltip.dispatchEvent(
+    createEvent('touchend', {
+      changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 2 }),
+    }),
+  )
+  assert.equal(interactions, 3)
 })
 
 test('activates the bucket represented by the current guide through the chart-wide hit layer', () => {

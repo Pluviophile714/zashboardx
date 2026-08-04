@@ -16,8 +16,11 @@ export type LatencyTimelineChartState =
   | { status: 'empty'; timeline: ProxyMetricsTimelineResponse }
   | { status: 'ready'; timeline: ProxyMetricsTimelineResponse }
 
+export type LatencyTimelineInputMode = 'coarse' | 'fine'
+
 export type LatencyTimelineChartOptions = {
   compact: boolean
+  inputMode: LatencyTimelineInputMode
   onBucketActivate?: (bucket: ProxyMetricsTimelineBucket) => void
   onBucketChange?: (bucket: ProxyMetricsTimelineBucket) => void
   onInteraction?: () => void
@@ -29,6 +32,26 @@ export type LatencyTimelineChartOptions = {
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const ACTIVATION_DRAG_THRESHOLD = 8
 let chartId = 0
+
+export const getLatencyTimelineInputMode = (): LatencyTimelineInputMode => {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    try {
+      return window.matchMedia('(pointer: coarse)').matches ? 'coarse' : 'fine'
+    } catch {
+      // Fall through to touch-point detection when pointer media is unavailable.
+    }
+  }
+
+  if (
+    typeof navigator !== 'undefined' &&
+    Number.isFinite(navigator.maxTouchPoints) &&
+    navigator.maxTouchPoints > 0
+  ) {
+    return 'coarse'
+  }
+
+  return 'fine'
+}
 
 const createSvgElement = (tagName: string, attributes: Record<string, string | number> = {}) => {
   const element = document.createElementNS(SVG_NAMESPACE, tagName)
@@ -85,6 +108,7 @@ export const createLatencyTimelineChartSection = (
   const rangeControl = document.createElement('div')
   const body = document.createElement('div')
   const height = getProxyMetricsTimelineHeight(options.compact)
+  const isCoarseInput = options.inputMode === 'coarse'
   const selectedWindow = options.window ?? '24h'
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
@@ -345,7 +369,7 @@ export const createLatencyTimelineChartSection = (
 
     selectedBucket = bucket
     selectedBucketIndex = bucketIndex
-    const canActivate = options.compact && bucket.sampleCount > 0
+    const canActivate = isCoarseInput && bucket.sampleCount > 0
 
     if (canActivate) {
       tooltip.setAttribute('aria-disabled', 'false')
@@ -463,6 +487,7 @@ export const createLatencyTimelineChartSection = (
     clientX: number,
     clientY: number,
   ) => {
+    options.onInteraction?.()
     suppressNextCardClick = false
     activeCardGesture = { id, source, startX: clientX, startY: clientY }
   }
@@ -473,6 +498,7 @@ export const createLatencyTimelineChartSection = (
     clientX: number,
     clientY: number,
   ) => {
+    options.onInteraction?.()
     if (
       activeCardGesture?.source === source &&
       activeCardGesture.id === id &&
@@ -484,6 +510,7 @@ export const createLatencyTimelineChartSection = (
   }
 
   const endCardGesture = (source: 'pointer' | 'touch', id: number, cancelled = false) => {
+    options.onInteraction?.()
     if (activeCardGesture?.source === source && activeCardGesture.id === id) {
       suppressNextCardClick ||= cancelled
       activeCardGesture = undefined
@@ -502,7 +529,7 @@ export const createLatencyTimelineChartSection = (
     return undefined
   }
 
-  if (!options.compact) {
+  if (!isCoarseInput) {
     chartHitArea.addEventListener('click', (event) => {
       if (suppressNextChartClick) {
         suppressNextChartClick = false

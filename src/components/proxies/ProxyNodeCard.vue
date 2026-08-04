@@ -132,6 +132,7 @@ import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import {
   createLatencyTimelineChartSection,
+  getLatencyTimelineInputMode,
   type LatencyTimelineChartState,
 } from './latencyTimelineChart'
 import ProxyIcon from './ProxyIcon.vue'
@@ -1184,6 +1185,7 @@ const createLatencyDetailsTip = () => {
         getLatencyTimelineChartState(timelineSourceName, activeLatencyTimelineWindow),
         {
           compact,
+          inputMode: getLatencyTimelineInputMode(),
           onBucketActivate: activateLatencyTimelineBucket,
           onInteraction: restartLatencyBucketDrilldownResetTimer,
           onWindowChange: changeLatencyTimelineWindow,

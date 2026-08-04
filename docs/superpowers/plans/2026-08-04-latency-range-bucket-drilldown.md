@@ -317,7 +317,7 @@ Build a compact three-button segmented control in the chart header. Use `aria-pr
 
 - [ ] **Step 4: Split activation surfaces by device input**
 
-Keep the bucket card display-only on desktop. Make the SVG use a chart-wide transparent hit layer that resolves the current guide bucket from the pointer x-coordinate; the guide follows the pointer exactly in the viewBox, and only a stationary desktop click on that layer activates a populated bucket. On compact/mobile charts, keep the chart as selection-only and make the populated information card the tap activation target. Keep sample inspection on the SVG, emit `onBucketChange(bucket)` from `renderBucket`, and emit `onInteraction()` from chart and strip pointer/touch activity. Empty buckets remain blocked, and drag must suppress the following synthetic click on either activation surface.
+Keep the bucket card display-only on fine-pointer desktop input. Make the SVG use a chart-wide transparent hit layer that resolves the current guide bucket from the pointer x-coordinate; the guide follows the pointer exactly in the viewBox, and only a stationary fine-pointer click on that layer activates a populated bucket. On coarse-pointer input, keep the chart selection-only and make the populated information card the tap activation target regardless of compact layout width. Keep sample inspection on the SVG, emit `onBucketChange(bucket)` from `renderBucket`, and emit `onInteraction()` from chart and strip pointer/touch activity. Empty buckets remain blocked, and drag must suppress the following synthetic click on either activation surface.
 
 - [ ] **Step 5: Replace fixed 24h labels with the selected window**
 
