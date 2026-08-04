@@ -48,8 +48,12 @@ type RangePoint = ProxyMetricsTimelineChartPoint & {
   minY: number
 }
 
-export const getProxyMetricsTimelineTooltipMode = (compact: boolean) =>
-  compact ? ('outside' as const) : ('overlay' as const)
+export const getProxyMetricsTimelineTooltipMode = (compact: boolean) => {
+  void compact
+  return 'outside' as const
+}
+
+export const getProxyMetricsTimelineHeight = (compact: boolean) => (compact ? 96 : 180)
 
 const coordinate = (value: number) => Number(value.toFixed(2))
 

@@ -1,6 +1,7 @@
 import type { ProxyMetricsTimelineResponse } from '@/api/metricsHelper'
 import {
   buildProxyMetricsTimelineChartModel,
+  getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
 } from '@/helper/proxyMetricsTimeline'
 
@@ -70,6 +71,7 @@ export const createLatencyTimelineChartSection = (
   const title = document.createElement('span')
   const source = document.createElement('span')
   const body = document.createElement('div')
+  const height = getProxyMetricsTimelineHeight(options.compact)
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
   header.className = 'mb-1.5 flex min-w-0 items-center justify-between gap-2 text-xs'
@@ -82,7 +84,8 @@ export const createLatencyTimelineChartSection = (
     header.append(source)
   }
 
-  body.className = options.compact ? 'relative h-[96px]' : 'relative h-[150px]'
+  body.className = 'relative'
+  body.style.height = `${height}px`
   section.append(header, body)
 
   if (state.status === 'loading') {
@@ -93,8 +96,7 @@ export const createLatencyTimelineChartSection = (
     appendEmptyState(body, 'R5S 24h 趋势暂不可用')
     return section
   }
-  const width = 360
-  const height = options.compact ? 96 : 150
+  const width = options.compact ? 360 : 420
   const timeline = state.timeline
   const tooltipMode = getProxyMetricsTimelineTooltipMode(options.compact)
   const model = buildProxyMetricsTimelineChartModel(timeline, {
@@ -176,7 +178,7 @@ export const createLatencyTimelineChartSection = (
       createSvgElement('path', {
         d: path,
         fill: 'var(--color-low-latency, oklch(0.648 0.15 160))',
-        'fill-opacity': 0.14,
+        'fill-opacity': 0.22,
       }),
     )
   }
@@ -231,17 +233,12 @@ export const createLatencyTimelineChartSection = (
 
   const tooltip = document.createElement('div')
 
+  tooltip.dataset.mode = tooltipMode
   tooltip.className =
-    tooltipMode === 'outside'
-      ? 'pointer-events-none mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
-      : 'pointer-events-none absolute top-1 z-10 hidden min-w-36 rounded-md border border-base-content/10 bg-base-100/95 px-2 py-1.5 text-[10px] text-base-content/70 shadow-lg backdrop-blur-sm'
+    'pointer-events-none mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
 
-  if (tooltipMode === 'outside') {
-    body.append(svg)
-    section.append(tooltip)
-  } else {
-    body.append(svg, tooltip)
-  }
+  body.append(svg)
+  section.append(tooltip)
 
   if (state.status === 'empty') {
     const empty = document.createElement('div')
@@ -274,26 +271,23 @@ export const createLatencyTimelineChartSection = (
     tooltip.replaceChildren()
     const time = document.createElement('div')
 
-    time.className = `${tooltipMode === 'outside' ? 'col-span-2' : 'mb-1'} whitespace-nowrap font-semibold text-base-content`
+    time.className = 'col-span-2 whitespace-nowrap font-semibold text-base-content'
     time.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
     tooltip.append(time)
 
     if (bucket.successCount > 0) {
       appendTooltipLine(tooltip, '平均', `${Math.round(bucket.avgDelay ?? 0)}ms`)
       appendTooltipLine(tooltip, '范围', `${bucket.minDelay ?? 0}-${bucket.maxDelay ?? 0}ms`)
+      appendTooltipLine(
+        tooltip,
+        '波动',
+        bucket.jitter === null ? '--' : `${Math.round(bucket.jitter)}ms`,
+      )
     } else {
       appendTooltipLine(tooltip, '延迟', bucket.sampleCount ? '测速失败' : '无样本')
     }
     appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
     appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
-
-    if (tooltipMode === 'overlay') {
-      const horizontalRatio = (bucketIndex + 0.5) / timeline.buckets.length
-
-      tooltip.style.left = `${Math.min(86, Math.max(14, horizontalRatio * 100))}%`
-      tooltip.style.transform = 'translateX(-50%)'
-    }
-    tooltip.classList.remove('hidden')
   }
 
   const updateHover = (event: PointerEvent) => {
@@ -316,16 +310,13 @@ export const createLatencyTimelineChartSection = (
   const clearHover = () => {
     hoverLine.setAttribute('visibility', 'hidden')
     hoverPoint.setAttribute('visibility', 'hidden')
-    if (tooltipMode === 'overlay') {
-      tooltip.classList.add('hidden')
-    }
   }
 
   svg.addEventListener('pointermove', updateHover)
   svg.addEventListener('pointerdown', updateHover)
   svg.addEventListener('pointerleave', clearHover)
 
-  if (tooltipMode === 'outside' && timeline.buckets.length) {
+  if (timeline.buckets.length) {
     let latestSampleIndex = timeline.buckets.length - 1
 
     for (let index = timeline.buckets.length - 1; index >= 0; index -= 1) {

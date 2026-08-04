@@ -573,6 +573,7 @@ test('aggregates one node into ordered timeline buckets and preserves gaps', () 
     avgDelay: 100,
     minDelay: 80,
     maxDelay: 120,
+    jitter: 40,
   })
   assert.deepEqual(buckets[1], {
     start: '2026-07-04T00:15:00.000Z',
@@ -583,6 +584,7 @@ test('aggregates one node into ordered timeline buckets and preserves gaps', () 
     avgDelay: null,
     minDelay: null,
     maxDelay: null,
+    jitter: null,
   })
   assert.deepEqual(buckets[2], {
     start: '2026-07-04T00:30:00.000Z',
@@ -593,6 +595,7 @@ test('aggregates one node into ordered timeline buckets and preserves gaps', () 
     avgDelay: null,
     minDelay: null,
     maxDelay: null,
+    jitter: null,
   })
   storage.close()
 })

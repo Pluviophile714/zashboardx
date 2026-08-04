@@ -28,6 +28,7 @@ type ProbeTimelineRow = {
   avg_delay: number | null
   min_delay: number | null
   max_delay: number | null
+  jitter: number | null
 }
 
 type MetricsStorageInitOptions = {
@@ -287,24 +288,58 @@ export class MetricsStorage {
               ?,
               CAST((unixepoch(timestamp) - ?) / ? AS INTEGER)
             ) AS bucket_index,
+            id,
+            timestamp,
             success,
             delay
           FROM probe_samples
           WHERE node_name = ?
             AND timestamp >= ?
             AND timestamp <= ?
+        ),
+        aggregated AS (
+          SELECT
+            bucket_index,
+            COUNT(*) AS sample_count,
+            SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failure_count,
+            AVG(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS avg_delay,
+            MIN(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS min_delay,
+            MAX(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS max_delay
+          FROM bucketed
+          GROUP BY bucket_index
+        ),
+        successful_samples AS (
+          SELECT
+            bucket_index,
+            delay,
+            LAG(delay) OVER (
+              PARTITION BY bucket_index
+              ORDER BY timestamp ASC, id ASC
+            ) AS previous_delay
+          FROM bucketed
+          WHERE success = 1 AND delay IS NOT NULL
+        ),
+        jitter_by_bucket AS (
+          SELECT
+            bucket_index,
+            AVG(ABS(delay - previous_delay)) AS jitter
+          FROM successful_samples
+          WHERE previous_delay IS NOT NULL
+          GROUP BY bucket_index
         )
         SELECT
-          bucket_index,
-          COUNT(*) AS sample_count,
-          SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
-          SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failure_count,
-          AVG(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS avg_delay,
-          MIN(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS min_delay,
-          MAX(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS max_delay
-        FROM bucketed
-        GROUP BY bucket_index
-        ORDER BY bucket_index ASC
+          aggregated.bucket_index,
+          aggregated.sample_count,
+          aggregated.success_count,
+          aggregated.failure_count,
+          aggregated.avg_delay,
+          aggregated.min_delay,
+          aggregated.max_delay,
+          jitter_by_bucket.jitter
+        FROM aggregated
+        LEFT JOIN jitter_by_bucket USING (bucket_index)
+        ORDER BY aggregated.bucket_index ASC
       `,
       )
       .all(
@@ -329,6 +364,7 @@ export class MetricsStorage {
         avgDelay: row?.avg_delay === null || row === undefined ? null : Number(row.avg_delay),
         minDelay: row?.min_delay === null || row === undefined ? null : Number(row.min_delay),
         maxDelay: row?.max_delay === null || row === undefined ? null : Number(row.max_delay),
+        jitter: row?.jitter === null || row === undefined ? null : Number(row.jitter),
       }
     })
   }

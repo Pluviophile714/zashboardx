@@ -47,6 +47,7 @@ export type ProxyMetricsTimelineBucket = {
   avgDelay: number | null
   minDelay: number | null
   maxDelay: number | null
+  jitter: number | null
 }
 
 export type ProxyMetricsTimelineResponse = {
@@ -111,8 +112,14 @@ export const normalizeMetricsTimelineBucket = (
   const avgDelay = normalizeTimelineDelay(bucket.avgDelay)
   const minDelay = normalizeTimelineDelay(bucket.minDelay)
   const maxDelay = normalizeTimelineDelay(bucket.maxDelay)
+  const jitter = bucket.jitter === undefined ? null : normalizeTimelineDelay(bucket.jitter)
 
-  if (avgDelay === undefined || minDelay === undefined || maxDelay === undefined) {
+  if (
+    avgDelay === undefined ||
+    minDelay === undefined ||
+    maxDelay === undefined ||
+    jitter === undefined
+  ) {
     return null
   }
   if (bucket.successCount === 0) {
@@ -128,6 +135,9 @@ export const normalizeMetricsTimelineBucket = (
   ) {
     return null
   }
+  if (bucket.successCount < 2 && jitter !== null) {
+    return null
+  }
 
   return {
     start: new Date(startMs).toISOString(),
@@ -138,6 +148,7 @@ export const normalizeMetricsTimelineBucket = (
     avgDelay,
     minDelay,
     maxDelay,
+    jitter,
   }
 }
 

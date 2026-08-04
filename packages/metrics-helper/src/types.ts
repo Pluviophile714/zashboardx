@@ -18,6 +18,7 @@ export type ProbeTimelineBucket = {
   avgDelay: number | null
   minDelay: number | null
   maxDelay: number | null
+  jitter: number | null
 }
 
 export type DiscoveredProxyNode = {

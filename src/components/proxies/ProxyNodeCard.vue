@@ -78,12 +78,6 @@
 
 <script setup lang="ts">
 import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
-import {
-  formatSmartLossRate,
-  getPrimarySmartLossRate,
-  getSmartLossRateClass,
-  resolveSmartLossMetric,
-} from '@/helper/smartLossMetrics'
 import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
 import {
   getCompactLatencyDetailsPlacement,
@@ -120,7 +114,7 @@ import {
   refreshProxyMetricsSamples,
   refreshProxyMetricsTimeline,
 } from '@/store/proxyMetrics'
-import { smartLossMetricsByNameMap, smartLossMetricsMap, smartWeightsMap } from '@/store/smart'
+import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
@@ -172,14 +166,6 @@ const typeDescription = computed(() => {
 
   return [type, isUDP, smartDesc, isV6].filter(Boolean).join(isSmallCard.value ? '/' : ' / ')
 })
-const getSmartLossMetric = () =>
-  resolveSmartLossMetric(
-    smartLossMetricsMap.value,
-    smartLossMetricsByNameMap.value,
-    props.groupName,
-    props.name,
-  )
-
 const getLatencySegmentClass = (delay?: number) => {
   if (!delay || delay === NOT_CONNECTED) {
     return props.active ? 'bg-primary-content/30' : 'bg-base-content/25'
@@ -361,67 +347,6 @@ const getLatencyTimelineAccent = (delay?: number) => {
     ratio: 0.44 + progress * 0.34,
   }
 }
-
-const formatLatencyHistoryGap = (gap: number) => {
-  const minutes = Math.max(1, Math.round(gap / 60000))
-
-  if (minutes < 60) {
-    return `${minutes} 分钟`
-  }
-
-  const hours = Math.floor(minutes / 60)
-  const restMinutes = minutes % 60
-
-  return restMinutes ? `${hours} 小时 ${restMinutes} 分钟` : `${hours} 小时`
-}
-
-const formatLatencyAvailabilityCoverage = (coverage: number, totalCount: number) => {
-  if (!totalCount) {
-    return '覆盖 --'
-  }
-
-  if (coverage < 60000) {
-    return '覆盖不足 1 分钟'
-  }
-
-  return `覆盖 ${formatLatencyHistoryGap(coverage)}`
-}
-
-const formatMetricTimestamp = (timestamp?: string | number | null) => {
-  const parsed =
-    typeof timestamp === 'number' ? timestamp : timestamp ? Date.parse(timestamp) : Number.NaN
-
-  if (!Number.isFinite(parsed)) {
-    return '--'
-  }
-
-  const date = dayjs(parsed)
-  const format = date.year() === dayjs().year() ? 'MM-DD HH:mm' : 'YYYY-MM-DD HH:mm'
-
-  return date.format(format)
-}
-
-const formatMetricSampleRange = (
-  source: string,
-  firstTimestamp?: string | number | null,
-  lastTimestamp?: string | number | null,
-) => {
-  const first = formatMetricTimestamp(firstTimestamp)
-  const last = formatMetricTimestamp(lastTimestamp)
-
-  if (first === '--' && last === '--') {
-    return `${source}首样本 -- · 最后 --`
-  }
-
-  if (first === last) {
-    return `${source}样本 ${first}`
-  }
-
-  return `${source}首样本 ${first} · 最后 ${last}`
-}
-
-const formatMetricUpdatedAt = (timestamp?: string | number | null) =>
-  `更新 ${formatMetricTimestamp(timestamp)}`
 
 const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
   const recent = history.slice(-windowSize)
@@ -912,7 +837,7 @@ const buildLatencyStatusTimeline = (
     segments.push(segment)
   }
 
-  if (compact && summaryLine) {
+  if (summaryLine) {
     const summaryNodes = Array.from(summaryLine.childNodes)
     let activePointerId: number | null = null
     let restoreTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -967,11 +892,11 @@ const buildLatencyStatusTimeline = (
       summaryLine.replaceChildren(time, delay, status)
     }
     const selectPointerSample = (event: PointerEvent) => {
-      if (event.type === 'pointerdown') {
+      if (compact && event.type === 'pointerdown') {
         activePointerId = event.pointerId
         clearRestoreTimer()
         strip.setPointerCapture?.(event.pointerId)
-      } else if (activePointerId !== event.pointerId) {
+      } else if (compact && activePointerId !== event.pointerId) {
         return
       }
 
@@ -995,10 +920,14 @@ const buildLatencyStatusTimeline = (
       restoreTimer = window.setTimeout(restoreSummary, LATENCY_SAMPLE_DETAIL_RESTORE_DELAY)
     }
 
-    strip.addEventListener('pointerdown', selectPointerSample)
     strip.addEventListener('pointermove', selectPointerSample)
-    strip.addEventListener('pointerup', scheduleSummaryRestore)
-    strip.addEventListener('pointercancel', scheduleSummaryRestore)
+    if (compact) {
+      strip.addEventListener('pointerdown', selectPointerSample)
+      strip.addEventListener('pointerup', scheduleSummaryRestore)
+      strip.addEventListener('pointercancel', scheduleSummaryRestore)
+    } else {
+      strip.addEventListener('pointerleave', restoreSummary)
+    }
   }
 
   timeline.append(header, strip)
@@ -1009,7 +938,6 @@ const createLatencyDetailsTip = () => {
   const compact = isCompactLatencyDetails()
   const detailHistorySource = getLatencyDetailsHistorySource()
   const history = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
-  const newestFirst = [...history].reverse()
   const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
   const sharedMetricsResolution = getSharedMetricsResolution()
   const sharedMetrics = sharedMetricsResolution?.metrics
@@ -1018,7 +946,7 @@ const createLatencyDetailsTip = () => {
 
   root.className = compact
     ? 'flex max-h-[min(68vh,28rem)] w-[calc(100vw-0.5rem)] touch-pan-y flex-col overflow-y-auto overscroll-contain rounded-lg border border-base-content/10 bg-base-200 p-2 text-base-content shadow-2xl'
-    : 'flex max-h-[calc(100vh-1rem)] w-[25rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
+    : 'flex max-h-[calc(100vh-1rem)] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-base-content/10 bg-base-200 p-3 text-base-content shadow-2xl'
 
   const title = document.createElement('div')
   title.className = compact
@@ -1035,8 +963,6 @@ const createLatencyDetailsTip = () => {
 
     const availabilityLine = document.createElement('div')
     const availabilityMain = document.createElement('div')
-    const coverage = document.createElement('div')
-    const sampleDetail = document.createElement('div')
     const availability = document.createElement('span')
     const failure = document.createElement('span')
     const availabilityNote = sharedMetrics
@@ -1058,28 +984,11 @@ const createLatencyDetailsTip = () => {
       : 'R5S 指标助手暂无该节点记录，本机近30次只用于短期状态'
     failure.className = availabilityNote.className
     failure.textContent = availabilityNote.text
-    coverage.className = compact
-      ? 'text-[10px] text-base-content/45'
-      : 'text-[11px] text-base-content/45'
-    sampleDetail.className = coverage.className
-    coverage.textContent = sharedMetrics
-      ? formatMetricSampleRange('R5S', sharedMetrics.firstSampleAt, sharedMetrics.lastSampleAt)
-      : formatMetricSampleRange('R5S', null, null)
-    sampleDetail.textContent = sharedMetrics
-      ? `R5S样本 ${sharedMetrics.successCount}/${sharedMetrics.sampleCount} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-      : `R5S样本 0/0 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-    coverage.title = sharedMetrics
-      ? `${formatLatencyAvailabilityCoverage(sharedMetrics.coverageSeconds * 1000, sharedMetrics.sampleCount)} · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-      : `等待 R5S 指标助手采集 · ${formatMetricUpdatedAt(proxyMetricsUpdatedAt.value)}`
-    sampleDetail.title = coverage.title
     availabilityMain.append(availability)
     if (failure.textContent) {
       availabilityMain.append(failure)
     }
     availabilityLine.append(availabilityMain)
-    if (!compact) {
-      availabilityLine.append(coverage, sampleDetail)
-    }
     chart.append(availabilityLine)
     chart.append(
       createLatencyTimelineChartSection(getLatencyTimelineChartState(timelineSourceName), {
@@ -1105,108 +1014,13 @@ const createLatencyDetailsTip = () => {
     }
 
     chart.append(
-      buildLatencyStatusTimeline(
-        history,
-        compact,
-        detailHistorySource.label,
-        compact ? summaryLine : undefined,
-      ),
+      buildLatencyStatusTimeline(history, compact, detailHistorySource.label, summaryLine),
       summaryLine,
     )
-
-    if (stats && !compact) {
-      const stabilityLine = document.createElement('div')
-      const jitter = document.createElement('span')
-      jitter.textContent = `jitter: ${stats.jitter}ms`
-
-      const lossMetric = getSmartLossMetric()
-      const lossRate = getPrimarySmartLossRate(lossMetric)
-
-      const loss = document.createElement('span')
-
-      stabilityLine.className =
-        'mt-1 flex items-center justify-between gap-2 text-xs text-base-content/75'
-      jitter.className = 'justify-self-start'
-      loss.className = `font-semibold ${getSmartLossRateClass(lossMetric)}`
-      loss.textContent = `loss: ${formatSmartLossRate(lossRate)}`
-      if (lossMetric?.current !== undefined && lossMetric?.cumulative !== undefined) {
-        loss.title = `当前 ${formatSmartLossRate(lossMetric.current)} · 累计 ${formatSmartLossRate(lossMetric.cumulative)}`
-      }
-      stabilityLine.append(jitter, loss)
-
-      chart.append(stabilityLine)
-    }
 
     root.append(chart)
   }
 
-  if (compact) return root
-
-  const list = document.createElement('div')
-  list.className =
-    'mt-2 flex min-h-20 max-h-52 flex-1 flex-col gap-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--color-base-content)_30%,transparent)_transparent]'
-
-  if (!newestFirst.length) {
-    const empty = document.createElement('div')
-    empty.className = 'py-4 text-center text-sm text-base-content/60'
-    empty.textContent = t('noLatencyHistory')
-    list.append(empty)
-  }
-
-  let previousTimestamp: number | undefined
-
-  for (const item of newestFirst) {
-    const timestamp = Date.parse(item.time)
-
-    if (
-      previousTimestamp &&
-      Number.isFinite(timestamp) &&
-      previousTimestamp - timestamp > LATENCY_HISTORY_GAP_THRESHOLD
-    ) {
-      const gap = document.createElement('div')
-      gap.className = compact
-        ? 'grid grid-cols-[1fr_auto_1fr] items-center gap-1.5 px-1 py-0.5 text-[10px] text-base-content/45'
-        : 'grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-1.5 py-0.5 text-[11px] text-base-content/45'
-
-      const before = document.createElement('span')
-      before.className = 'h-px bg-base-content/10'
-      const label = document.createElement('span')
-      label.textContent = `间隔 ${formatLatencyHistoryGap(previousTimestamp - timestamp)}`
-      const after = document.createElement('span')
-      after.className = 'h-px bg-base-content/10'
-
-      gap.append(before, label, after)
-      list.append(gap)
-    }
-
-    if (Number.isFinite(timestamp)) {
-      previousTimestamp = timestamp
-    }
-
-    const row = document.createElement('div')
-    row.className = compact
-      ? 'grid grid-cols-[auto_1fr_auto] items-center gap-1.5 rounded-md px-1 py-1 hover:bg-base-300/60'
-      : 'grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-base-300/60'
-
-    const status = document.createElement('span')
-    status.className =
-      item.delay > NOT_CONNECTED
-        ? `${compact ? 'size-2' : 'size-2.5'} rounded-full bg-low-latency`
-        : `${compact ? 'size-2' : 'size-2.5'} rounded-full bg-base-content/35`
-
-    const time = document.createElement('time')
-    time.className = `${compact ? 'text-[11px]' : 'text-xs'} truncate text-base-content/75`
-    time.textContent = dayjs(item.time).format('YYYY-MM-DD HH:mm:ss')
-
-    const delay = document.createElement('span')
-    delay.className = `${compact ? 'text-[11px]' : 'text-xs'} font-semibold ${getLatencyTextClass(item.delay)}`
-    delay.textContent = item.delay > NOT_CONNECTED ? `${item.delay}ms` : '---'
-
-    row.append(status, time, delay)
-    list.append(row)
-  }
-
-  root.append(list)
   return root
 }
 

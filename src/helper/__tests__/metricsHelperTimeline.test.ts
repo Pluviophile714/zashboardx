@@ -11,6 +11,7 @@ const validBucket = {
   avgDelay: 100,
   minDelay: 80,
   maxDelay: 120,
+  jitter: 40,
 }
 
 test('normalizes a valid timeline bucket', () => {
@@ -66,6 +67,7 @@ test('rejects inconsistent timeline latency values', () => {
       avgDelay: null,
       minDelay: null,
       maxDelay: null,
+      jitter: null,
     }),
     {
       ...validBucket,
@@ -74,6 +76,26 @@ test('rejects inconsistent timeline latency values', () => {
       avgDelay: null,
       minDelay: null,
       maxDelay: null,
+      jitter: null,
     },
+  )
+})
+
+test('defaults jitter to null for a timeline response from an older helper', () => {
+  assert.deepEqual(normalizeMetricsTimelineBucket({ ...validBucket, jitter: undefined }), {
+    ...validBucket,
+    jitter: null,
+  })
+})
+
+test('rejects a bucket jitter without at least two successful samples', () => {
+  assert.equal(
+    normalizeMetricsTimelineBucket({
+      ...validBucket,
+      successCount: 1,
+      failureCount: 2,
+      jitter: 10,
+    }),
+    null,
   )
 })

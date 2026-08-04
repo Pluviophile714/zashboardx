@@ -6,6 +6,7 @@ import type {
 } from '../../api/metricsHelper.ts'
 import {
   buildProxyMetricsTimelineChartModel,
+  getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
 } from '../proxyMetricsTimeline.ts'
 
@@ -24,6 +25,7 @@ const bucket = (
     avgDelay: 100 + index,
     minDelay: 90 + index,
     maxDelay: 110 + index,
+    jitter: 10,
     ...values,
   }
 }
@@ -143,7 +145,12 @@ test('keeps five time ticks and latency ticks for an empty 24h timeline', () => 
   assert.deepEqual(model.averagePaths, [])
 })
 
-test('keeps compact timeline details outside the plot without changing desktop overlay mode', () => {
+test('keeps timeline details outside the plot on mobile and desktop', () => {
   assert.equal(getProxyMetricsTimelineTooltipMode(true), 'outside')
-  assert.equal(getProxyMetricsTimelineTooltipMode(false), 'overlay')
+  assert.equal(getProxyMetricsTimelineTooltipMode(false), 'outside')
+})
+
+test('gives the wider desktop popover a taller timeline plot', () => {
+  assert.equal(getProxyMetricsTimelineHeight(true), 96)
+  assert.equal(getProxyMetricsTimelineHeight(false), 180)
 })
