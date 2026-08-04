@@ -179,20 +179,6 @@ const getLatencySegmentClass = (delay?: number) => {
   return 'bg-high-latency'
 }
 
-const latencyStabilityBar = computed(() => {
-  const history = getHistoryByName(props.name, props.groupName) ?? []
-  const recentHistory = history.slice(-LATENCY_BAR_SEGMENTS)
-  const emptySegments: { delay?: number }[] = Array.from(
-    { length: Math.max(0, LATENCY_BAR_SEGMENTS - recentHistory.length) },
-    () => ({}),
-  )
-  const recentSegments = recentHistory.map((item) => ({ delay: item.delay }))
-
-  return [...emptySegments, ...recentSegments].map((item) => ({
-    class: getLatencySegmentClass(item?.delay),
-  }))
-})
-
 const hasLatencyDetailsHistory = () => {
   if (getSharedMetricsResolution()?.metrics?.sampleCount) {
     return true
@@ -464,6 +450,36 @@ const getMetricsCandidateNames = () => {
 
 const getR5sLatencySampleSourceName = () =>
   getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
+
+const getLatencyStabilityHistory = () => {
+  const sourceName = getR5sLatencySampleSourceName()
+  const r5sSamples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ]
+
+  if (r5sSamples?.length) {
+    return r5sSamples.map((sample) => ({
+      delay: sample.success && sample.delay !== null ? sample.delay : NOT_CONNECTED,
+    }))
+  }
+
+  return getHistoryByName(props.name, props.groupName) ?? []
+}
+
+const latencyStabilityBar = computed(() => {
+  const history = getLatencyStabilityHistory()
+  const recentHistory = history.slice(-LATENCY_BAR_SEGMENTS)
+  const emptySegments: { delay?: number }[] = Array.from(
+    { length: Math.max(0, LATENCY_BAR_SEGMENTS - recentHistory.length) },
+    () => ({}),
+  )
+  const recentSegments = recentHistory.map((item) => ({ delay: item.delay }))
+
+  return [...emptySegments, ...recentSegments].map((item) => ({
+    class: getLatencySegmentClass(item?.delay),
+  }))
+})
 
 const getLatencyTimelineChartState = (sourceName: string): LatencyTimelineChartState => {
   const cacheKey = getProxyMetricsTimelineCacheKey(sourceName)

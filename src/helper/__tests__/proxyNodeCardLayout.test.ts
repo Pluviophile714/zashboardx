@@ -90,6 +90,14 @@ test('keeps the node title from shrinking when a detail popover is height constr
   )
 })
 
+test('uses cached R5S samples for the first-level latency stability bar', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /const getLatencyStabilityHistory = \(\) => \{[\s\S]*proxyMetricsSamplesMap\.value[\s\S]*return r5sSamples[\s\S]*getHistoryByName/,
+  )
+  assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
+})
+
 test('uses a short desktop hover delay without changing the mobile long-press trigger', () => {
   assert.match(proxyNodeCardSource, /delay: \[500, 120\]/)
   assert.match(proxyNodeCardSource, /touch: \['hold', 500\]/)
