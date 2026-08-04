@@ -9,6 +9,11 @@ export type ProbeSample = {
   errorType?: string
 }
 
+export type ProbeSampleRange = {
+  samples: ProbeSample[]
+  truncated: boolean
+}
+
 export type ProbeTimelineBucket = {
   start: string
   end: string

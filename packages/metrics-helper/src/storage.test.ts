@@ -674,3 +674,76 @@ test('supports fixed timeline profile geometry and boundary placement', () => {
     storage.close()
   }
 })
+
+test('returns raw samples in a half-open interval ordered by timestamp and database id', () => {
+  const storage = createStorage()
+  const start = '2026-07-04T00:10:00.000Z'
+  const end = '2026-07-04T00:15:00.000Z'
+
+  const samples: ProbeSample[] = [
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/start',
+      timestamp: start,
+      delay: 51,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/first',
+      timestamp: '2026-07-04T00:12:00.000Z',
+      delay: 52,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/second',
+      timestamp: '2026-07-04T00:12:00.000Z',
+      delay: 53,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/end',
+      timestamp: end,
+      delay: 54,
+      success: true,
+    },
+  ]
+
+  samples.forEach((sample) => storage.insertProbeSample(sample))
+
+  const result = storage.getProbeSamplesBetween('HK-01', Date.parse(start), Date.parse(end), 200)
+
+  assert.deepEqual(
+    result.samples.map((sample) => sample.delay),
+    [51, 52, 53],
+  )
+  assert.equal(result.truncated, false)
+  storage.close()
+})
+
+test('marks raw sample intervals as truncated when more rows match than the limit', () => {
+  const storage = createStorage()
+  const start = '2026-07-04T00:10:00.000Z'
+  const end = '2026-07-04T00:15:00.000Z'
+
+  for (const [index, delay] of [51, 52, 53].entries()) {
+    storage.insertProbeSample({
+      nodeName: 'HK-01',
+      testUrl: `https://example.com/${index}`,
+      timestamp: new Date(Date.parse(start) + index * 60_000).toISOString(),
+      delay,
+      success: true,
+    })
+  }
+
+  const result = storage.getProbeSamplesBetween('HK-01', Date.parse(start), Date.parse(end), 2)
+
+  assert.deepEqual(
+    result.samples.map((sample) => sample.delay),
+    [51, 52],
+  )
+  assert.equal(result.truncated, true)
+  storage.close()
+})

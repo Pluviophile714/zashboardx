@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { NodeMetrics, ProbeSample, ProbeTimelineBucket } from './types.js'
+import type { NodeMetrics, ProbeSample, ProbeSampleRange, ProbeTimelineBucket } from './types.js'
 
 const FALLBACK_ROUND_WINDOW_MS = 2_000
 
@@ -367,6 +367,51 @@ export class MetricsStorage {
         jitter: row?.jitter === null || row === undefined ? null : Number(row.jitter),
       }
     })
+  }
+
+  getProbeSamplesBetween(
+    nodeName: string,
+    startMs: number,
+    endMs: number,
+    limit: number,
+  ): ProbeSampleRange {
+    const rows = this.#db
+      .prepare(
+        `
+        SELECT node_name, test_url, timestamp, delay, success, error_type
+        FROM probe_samples
+        WHERE node_name = ?
+          AND timestamp >= ?
+          AND timestamp < ?
+        ORDER BY timestamp ASC, id ASC
+        LIMIT ?
+      `,
+      )
+      .all(nodeName, new Date(startMs).toISOString(), new Date(endMs).toISOString(), limit + 1) as {
+      delay: number | null
+      error_type: string | null
+      node_name: string
+      success: number
+      test_url: string
+      timestamp: string
+    }[]
+    const truncated = rows.length > limit
+
+    return {
+      samples: rows.slice(0, limit).map((row): ProbeSample => {
+        const success = row.success === 1
+
+        return {
+          nodeName: row.node_name,
+          testUrl: row.test_url,
+          timestamp: row.timestamp,
+          delay: row.delay === null ? null : Number(row.delay),
+          success,
+          ...(success || !row.error_type ? {} : { errorType: row.error_type }),
+        }
+      }),
+      truncated,
+    }
   }
 
   getLatestSampleTimestamp(nodeName: string, testUrl?: string) {

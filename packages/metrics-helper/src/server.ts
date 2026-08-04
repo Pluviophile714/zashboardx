@@ -17,6 +17,8 @@ const TIMELINE_PROFILES = {
   '6h': { windowSeconds: 21_600, bucketCount: 72 },
   '24h': { windowSeconds: 86_400, bucketCount: 96 },
 } as const
+const MAX_BUCKET_SAMPLE_INTERVAL_MS = 900_000
+const BUCKET_SAMPLE_LIMIT = 200
 
 const parseWindowSeconds = (value: string | null, fallback: number) => {
   if (!value) {
@@ -246,6 +248,42 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
           profile.bucketCount,
           nowMs,
         ),
+      })
+      return
+    }
+
+    if (url.pathname === '/api/metrics/bucket-samples') {
+      const nodeName = url.searchParams.get('node')?.trim() ?? ''
+      const startMs = Date.parse(url.searchParams.get('start') ?? '')
+      const endMs = Date.parse(url.searchParams.get('end') ?? '')
+
+      if (!nodeName || nodeName.length > 512) {
+        sendStatus(response, 400, { error: 'invalid_node' })
+        return
+      }
+      if (
+        !Number.isFinite(startMs) ||
+        !Number.isFinite(endMs) ||
+        startMs >= endMs ||
+        endMs - startMs > MAX_BUCKET_SAMPLE_INTERVAL_MS
+      ) {
+        sendStatus(response, 400, { error: 'invalid_interval' })
+        return
+      }
+
+      const result = options.storage.getProbeSamplesBetween(
+        nodeName,
+        startMs,
+        endMs,
+        BUCKET_SAMPLE_LIMIT,
+      )
+
+      sendJson(response, {
+        nodeName,
+        start: new Date(startMs).toISOString(),
+        end: new Date(endMs).toISOString(),
+        generatedAt: new Date(nowMs).toISOString(),
+        ...result,
       })
       return
     }

@@ -460,6 +460,206 @@ test('validates timeline requests and retains the global method check', async ()
   }
 })
 
+test('serves bounded raw bucket samples for a Unicode node name', async () => {
+  const storage = createStorage()
+  const nodeName = '\ud83c\udded\ud83c\uddf0 HKG \u9999\u6e2f 07 [\u4e3b]'
+  const start = at(10)
+  const end = at(15)
+
+  storage.insertProbeSample({
+    nodeName,
+    testUrl: 'https://example.com/start',
+    timestamp: start,
+    delay: 51,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName,
+    testUrl: 'https://example.com/inside',
+    timestamp: at(12),
+    delay: 52,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName,
+    testUrl: 'https://example.com/end',
+    timestamp: end,
+    delay: 53,
+    success: true,
+  })
+
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=${encodeURIComponent(nodeName)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    )
+    const body = (await response.json()) as {
+      end: string
+      generatedAt: string
+      nodeName: string
+      samples: { delay: number | null; timestamp: string }[]
+      start: string
+      truncated: boolean
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(body.nodeName, nodeName)
+    assert.equal(body.start, start)
+    assert.equal(body.end, end)
+    assert.equal(body.generatedAt, at(30))
+    assert.deepEqual(
+      body.samples.map((sample) => ({ delay: sample.delay, timestamp: sample.timestamp })),
+      [
+        { delay: 51, timestamp: start },
+        { delay: 52, timestamp: at(12) },
+      ],
+    )
+    assert.equal(body.truncated, false)
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('validates bounded raw bucket sample requests and retains the global method check', async () => {
+  const storage = createStorage()
+  const start = at(10)
+  const end = at(15)
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const emptyResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=Empty&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    )
+    const emptyBody = (await emptyResponse.json()) as {
+      samples: unknown[]
+      truncated: boolean
+    }
+
+    assert.equal(emptyResponse.status, 200)
+    assert.equal(emptyResponse.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(emptyBody.samples, [])
+    assert.equal(emptyBody.truncated, false)
+
+    const invalidTimestampResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=not-a-timestamp&end=${encodeURIComponent(end)}`,
+    )
+    const reversedBoundsResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent(end)}&end=${encodeURIComponent(start)}`,
+    )
+    const oversizedIntervalResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent(at(0))}&end=${encodeURIComponent(at(16))}`,
+    )
+    const missingNodeResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    )
+    const longNodeResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=${'x'.repeat(513)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    )
+    const postResponse = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+      { method: 'POST' },
+    )
+
+    for (const response of [
+      invalidTimestampResponse,
+      reversedBoundsResponse,
+      oversizedIntervalResponse,
+      missingNodeResponse,
+      longNodeResponse,
+    ]) {
+      assert.equal(response.status, 400)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+    }
+    assert.equal(postResponse.status, 405)
+    assert.equal(postResponse.headers.get('cache-control'), 'no-store')
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('limits raw bucket sample responses to 200 records', async () => {
+  const storage = createStorage()
+  const start = at(10)
+  const end = at(15)
+
+  for (let index = 0; index < 201; index += 1) {
+    storage.insertProbeSample({
+      nodeName: 'HK-01',
+      testUrl: `https://example.com/${index}`,
+      timestamp: start,
+      delay: index + 1,
+      success: true,
+    })
+  }
+
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    )
+    const body = (await response.json()) as {
+      samples: { delay: number | null }[]
+      truncated: boolean
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(body.samples.length, 200)
+    assert.equal(body.samples[0].delay, 1)
+    assert.equal(body.samples[199].delay, 200)
+    assert.equal(body.truncated, true)
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
 test('returns 404 for unknown metric routes', async () => {
   const storage = createStorage()
   const server = createMetricsServer({
