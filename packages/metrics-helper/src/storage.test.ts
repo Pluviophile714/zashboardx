@@ -628,3 +628,49 @@ test('includes exact window endpoints in timeline buckets', () => {
   assert.equal(buckets[95].avgDelay, 125)
   storage.close()
 })
+
+test('supports fixed timeline profile geometry and boundary placement', () => {
+  const profiles = [
+    { windowSeconds: 3_600, bucketCount: 60, bucketSeconds: 60 },
+    { windowSeconds: 21_600, bucketCount: 72, bucketSeconds: 300 },
+    { windowSeconds: 86_400, bucketCount: 96, bucketSeconds: 900 },
+  ]
+  const nowMs = Date.parse('2026-07-05T00:00:00.000Z')
+
+  for (const [index, profile] of profiles.entries()) {
+    const storage = createStorage()
+    const nodeName = `PROFILE-${index}`
+    const windowStart = new Date(nowMs - profile.windowSeconds * 1000).toISOString()
+
+    storage.insertProbeSample({
+      nodeName,
+      testUrl: 'https://example.com',
+      timestamp: windowStart,
+      delay: 75,
+      success: true,
+    })
+    storage.insertProbeSample({
+      nodeName,
+      testUrl: 'https://example.com',
+      timestamp: new Date(nowMs).toISOString(),
+      delay: 125,
+      success: true,
+    })
+
+    const buckets = storage.getNodeTimeline(
+      nodeName,
+      profile.windowSeconds,
+      profile.bucketCount,
+      nowMs,
+    )
+
+    assert.equal(buckets.length, profile.bucketCount)
+    assert.equal(
+      Date.parse(buckets[0].end) - Date.parse(buckets[0].start),
+      profile.bucketSeconds * 1000,
+    )
+    assert.equal(buckets[0].sampleCount, 1)
+    assert.equal(buckets[profile.bucketCount - 1].sampleCount, 1)
+    storage.close()
+  }
+})

@@ -12,6 +12,12 @@ type MetricsServerOptions = {
   now?: () => number
 }
 
+const TIMELINE_PROFILES = {
+  '1h': { windowSeconds: 3_600, bucketCount: 60 },
+  '6h': { windowSeconds: 21_600, bucketCount: 72 },
+  '24h': { windowSeconds: 86_400, bucketCount: 96 },
+} as const
+
 const parseWindowSeconds = (value: string | null, fallback: number) => {
   if (!value) {
     return fallback
@@ -218,22 +224,28 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
     if (url.pathname === '/api/metrics/timeline') {
       const nodeName = url.searchParams.get('node')?.trim() ?? ''
       const requestedWindow = url.searchParams.get('window') ?? '24h'
+      const profile = TIMELINE_PROFILES[requestedWindow as keyof typeof TIMELINE_PROFILES]
 
       if (!nodeName || nodeName.length > 512) {
         sendStatus(response, 400, { error: 'invalid_node' })
         return
       }
-      if (requestedWindow !== '24h') {
+      if (!profile) {
         sendStatus(response, 400, { error: 'unsupported_window' })
         return
       }
 
       sendJson(response, {
-        windowSeconds: 86_400,
+        windowSeconds: profile.windowSeconds,
         generatedAt: new Date(nowMs).toISOString(),
         nodeName,
-        bucketSeconds: 900,
-        buckets: options.storage.getNodeTimeline(nodeName, 86_400, 96, nowMs),
+        bucketSeconds: profile.windowSeconds / profile.bucketCount,
+        buckets: options.storage.getNodeTimeline(
+          nodeName,
+          profile.windowSeconds,
+          profile.bucketCount,
+          nowMs,
+        ),
       })
       return
     }

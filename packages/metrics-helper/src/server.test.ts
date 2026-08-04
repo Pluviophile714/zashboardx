@@ -342,7 +342,7 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
   }
 })
 
-test('serves a fixed 24-hour timeline for a Unicode node name', async () => {
+test('serves fixed timeline profiles for a Unicode node name', async () => {
   const storage = createStorage()
   const nodeName = '\ud83c\udded\ud83c\uddf0 HKG \u9999\u6e2f 07 [\u4e3b]'
 
@@ -371,25 +371,33 @@ test('serves a fixed 24-hour timeline for a Unicode node name', async () => {
   const baseUrl = await listen(server)
 
   try {
-    const response = await fetch(
-      `${baseUrl}/api/metrics/timeline?node=${encodeURIComponent(nodeName)}&window=24h`,
-    )
-    const body = (await response.json()) as {
-      bucketSeconds: number
-      buckets: { sampleCount: number }[]
-      generatedAt: string
-      nodeName: string
-      windowSeconds: number
-    }
+    const cases = [
+      { window: '1h', windowSeconds: 3_600, bucketSeconds: 60, bucketCount: 60 },
+      { window: '6h', windowSeconds: 21_600, bucketSeconds: 300, bucketCount: 72 },
+      { window: '24h', windowSeconds: 86_400, bucketSeconds: 900, bucketCount: 96 },
+    ]
 
-    assert.equal(response.status, 200)
-    assert.equal(response.headers.get('cache-control'), 'no-store')
-    assert.equal(body.windowSeconds, 86_400)
-    assert.equal(body.generatedAt, at(30))
-    assert.equal(body.nodeName, nodeName)
-    assert.equal(body.bucketSeconds, 900)
-    assert.equal(body.buckets.length, 96)
-    assert.equal(body.buckets[95].sampleCount, 1)
+    for (const timelineCase of cases) {
+      const response = await fetch(
+        `${baseUrl}/api/metrics/timeline?node=${encodeURIComponent(nodeName)}&window=${timelineCase.window}`,
+      )
+      const body = (await response.json()) as {
+        bucketSeconds: number
+        buckets: { sampleCount: number }[]
+        generatedAt: string
+        nodeName: string
+        windowSeconds: number
+      }
+
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      assert.equal(body.windowSeconds, timelineCase.windowSeconds)
+      assert.equal(body.generatedAt, at(30))
+      assert.equal(body.nodeName, nodeName)
+      assert.equal(body.bucketSeconds, timelineCase.bucketSeconds)
+      assert.equal(body.buckets.length, timelineCase.bucketCount)
+      assert.equal(body.buckets[timelineCase.bucketCount - 1].sampleCount, 1)
+    }
   } finally {
     server.close()
     storage.close()
