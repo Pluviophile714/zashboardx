@@ -43,9 +43,33 @@ test('keeps compact node details focused on the chart instead of desktop metadat
     proxyNodeCardSource,
     /if \(!compact\) \{\r?\n\s*availabilityLine\.append\(coverage, sampleDetail\)/,
   )
-  assert.match(proxyNodeCardSource, /if \(stats\) \{\r?\n\s*const statLine/)
+  assert.match(
+    proxyNodeCardSource,
+    /const summaryLine = document\.createElement\('div'\)\r?\n\s*if \(stats\) \{/,
+  )
   assert.match(proxyNodeCardSource, /if \(stats && !compact\) \{\r?\n\s*const stabilityLine/)
   assert.match(timelineChartSource, /options\.compact \? 'relative h-\[96px\]'/)
+})
+
+test('keeps compact 24h bucket details outside the plot while desktop stays overlaid', () => {
+  assert.match(timelineChartSource, /getProxyMetricsTimelineTooltipMode\(options\.compact\)/)
+  assert.match(
+    timelineChartSource,
+    /if \(tooltipMode === 'outside'\) \{\r?\n\s*body\.append\(svg\)\r?\n\s*section\.append\(tooltip\)/,
+  )
+  assert.match(timelineChartSource, /body\.append\(svg, tooltip\)/)
+})
+
+test('temporarily replaces compact recent stats while dragging a latency segment', () => {
+  assert.match(proxyNodeCardSource, /getLatencySampleIndexAtPointer/)
+  assert.match(proxyNodeCardSource, /if \(compact && summaryLine\) \{/)
+  assert.match(proxyNodeCardSource, /strip\.addEventListener\('pointerdown', selectPointerSample\)/)
+  assert.match(proxyNodeCardSource, /strip\.addEventListener\('pointermove', selectPointerSample\)/)
+  assert.match(
+    proxyNodeCardSource,
+    /strip\.addEventListener\('pointerup', scheduleSummaryRestore\)/,
+  )
+  assert.match(proxyNodeCardSource, /LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000/)
 })
 
 test('repositions an expanded desktop detail popover within the available viewport space', () => {

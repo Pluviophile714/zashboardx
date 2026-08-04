@@ -48,6 +48,9 @@ type RangePoint = ProxyMetricsTimelineChartPoint & {
   minY: number
 }
 
+export const getProxyMetricsTimelineTooltipMode = (compact: boolean) =>
+  compact ? ('outside' as const) : ('overlay' as const)
+
 const coordinate = (value: number) => Number(value.toFixed(2))
 
 const createPathRuns = <T>(points: (T | null)[], createPath: (run: T[]) => string): string[] => {

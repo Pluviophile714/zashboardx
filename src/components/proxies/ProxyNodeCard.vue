@@ -89,6 +89,7 @@ import {
   getCompactLatencyDetailsPlacement,
   getLatencyDetailsViewportSize,
 } from '@/helper/latencyDetailsViewport'
+import { getLatencySampleIndexAtPointer } from '@/helper/latencySampleSelection'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
@@ -141,6 +142,7 @@ const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
 const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
 const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
+const LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000
 const { t } = useI18n()
 const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
@@ -811,6 +813,7 @@ const buildLatencyStatusTimeline = (
   history: { delay: number; time?: string }[],
   compact = false,
   sourceLabel = '本机近30次',
+  summaryLine?: HTMLElement,
 ) => {
   const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
@@ -823,6 +826,8 @@ const buildLatencyStatusTimeline = (
   const sampleCount = recentHistory.length
   const successTests = recentHistory.filter((item) => item.delay > NOT_CONNECTED).length
   const sampledSuccessRate = sampleCount > 0 ? Math.round((successTests / sampleCount) * 100) : 0
+  const timelineItems = [...emptySegments, ...recentHistory]
+  const segments: HTMLElement[] = []
 
   timeline.className = compact
     ? 'mt-2 rounded-md bg-base-200/40 p-1.5'
@@ -852,11 +857,11 @@ const buildLatencyStatusTimeline = (
     : '暂无'
   header.append(oldestLabel, successLabel, newestLabel)
 
-  strip.className = 'flex w-full items-end gap-1'
+  strip.className = `flex w-full items-end gap-1 ${compact ? 'touch-pan-y select-none' : ''}`
 
   let previousTimestamp: number | undefined
 
-  for (const item of [...emptySegments, ...recentHistory]) {
+  for (const item of timelineItems) {
     const segment = document.createElement('div')
     const timestamp = item.time ? Date.parse(item.time) : undefined
     const accent = getLatencyTimelineAccent(item.delay)
@@ -904,6 +909,96 @@ const buildLatencyStatusTimeline = (
     }
 
     strip.append(segment)
+    segments.push(segment)
+  }
+
+  if (compact && summaryLine) {
+    const summaryNodes = Array.from(summaryLine.childNodes)
+    let activePointerId: number | null = null
+    let restoreTimer: ReturnType<typeof window.setTimeout> | undefined
+
+    const clearRestoreTimer = () => {
+      if (!restoreTimer) return
+
+      window.clearTimeout(restoreTimer)
+      restoreTimer = undefined
+    }
+    const clearSelectedSegment = () => {
+      for (const segment of segments) {
+        segment.style.outline = ''
+        segment.style.outlineOffset = ''
+      }
+    }
+    const restoreSummary = () => {
+      clearSelectedSegment()
+      summaryLine.replaceChildren(...summaryNodes)
+    }
+    const showSample = (index: number) => {
+      const item = timelineItems[index]
+
+      if (!item?.time || item.delay === undefined) {
+        restoreSummary()
+        return
+      }
+
+      clearSelectedSegment()
+      const selectedSegment = segments[index]
+      selectedSegment.style.outline =
+        '1px solid color-mix(in oklch, var(--color-base-content) 70%, transparent)'
+      selectedSegment.style.outlineOffset = '1px'
+
+      const time = document.createElement('time')
+      const delay = document.createElement('span')
+      const status = document.createElement('span')
+      const statusDot = document.createElement('span')
+      const success = item.delay > NOT_CONNECTED
+
+      time.className = 'text-base-content/60'
+      time.textContent = dayjs(item.time).format('MM-DD HH:mm:ss')
+      delay.className = `font-semibold ${getLatencyTextClass(item.delay)}`
+      delay.textContent = success ? `${item.delay}ms` : '---'
+      status.className = `inline-flex items-center gap-1 ${
+        success ? 'text-low-latency' : 'text-high-latency'
+      }`
+      statusDot.className = `size-1.5 rounded-full ${
+        success ? 'bg-low-latency' : 'bg-high-latency'
+      }`
+      status.append(statusDot, document.createTextNode(success ? '成功' : '失败'))
+      summaryLine.replaceChildren(time, delay, status)
+    }
+    const selectPointerSample = (event: PointerEvent) => {
+      if (event.type === 'pointerdown') {
+        activePointerId = event.pointerId
+        clearRestoreTimer()
+        strip.setPointerCapture?.(event.pointerId)
+      } else if (activePointerId !== event.pointerId) {
+        return
+      }
+
+      const rect = strip.getBoundingClientRect()
+      const index = getLatencySampleIndexAtPointer(
+        event.clientX,
+        rect.left,
+        rect.width,
+        timelineItems.length,
+      )
+
+      if (index !== null) {
+        showSample(index)
+      }
+    }
+    const scheduleSummaryRestore = (event: PointerEvent) => {
+      if (activePointerId !== event.pointerId) return
+
+      activePointerId = null
+      clearRestoreTimer()
+      restoreTimer = window.setTimeout(restoreSummary, LATENCY_SAMPLE_DETAIL_RESTORE_DELAY)
+    }
+
+    strip.addEventListener('pointerdown', selectPointerSample)
+    strip.addEventListener('pointermove', selectPointerSample)
+    strip.addEventListener('pointerup', scheduleSummaryRestore)
+    strip.addEventListener('pointercancel', scheduleSummaryRestore)
   }
 
   timeline.append(header, strip)
@@ -993,11 +1088,9 @@ const createLatencyDetailsTip = () => {
       }),
     )
 
-    chart.append(buildLatencyStatusTimeline(history, compact, detailHistorySource.label))
-
+    const summaryLine = document.createElement('div')
     if (stats) {
-      const statLine = document.createElement('div')
-      statLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
+      summaryLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
 
       const min = document.createElement('span')
       min.textContent = `${stats.min}ms`
@@ -1005,14 +1098,21 @@ const createLatencyDetailsTip = () => {
       avg.textContent = `avg: ${stats.avg}ms`
       const max = document.createElement('span')
       max.textContent = `${stats.max}ms`
-      statLine.append(min, avg, max)
-      chart.append(statLine)
+      summaryLine.append(min, avg, max)
     } else {
-      const emptyStat = document.createElement('div')
-      emptyStat.className = 'mt-1 text-center text-xs text-base-content/55'
-      emptyStat.textContent = history.length ? '近30次暂无成功测速' : 'R5S近30次等待样本'
-      chart.append(emptyStat)
+      summaryLine.className = 'mt-1 text-center text-xs text-base-content/55'
+      summaryLine.textContent = history.length ? '近30次暂无成功测速' : 'R5S近30次等待样本'
     }
+
+    chart.append(
+      buildLatencyStatusTimeline(
+        history,
+        compact,
+        detailHistorySource.label,
+        compact ? summaryLine : undefined,
+      ),
+      summaryLine,
+    )
 
     if (stats && !compact) {
       const stabilityLine = document.createElement('div')

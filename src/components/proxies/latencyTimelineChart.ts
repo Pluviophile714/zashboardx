@@ -1,5 +1,8 @@
 import type { ProxyMetricsTimelineResponse } from '@/api/metricsHelper'
-import { buildProxyMetricsTimelineChartModel } from '@/helper/proxyMetricsTimeline'
+import {
+  buildProxyMetricsTimelineChartModel,
+  getProxyMetricsTimelineTooltipMode,
+} from '@/helper/proxyMetricsTimeline'
 
 export type LatencyTimelineChartState =
   | { status: 'loading' }
@@ -93,6 +96,7 @@ export const createLatencyTimelineChartSection = (
   const width = 360
   const height = options.compact ? 96 : 150
   const timeline = state.timeline
+  const tooltipMode = getProxyMetricsTimelineTooltipMode(options.compact)
   const model = buildProxyMetricsTimelineChartModel(timeline, {
     width,
     height,
@@ -228,8 +232,16 @@ export const createLatencyTimelineChartSection = (
   const tooltip = document.createElement('div')
 
   tooltip.className =
-    'pointer-events-none absolute top-1 z-10 hidden min-w-36 rounded-md border border-base-content/10 bg-base-100/95 px-2 py-1.5 text-[10px] text-base-content/70 shadow-lg backdrop-blur-sm'
-  body.append(svg, tooltip)
+    tooltipMode === 'outside'
+      ? 'pointer-events-none mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
+      : 'pointer-events-none absolute top-1 z-10 hidden min-w-36 rounded-md border border-base-content/10 bg-base-100/95 px-2 py-1.5 text-[10px] text-base-content/70 shadow-lg backdrop-blur-sm'
+
+  if (tooltipMode === 'outside') {
+    body.append(svg)
+    section.append(tooltip)
+  } else {
+    body.append(svg, tooltip)
+  }
 
   if (state.status === 'empty') {
     const empty = document.createElement('div')
@@ -240,19 +252,7 @@ export const createLatencyTimelineChartSection = (
     body.append(empty)
   }
 
-  const updateHover = (event: PointerEvent) => {
-    const rect = svg.getBoundingClientRect()
-
-    if (!rect.width) {
-      return
-    }
-
-    const svgX = ((event.clientX - rect.left) / rect.width) * width
-    const relativeX = (svgX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
-    const bucketIndex = Math.max(
-      0,
-      Math.min(timeline.buckets.length - 1, Math.floor(relativeX * timeline.buckets.length)),
-    )
+  const renderBucket = (bucketIndex: number) => {
     const bucket = timeline.buckets[bucketIndex]
     const point = model.points[bucketIndex]
     const bucketCenter =
@@ -274,7 +274,7 @@ export const createLatencyTimelineChartSection = (
     tooltip.replaceChildren()
     const time = document.createElement('div')
 
-    time.className = 'mb-1 whitespace-nowrap font-semibold text-base-content'
+    time.className = `${tooltipMode === 'outside' ? 'col-span-2' : 'mb-1'} whitespace-nowrap font-semibold text-base-content`
     time.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
     tooltip.append(time)
 
@@ -287,22 +287,56 @@ export const createLatencyTimelineChartSection = (
     appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
     appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
 
-    const horizontalRatio = (bucketIndex + 0.5) / timeline.buckets.length
+    if (tooltipMode === 'overlay') {
+      const horizontalRatio = (bucketIndex + 0.5) / timeline.buckets.length
 
-    tooltip.style.left = `${Math.min(86, Math.max(14, horizontalRatio * 100))}%`
-    tooltip.style.transform = 'translateX(-50%)'
+      tooltip.style.left = `${Math.min(86, Math.max(14, horizontalRatio * 100))}%`
+      tooltip.style.transform = 'translateX(-50%)'
+    }
     tooltip.classList.remove('hidden')
+  }
+
+  const updateHover = (event: PointerEvent) => {
+    const rect = svg.getBoundingClientRect()
+
+    if (!rect.width) {
+      return
+    }
+
+    const svgX = ((event.clientX - rect.left) / rect.width) * width
+    const relativeX = (svgX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
+    const bucketIndex = Math.max(
+      0,
+      Math.min(timeline.buckets.length - 1, Math.floor(relativeX * timeline.buckets.length)),
+    )
+
+    renderBucket(bucketIndex)
   }
 
   const clearHover = () => {
     hoverLine.setAttribute('visibility', 'hidden')
     hoverPoint.setAttribute('visibility', 'hidden')
-    tooltip.classList.add('hidden')
+    if (tooltipMode === 'overlay') {
+      tooltip.classList.add('hidden')
+    }
   }
 
   svg.addEventListener('pointermove', updateHover)
   svg.addEventListener('pointerdown', updateHover)
   svg.addEventListener('pointerleave', clearHover)
+
+  if (tooltipMode === 'outside' && timeline.buckets.length) {
+    let latestSampleIndex = timeline.buckets.length - 1
+
+    for (let index = timeline.buckets.length - 1; index >= 0; index -= 1) {
+      if (timeline.buckets[index].sampleCount > 0) {
+        latestSampleIndex = index
+        break
+      }
+    }
+
+    renderBucket(latestSampleIndex)
+  }
 
   return section
 }

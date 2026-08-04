@@ -4,7 +4,10 @@ import type {
   ProxyMetricsTimelineBucket,
   ProxyMetricsTimelineResponse,
 } from '../../api/metricsHelper.ts'
-import { buildProxyMetricsTimelineChartModel } from '../proxyMetricsTimeline.ts'
+import {
+  buildProxyMetricsTimelineChartModel,
+  getProxyMetricsTimelineTooltipMode,
+} from '../proxyMetricsTimeline.ts'
 
 const bucket = (
   index: number,
@@ -138,4 +141,9 @@ test('keeps five time ticks and latency ticks for an empty 24h timeline', () => 
   assert.equal(model.axes.xTicks.length, 5)
   assert.equal(model.axes.yTicks.length, 3)
   assert.deepEqual(model.averagePaths, [])
+})
+
+test('keeps compact timeline details outside the plot without changing desktop overlay mode', () => {
+  assert.equal(getProxyMetricsTimelineTooltipMode(true), 'outside')
+  assert.equal(getProxyMetricsTimelineTooltipMode(false), 'overlay')
 })
