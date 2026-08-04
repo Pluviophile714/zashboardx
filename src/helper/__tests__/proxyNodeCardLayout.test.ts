@@ -440,6 +440,22 @@ test('range changes exit drilldown and request the selected timeline', () => {
   )
 })
 
+test('guards stale timeline responses before mutating unavailable state', () => {
+  const refreshStart = proxyNodeCardSource.indexOf('const refreshLatencyDetailsTimeline =')
+  const refreshEnd = proxyNodeCardSource.indexOf(
+    'const changeLatencyTimelineWindow =',
+    refreshStart,
+  )
+  const refreshSource = proxyNodeCardSource.slice(refreshStart, refreshEnd)
+  const guardIndex = refreshSource.indexOf('requestGeneration !== latencyTimelineRequestGeneration')
+  const deleteIndex = refreshSource.indexOf('unavailableLatencyTimelineKeys.delete')
+  const addIndex = refreshSource.indexOf('unavailableLatencyTimelineKeys.add')
+
+  assert.ok(guardIndex >= 0)
+  assert.ok(deleteIndex > guardIndex)
+  assert.ok(addIndex > guardIndex)
+})
+
 test('enters bucket drilldown only after a successful exact-interval response', () => {
   assert.match(
     proxyNodeCardSource,

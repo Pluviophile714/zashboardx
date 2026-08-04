@@ -34,6 +34,9 @@ export const resolveLatencyStripHistory = ({
   bucket,
 }: ResolveLatencyStripHistoryOptions) => (mode === 'bucket' ? bucket : recent)
 
+export const getLatencyStripTargetCount = (displayedCount: number, minimumCount: number) =>
+  Math.max(minimumCount, displayedCount)
+
 export const formatLatencyBucketTitle = (
   bucket: Pick<ProxyMetricsTimelineBucket, 'start' | 'end'>,
   recordCount: number,

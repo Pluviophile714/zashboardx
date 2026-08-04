@@ -81,6 +81,7 @@ import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
 import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
 import {
   formatLatencyBucketTitle,
+  getLatencyStripTargetCount,
   mapLatencyBucketSamplesToHistory,
   resolveLatencyStripHistory,
   type LatencyStripHistoryItem,
@@ -825,18 +826,18 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
   const request = refreshProxyMetricsTimeline(sourceName, { window })
 
   void request.then((timeline) => {
-    if (timeline) {
-      unavailableLatencyTimelineKeys.delete(timelineCacheKey)
-    } else {
-      unavailableLatencyTimelineKeys.add(timelineCacheKey)
-    }
-
     if (
       requestGeneration !== latencyTimelineRequestGeneration ||
       activeLatencyTimelineWindow !== window ||
       activeLatencyDetailsSourceName !== sourceName
     ) {
       return
+    }
+
+    if (timeline) {
+      unavailableLatencyTimelineKeys.delete(timelineCacheKey)
+    } else {
+      unavailableLatencyTimelineKeys.add(timelineCacheKey)
     }
 
     renderActiveLatencyDetailsTip()
@@ -906,7 +907,10 @@ const buildLatencyStatusTimeline = (
   options: { onInteraction?: () => void; preserveAll?: boolean } = {},
 ) => {
   const displayedHistory = options.preserveAll ? history : history.slice(-LATENCY_DETAIL_SEGMENTS)
-  const targetSegmentCount = options.preserveAll ? displayedHistory.length : LATENCY_DETAIL_SEGMENTS
+  const targetSegmentCount = getLatencyStripTargetCount(
+    displayedHistory.length,
+    LATENCY_DETAIL_SEGMENTS,
+  )
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
     { length: Math.max(0, targetSegmentCount - displayedHistory.length) },
     () => ({}),

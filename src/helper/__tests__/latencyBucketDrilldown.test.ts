@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { ProxyMetricsSample, ProxyMetricsTimelineBucket } from '../../api/metricsHelper.ts'
 import {
   formatLatencyBucketTitle,
+  getLatencyStripTargetCount,
   mapLatencyBucketSamplesToHistory,
   resolveLatencyStripHistory,
 } from '../latencyBucketDrilldown.ts'
@@ -57,6 +58,21 @@ for (const recordCount of [14, 17, 34]) {
     )
   })
 }
+
+test('keeps 30 strip tracks for small buckets without truncating larger buckets', () => {
+  assert.deepEqual(
+    [14, 17, 34].map((recordCount) => {
+      const targetCount = getLatencyStripTargetCount(recordCount, 30)
+
+      return { recordCount, targetCount, placeholderCount: targetCount - recordCount }
+    }),
+    [
+      { recordCount: 14, targetCount: 30, placeholderCount: 16 },
+      { recordCount: 17, targetCount: 30, placeholderCount: 13 },
+      { recordCount: 34, targetCount: 34, placeholderCount: 0 },
+    ],
+  )
+})
 
 test('maps raw bucket samples in response order and preserves failures', () => {
   const samples = [
