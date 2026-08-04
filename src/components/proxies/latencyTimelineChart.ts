@@ -1,8 +1,13 @@
-import type { ProxyMetricsTimelineResponse } from '@/api/metricsHelper'
+import type {
+  ProxyMetricsTimelineBucket,
+  ProxyMetricsTimelineResponse,
+  ProxyMetricsTimelineWindow,
+} from '@/api/metricsHelper'
 import {
   buildProxyMetricsTimelineChartModel,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
+  LATENCY_TIMELINE_WINDOWS,
 } from '@/helper/proxyMetricsTimeline'
 
 export type LatencyTimelineChartState =
@@ -11,9 +16,14 @@ export type LatencyTimelineChartState =
   | { status: 'empty'; timeline: ProxyMetricsTimelineResponse }
   | { status: 'ready'; timeline: ProxyMetricsTimelineResponse }
 
-type LatencyTimelineChartOptions = {
+export type LatencyTimelineChartOptions = {
   compact: boolean
+  onBucketActivate?: (bucket: ProxyMetricsTimelineBucket) => void
+  onBucketChange?: (bucket: ProxyMetricsTimelineBucket) => void
+  onInteraction?: () => void
+  onWindowChange?: (window: ProxyMetricsTimelineWindow) => void
   sourceLabel?: string
+  window?: ProxyMetricsTimelineWindow
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
@@ -68,32 +78,62 @@ export const createLatencyTimelineChartSection = (
 ): HTMLElement => {
   const section = document.createElement('section')
   const header = document.createElement('div')
+  const headerInfo = document.createElement('div')
   const title = document.createElement('span')
   const source = document.createElement('span')
+  const rangeControl = document.createElement('div')
   const body = document.createElement('div')
   const height = getProxyMetricsTimelineHeight(options.compact)
+  const selectedWindow = options.window ?? '24h'
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
   header.className = 'mb-1.5 flex min-w-0 items-center justify-between gap-2 text-xs'
+  headerInfo.className = 'flex min-w-0 flex-1 items-center gap-2'
   title.className = 'shrink-0 font-semibold text-base-content/80'
-  title.textContent = '24h 延迟'
-  source.className = 'truncate text-[10px] text-base-content/45'
+  title.textContent = `${selectedWindow} 延迟`
+  source.className = 'min-w-0 flex-1 truncate text-[10px] text-base-content/45'
   source.textContent = options.sourceLabel ? `来源 ${options.sourceLabel}` : ''
-  header.append(title)
+  headerInfo.append(title)
   if (source.textContent) {
-    header.append(source)
+    headerInfo.append(source)
   }
+  rangeControl.className =
+    'inline-flex h-6 shrink-0 overflow-hidden rounded-md border border-base-content/15 bg-base-200/40'
+  rangeControl.setAttribute('aria-label', '延迟时间范围')
+  for (const window of LATENCY_TIMELINE_WINDOWS) {
+    const button = document.createElement('button')
+
+    button.type = 'button'
+    button.className =
+      'h-6 w-8 border-r border-base-content/10 text-[10px] last:border-r-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary'
+    button.textContent = window
+    button.setAttribute('aria-pressed', String(window === selectedWindow))
+    button.setAttribute('aria-label', `${window} 延迟`)
+    if (window === selectedWindow) {
+      button.classList.add('bg-base-100', 'font-semibold', 'text-base-content')
+    } else {
+      button.classList.add('text-base-content/55')
+    }
+    button.addEventListener('click', () => {
+      options.onInteraction?.()
+      if (window !== selectedWindow) {
+        options.onWindowChange?.(window)
+      }
+    })
+    rangeControl.append(button)
+  }
+  header.append(headerInfo, rangeControl)
 
   body.className = 'relative'
   body.style.height = `${height}px`
   section.append(header, body)
 
   if (state.status === 'loading') {
-    appendEmptyState(body, '正在读取 R5S 24h 趋势')
+    appendEmptyState(body, `正在读取 R5S ${selectedWindow} 延迟趋势`)
     return section
   }
   if (state.status === 'unavailable') {
-    appendEmptyState(body, 'R5S 24h 趋势暂不可用')
+    appendEmptyState(body, `R5S ${selectedWindow} 延迟趋势暂不可用`)
     return section
   }
   const width = options.compact ? 360 : 420
@@ -110,7 +150,7 @@ export const createLatencyTimelineChartSection = (
     },
   })
   const svg = createSvgElement('svg', {
-    'aria-label': `24 小时延迟趋势，${timeline.nodeName}`,
+    'aria-label': `${selectedWindow} 延迟趋势，${timeline.nodeName}`,
     role: 'img',
     viewBox: `0 0 ${width} ${height}`,
   })
@@ -235,7 +275,7 @@ export const createLatencyTimelineChartSection = (
 
   tooltip.dataset.mode = tooltipMode
   tooltip.className =
-    'pointer-events-none mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
+    'mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
 
   body.append(svg)
   section.append(tooltip)
@@ -245,9 +285,11 @@ export const createLatencyTimelineChartSection = (
 
     empty.className =
       'pointer-events-none absolute inset-0 flex items-center justify-center pb-5 text-xs text-base-content/50'
-    empty.textContent = '24h 趋势暂无样本'
+    empty.textContent = `${selectedWindow} 延迟趋势暂无样本`
     body.append(empty)
   }
+
+  let selectedBucket: ProxyMetricsTimelineBucket | undefined
 
   const renderBucket = (bucketIndex: number) => {
     const bucket = timeline.buckets[bucketIndex]
@@ -288,9 +330,36 @@ export const createLatencyTimelineChartSection = (
     }
     appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
     appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
+
+    selectedBucket = bucket
+    const canActivate = bucket.sampleCount > 0
+
+    if (canActivate) {
+      tooltip.setAttribute('aria-disabled', 'false')
+      tooltip.setAttribute('aria-label', '查看此时间段的测速记录')
+      tooltip.setAttribute('role', 'button')
+      tooltip.tabIndex = 0
+      tooltip.classList.add(
+        'cursor-pointer',
+        'focus-visible:outline-2',
+        'focus-visible:outline-primary',
+      )
+    } else {
+      tooltip.removeAttribute('aria-disabled')
+      tooltip.removeAttribute('aria-label')
+      tooltip.removeAttribute('role')
+      tooltip.removeAttribute('tabindex')
+      tooltip.classList.remove(
+        'cursor-pointer',
+        'focus-visible:outline-2',
+        'focus-visible:outline-primary',
+      )
+    }
+    options.onBucketChange?.(bucket)
   }
 
   const updateHover = (event: PointerEvent) => {
+    options.onInteraction?.()
     const rect = svg.getBoundingClientRect()
 
     if (!rect.width) {
@@ -312,8 +381,28 @@ export const createLatencyTimelineChartSection = (
     hoverPoint.setAttribute('visibility', 'hidden')
   }
 
+  const activateSelectedBucket = () => {
+    const bucket = selectedBucket
+
+    if (bucket && bucket.sampleCount > 0) {
+      options.onInteraction?.()
+      options.onBucketActivate?.(bucket)
+    }
+  }
+
+  tooltip.addEventListener('click', activateSelectedBucket)
+  tooltip.addEventListener('pointerdown', () => options.onInteraction?.())
+  tooltip.addEventListener('touchstart', () => options.onInteraction?.(), { passive: true })
+  tooltip.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      activateSelectedBucket()
+    }
+  })
+
   svg.addEventListener('pointermove', updateHover)
   svg.addEventListener('pointerdown', updateHover)
+  svg.addEventListener('touchstart', () => options.onInteraction?.(), { passive: true })
   svg.addEventListener('pointerleave', clearHover)
 
   if (timeline.buckets.length) {

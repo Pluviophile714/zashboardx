@@ -59,6 +59,30 @@ test('keeps 24h bucket details outside the plot on desktop and mobile', () => {
   assert.doesNotMatch(timelineChartSource, /body\.append\(svg, tooltip\)/)
 })
 
+test('renders a selected 1h, 6h, and 24h range control that reports changes', () => {
+  assert.match(timelineChartSource, /LATENCY_TIMELINE_WINDOWS/)
+  assert.match(timelineChartSource, /document\.createElement\('button'\)/)
+  assert.match(timelineChartSource, /button\.textContent = window/)
+  assert.match(
+    timelineChartSource,
+    /button\.setAttribute\('aria-pressed', String\(window === selectedWindow\)\)/,
+  )
+  assert.match(timelineChartSource, /options\.onWindowChange\?\.\(window\)/)
+  assert.match(timelineChartSource, /title\.textContent = `\$\{selectedWindow\} 延迟`/)
+  assert.match(timelineChartSource, /正在读取 R5S \$\{selectedWindow\} 延迟趋势/)
+  assert.match(timelineChartSource, /R5S \$\{selectedWindow\} 延迟趋势暂不可用/)
+  assert.match(timelineChartSource, /\$\{selectedWindow\} 延迟趋势暂无样本/)
+})
+
+test('reports chart interaction and selected buckets while only activating populated cards', () => {
+  assert.match(timelineChartSource, /options\.onBucketChange\?\.\(bucket\)/)
+  assert.match(timelineChartSource, /bucket\.sampleCount > 0/)
+  assert.match(timelineChartSource, /options\.onBucketActivate\?\.\(bucket\)/)
+  assert.match(timelineChartSource, /options\.onInteraction\?\.\(\)/)
+  assert.match(timelineChartSource, /tooltip\.addEventListener\('click'/)
+  assert.match(timelineChartSource, /svg\.addEventListener\('pointermove', updateHover\)/)
+})
+
 test('shows selected bucket jitter next to its range details', () => {
   assert.match(timelineChartSource, /'波动'/)
 })

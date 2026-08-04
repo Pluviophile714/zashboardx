@@ -8,6 +8,7 @@ import {
   buildProxyMetricsTimelineChartModel,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
+  LATENCY_TIMELINE_WINDOWS,
 } from '../proxyMetricsTimeline.ts'
 
 const bucket = (
@@ -153,4 +154,8 @@ test('keeps timeline details outside the plot on mobile and desktop', () => {
 test('gives the wider desktop popover a taller timeline plot', () => {
   assert.equal(getProxyMetricsTimelineHeight(true), 96)
   assert.equal(getProxyMetricsTimelineHeight(false), 180)
+})
+
+test('exposes the supported timeline windows in compact control order', () => {
+  assert.deepEqual(LATENCY_TIMELINE_WINDOWS, ['1h', '6h', '24h'])
 })

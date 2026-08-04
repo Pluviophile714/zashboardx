@@ -1,4 +1,6 @@
-import type { ProxyMetricsTimelineResponse } from '@/api/metricsHelper'
+import type { ProxyMetricsTimelineResponse, ProxyMetricsTimelineWindow } from '@/api/metricsHelper'
+
+export const LATENCY_TIMELINE_WINDOWS: readonly ProxyMetricsTimelineWindow[] = ['1h', '6h', '24h']
 
 export type ProxyMetricsTimelineChartPoint = {
   bucketIndex: number
