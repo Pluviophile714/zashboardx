@@ -27,6 +27,7 @@ export type LatencyTimelineChartOptions = {
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
+const CARD_ACTIVATION_DRAG_THRESHOLD = 8
 let chartId = 0
 
 const createSvgElement = (tagName: string, attributes: Record<string, string | number> = {}) => {
@@ -390,14 +391,153 @@ export const createLatencyTimelineChartSection = (
     }
   }
 
-  tooltip.addEventListener('click', activateSelectedBucket)
-  tooltip.addEventListener('pointerdown', () => options.onInteraction?.())
-  tooltip.addEventListener('touchstart', () => options.onInteraction?.(), { passive: true })
+  let activeCardGesture:
+    | { id: number; source: 'pointer' | 'touch'; startX: number; startY: number }
+    | undefined
+  let suppressNextCardClick = false
+  let spacePressed = false
+
+  const beginCardGesture = (
+    source: 'pointer' | 'touch',
+    id: number,
+    clientX: number,
+    clientY: number,
+  ) => {
+    options.onInteraction?.()
+    suppressNextCardClick = false
+    activeCardGesture = { id, source, startX: clientX, startY: clientY }
+  }
+
+  const updateCardGesture = (
+    source: 'pointer' | 'touch',
+    id: number,
+    clientX: number,
+    clientY: number,
+  ) => {
+    options.onInteraction?.()
+    if (
+      activeCardGesture?.source === source &&
+      activeCardGesture.id === id &&
+      Math.hypot(clientX - activeCardGesture.startX, clientY - activeCardGesture.startY) >=
+        CARD_ACTIVATION_DRAG_THRESHOLD
+    ) {
+      suppressNextCardClick = true
+    }
+  }
+
+  const endCardGesture = (source: 'pointer' | 'touch', id: number, cancelled = false) => {
+    options.onInteraction?.()
+    if (activeCardGesture?.source === source && activeCardGesture.id === id) {
+      suppressNextCardClick ||= cancelled
+      activeCardGesture = undefined
+    }
+  }
+
+  const findTouch = (touches: TouchList, identifier: number) => {
+    for (let index = 0; index < touches.length; index += 1) {
+      const touch = touches.item(index)
+
+      if (touch?.identifier === identifier) {
+        return touch
+      }
+    }
+
+    return undefined
+  }
+
+  tooltip.addEventListener('click', () => {
+    if (suppressNextCardClick) {
+      suppressNextCardClick = false
+      return
+    }
+
+    activateSelectedBucket()
+  })
+  tooltip.addEventListener('pointerdown', (event) => {
+    beginCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+  })
+  tooltip.addEventListener('pointermove', (event) => {
+    updateCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+  })
+  tooltip.addEventListener('pointerup', (event) => {
+    endCardGesture('pointer', event.pointerId)
+  })
+  tooltip.addEventListener('pointercancel', (event) => {
+    endCardGesture('pointer', event.pointerId, true)
+  })
+  tooltip.addEventListener(
+    'touchstart',
+    (event) => {
+      if (activeCardGesture?.source === 'pointer') {
+        return
+      }
+
+      const touch = event.changedTouches.item(0)
+      if (touch) {
+        beginCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+      }
+    },
+    { passive: true },
+  )
+  tooltip.addEventListener(
+    'touchmove',
+    (event) => {
+      if (activeCardGesture?.source !== 'touch') {
+        return
+      }
+
+      const touch = findTouch(event.changedTouches, activeCardGesture.id)
+      if (touch) {
+        updateCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+      }
+    },
+    { passive: true },
+  )
+  tooltip.addEventListener(
+    'touchend',
+    (event) => {
+      if (activeCardGesture?.source !== 'touch') {
+        return
+      }
+
+      const touch = findTouch(event.changedTouches, activeCardGesture.id)
+      if (touch) {
+        endCardGesture('touch', touch.identifier)
+      }
+    },
+    { passive: true },
+  )
+  tooltip.addEventListener(
+    'touchcancel',
+    () => {
+      if (activeCardGesture?.source === 'touch') {
+        endCardGesture('touch', activeCardGesture.id, true)
+      }
+    },
+    { passive: true },
+  )
   tooltip.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (event.key === ' ') {
+      event.preventDefault()
+      if (!event.repeat) {
+        spacePressed = true
+      }
+    } else if (event.key === 'Enter' && !event.repeat) {
       event.preventDefault()
       activateSelectedBucket()
     }
+  })
+  tooltip.addEventListener('keyup', (event) => {
+    if (event.key === ' ') {
+      event.preventDefault()
+      if (spacePressed) {
+        spacePressed = false
+        activateSelectedBucket()
+      }
+    }
+  })
+  tooltip.addEventListener('blur', () => {
+    spacePressed = false
   })
 
   svg.addEventListener('pointermove', updateHover)

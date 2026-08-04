@@ -1,6 +1,204 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { registerHooks } from 'node:module'
 import test from 'node:test'
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith('@/')) {
+      return {
+        shortCircuit: true,
+        url: new URL(`../../${specifier.slice(2)}.ts`, import.meta.url).href,
+      }
+    }
+
+    return nextResolve(specifier, context)
+  },
+})
+
+const { createLatencyTimelineChartSection } =
+  await import('../../components/proxies/latencyTimelineChart.ts')
+
+type TestEvent = {
+  clientX?: number
+  clientY?: number
+  changedTouches?: TestTouchList
+  defaultPrevented: boolean
+  key?: string
+  pointerId?: number
+  repeat?: boolean
+  type: string
+  preventDefault: () => void
+}
+
+type TestTouch = { clientX: number; clientY: number; identifier: number }
+type TestTouchList = { item: (index: number) => TestTouch | null; length: number }
+
+class TestElement {
+  attributes = new Map<string, string>()
+  children: TestElement[] = []
+  classList = {
+    add: (...tokens: string[]) => tokens.forEach((token) => this.classNames.add(token)),
+    remove: (...tokens: string[]) => tokens.forEach((token) => this.classNames.delete(token)),
+  }
+  dataset: Record<string, string> = {}
+  private classNames = new Set<string>()
+  private listeners = new Map<string, ((event: TestEvent) => void)[]>()
+  style: Record<string, string> = {}
+  tabIndex = -1
+  tagName: string
+  textContent = ''
+  type = ''
+
+  constructor(tagName: string) {
+    this.tagName = tagName
+  }
+
+  get className() {
+    return [...this.classNames].join(' ')
+  }
+
+  set className(value: string) {
+    this.classNames = new Set(value.split(/\s+/).filter(Boolean))
+  }
+
+  addEventListener(type: string, listener: (event: TestEvent) => void) {
+    const listeners = this.listeners.get(type) ?? []
+
+    listeners.push(listener)
+    this.listeners.set(type, listeners)
+  }
+
+  append(...children: TestElement[]) {
+    this.children.push(...children)
+  }
+
+  dispatchEvent(event: TestEvent) {
+    for (const listener of this.listeners.get(event.type) ?? []) {
+      listener(event)
+    }
+
+    return !event.defaultPrevented
+  }
+
+  getAttribute(name: string) {
+    return this.attributes.get(name) ?? null
+  }
+
+  getBoundingClientRect() {
+    return { left: 0, width: 360 }
+  }
+
+  removeAttribute(name: string) {
+    this.attributes.delete(name)
+  }
+
+  replaceChildren(...children: TestElement[]) {
+    this.children = children
+  }
+
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value)
+  }
+}
+
+class TestDocument {
+  createElement(tagName: string) {
+    return new TestElement(tagName)
+  }
+
+  createElementNS(_namespace: string, tagName: string) {
+    return new TestElement(tagName)
+  }
+}
+
+const createEvent = (
+  type: string,
+  properties: Omit<Partial<TestEvent>, 'type'> = {},
+): TestEvent => {
+  const event: TestEvent = {
+    defaultPrevented: false,
+    preventDefault: () => {
+      event.defaultPrevented = true
+    },
+    type,
+    ...properties,
+  }
+
+  return event
+}
+
+const createTouchList = (...touches: TestTouch[]): TestTouchList => ({
+  item: (index) => touches[index] ?? null,
+  length: touches.length,
+})
+
+const findElements = (element: TestElement, predicate: (element: TestElement) => boolean) => {
+  const found = predicate(element) ? [element] : []
+
+  return element.children.reduce(
+    (elements, child) => elements.concat(findElements(child, predicate)),
+    found,
+  )
+}
+
+const createTimelineBucket = (index: number, sampleCount: number) => {
+  const start = Date.parse('2026-07-04T00:00:00.000Z') + index * 15 * 60 * 1000
+  const successCount = sampleCount ? 1 : 0
+
+  return {
+    avgDelay: sampleCount ? 100 + index : null,
+    end: new Date(start + 15 * 60 * 1000).toISOString(),
+    failureCount: 0,
+    jitter: null,
+    maxDelay: sampleCount ? 110 + index : null,
+    minDelay: sampleCount ? 90 + index : null,
+    sampleCount,
+    start: new Date(start).toISOString(),
+    successCount,
+  }
+}
+
+const renderTimelineChart = (
+  callbacks: {
+    onBucketActivate?: (bucket: { sampleCount: number }) => void
+    onBucketChange?: (bucket: { sampleCount: number }) => void
+    onInteraction?: () => void
+    onWindowChange?: (window: '1h' | '6h' | '24h') => void
+  } = {},
+) => {
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: new TestDocument(),
+  })
+
+  const section = createLatencyTimelineChartSection(
+    {
+      status: 'ready',
+      timeline: {
+        bucketSeconds: 900,
+        buckets: [createTimelineBucket(0, 0), createTimelineBucket(1, 1)],
+        generatedAt: '2026-07-04T00:30:00.000Z',
+        nodeName: 'HK-01',
+        windowSeconds: 86_400,
+      },
+    },
+    {
+      compact: true,
+      onBucketActivate: callbacks.onBucketActivate,
+      onBucketChange: callbacks.onBucketChange,
+      onInteraction: callbacks.onInteraction,
+      onWindowChange: callbacks.onWindowChange,
+      window: '6h',
+    },
+  ) as unknown as TestElement
+
+  const buttons = findElements(section, (element) => element.tagName === 'button')
+  const svg = findElements(section, (element) => element.tagName === 'svg')[0]
+  const tooltip = findElements(section, (element) => element.className.includes('min-h-12'))[0]
+
+  return { buttons, section, svg, tooltip }
+}
 
 const proxyNodeCardSource = readFileSync(
   new URL('../../components/proxies/ProxyNodeCard.vue', import.meta.url),
@@ -59,28 +257,101 @@ test('keeps 24h bucket details outside the plot on desktop and mobile', () => {
   assert.doesNotMatch(timelineChartSource, /body\.append\(svg, tooltip\)/)
 })
 
-test('renders a selected 1h, 6h, and 24h range control that reports changes', () => {
-  assert.match(timelineChartSource, /LATENCY_TIMELINE_WINDOWS/)
-  assert.match(timelineChartSource, /document\.createElement\('button'\)/)
-  assert.match(timelineChartSource, /button\.textContent = window/)
-  assert.match(
-    timelineChartSource,
-    /button\.setAttribute\('aria-pressed', String\(window === selectedWindow\)\)/,
+test('dispatches renderer callbacks through the range control, chart, and populated card', () => {
+  const windowChanges: string[] = []
+  const bucketChanges: number[] = []
+  const bucketActivations: number[] = []
+  let interactions = 0
+  const { buttons, svg, tooltip } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+    onBucketChange: (bucket) => bucketChanges.push(bucket.sampleCount),
+    onInteraction: () => {
+      interactions += 1
+    },
+    onWindowChange: (window) => windowChanges.push(window),
+  })
+
+  assert.equal(buttons.length, 3)
+  assert.deepEqual(
+    buttons.map((button) => button.textContent),
+    ['1h', '6h', '24h'],
   )
-  assert.match(timelineChartSource, /options\.onWindowChange\?\.\(window\)/)
-  assert.match(timelineChartSource, /title\.textContent = `\$\{selectedWindow\} 延迟`/)
-  assert.match(timelineChartSource, /正在读取 R5S \$\{selectedWindow\} 延迟趋势/)
-  assert.match(timelineChartSource, /R5S \$\{selectedWindow\} 延迟趋势暂不可用/)
-  assert.match(timelineChartSource, /\$\{selectedWindow\} 延迟趋势暂无样本/)
+  assert.deepEqual(
+    buttons.map((button) => button.getAttribute('aria-pressed')),
+    ['false', 'true', 'false'],
+  )
+
+  buttons[0].dispatchEvent(createEvent('click'))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 40 }))
+  tooltip.dispatchEvent(createEvent('click'))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  tooltip.dispatchEvent(createEvent('click'))
+
+  assert.deepEqual(windowChanges, ['1h'])
+  assert.deepEqual(bucketChanges, [1, 0, 1])
+  assert.deepEqual(bucketActivations, [1])
+  assert.equal(interactions, 4)
 })
 
-test('reports chart interaction and selected buckets while only activating populated cards', () => {
-  assert.match(timelineChartSource, /options\.onBucketChange\?\.\(bucket\)/)
-  assert.match(timelineChartSource, /bucket\.sampleCount > 0/)
-  assert.match(timelineChartSource, /options\.onBucketActivate\?\.\(bucket\)/)
-  assert.match(timelineChartSource, /options\.onInteraction\?\.\(\)/)
-  assert.match(timelineChartSource, /tooltip\.addEventListener\('click'/)
-  assert.match(timelineChartSource, /svg\.addEventListener\('pointermove', updateHover\)/)
+test('suppresses a populated card click generated after a drag or cancellation', () => {
+  const bucketActivations: number[] = []
+  let interactions = 0
+  const { tooltip } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+    onInteraction: () => {
+      interactions += 1
+    },
+  })
+
+  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('pointermove', { clientX: 30, clientY: 10, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('pointerup', { clientX: 30, clientY: 10, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('click'))
+  tooltip.dispatchEvent(createEvent('click'))
+  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 10, clientY: 10, pointerId: 2 }))
+  tooltip.dispatchEvent(createEvent('pointercancel', { pointerId: 2 }))
+  tooltip.dispatchEvent(createEvent('click'))
+  tooltip.dispatchEvent(
+    createEvent('touchstart', {
+      changedTouches: createTouchList({ clientX: 10, clientY: 10, identifier: 3 }),
+    }),
+  )
+  tooltip.dispatchEvent(
+    createEvent('touchmove', {
+      changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 3 }),
+    }),
+  )
+  tooltip.dispatchEvent(
+    createEvent('touchend', {
+      changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 3 }),
+    }),
+  )
+  tooltip.dispatchEvent(createEvent('click'))
+
+  assert.deepEqual(bucketActivations, [1])
+  assert.equal(interactions, 9)
+})
+
+test('activates a populated card once for Space keyup and ignores repeated keydowns', () => {
+  const bucketActivations: number[] = []
+  const { tooltip } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+  const spaceDown = createEvent('keydown', { key: ' ', repeat: false })
+  const repeatedSpaceDown = createEvent('keydown', { key: ' ', repeat: true })
+  const spaceUp = createEvent('keyup', { key: ' ' })
+
+  tooltip.dispatchEvent(spaceDown)
+  tooltip.dispatchEvent(repeatedSpaceDown)
+  tooltip.dispatchEvent(spaceUp)
+  tooltip.dispatchEvent(createEvent('keyup', { key: ' ' }))
+  tooltip.dispatchEvent(createEvent('keydown', { key: 'Enter', repeat: false }))
+  tooltip.dispatchEvent(createEvent('keydown', { key: 'Enter', repeat: true }))
+
+  assert.equal(spaceDown.defaultPrevented, true)
+  assert.equal(repeatedSpaceDown.defaultPrevented, true)
+  assert.equal(spaceUp.defaultPrevented, true)
+  assert.deepEqual(bucketActivations, [1, 1])
 })
 
 test('shows selected bucket jitter next to its range details', () => {
