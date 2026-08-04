@@ -80,6 +80,12 @@
 import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
 import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
 import {
+  formatLatencyBucketTitle,
+  mapLatencyBucketSamplesToHistory,
+  resolveLatencyStripHistory,
+  type LatencyStripHistoryItem,
+} from '@/helper/latencyBucketDrilldown'
+import {
   getCompactLatencyDetailsPlacement,
   getLatencyDetailsViewportSize,
 } from '@/helper/latencyDetailsViewport'
@@ -111,9 +117,11 @@ import {
   proxyMetricsSamplesMap,
   proxyMetricsTimelineMap,
   proxyMetricsUpdatedAt,
+  refreshProxyMetricsBucketSamples,
   refreshProxyMetricsSamples,
   refreshProxyMetricsTimeline,
 } from '@/store/proxyMetrics'
+import type { ProxyMetricsTimelineBucket, ProxyMetricsTimelineWindow } from '@/api/metricsHelper'
 import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
@@ -137,6 +145,7 @@ const LATENCY_HISTORY_GAP_THRESHOLD = 10 * 60 * 1000
 const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
 const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
 const LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000
+const LATENCY_BUCKET_DRILLDOWN_RESET_DELAY = 8000
 const { t } = useI18n()
 const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
@@ -199,6 +208,11 @@ let activeLatencyDetailsAnchor: HTMLElement | null = null
 let activeLatencyDetailsCompact = false
 let stopLatencyDetailsMetricsWatch: (() => void) | undefined
 let latencyTimelineRequestGeneration = 0
+let latencyBucketRequestGeneration = 0
+let latencyBucketDrilldownResetTimer: ReturnType<typeof window.setTimeout> | undefined
+let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '24h'
+let activeLatencyTimelineBucket: ProxyMetricsTimelineBucket | null = null
+let latencyBucketHistory: LatencyStripHistoryItem[] = []
 const unavailableLatencyTimelineKeys = new Set<string>()
 const LATENCY_DETAILS_VIEWPORT_PADDING = 8
 const LATENCY_DETAILS_POPOVER_GAP = 8
@@ -208,6 +222,22 @@ const clearLatencyDetailsCloseTimer = () => {
 
   window.clearTimeout(latencyDetailsCloseTimer)
   latencyDetailsCloseTimer = undefined
+}
+
+const clearLatencyBucketDrilldownResetTimer = () => {
+  if (!latencyBucketDrilldownResetTimer) return
+
+  window.clearTimeout(latencyBucketDrilldownResetTimer)
+  latencyBucketDrilldownResetTimer = undefined
+}
+
+const resetLatencyBucketDrilldownState = () => {
+  clearLatencyBucketDrilldownResetTimer()
+  activeLatencyTimelineWindow = '24h'
+  activeLatencyTimelineBucket = null
+  latencyBucketHistory = []
+  latencyBucketRequestGeneration += 1
+  latencyTimelineRequestGeneration += 1
 }
 
 const isHoveringElement = (element?: Element | null) => {
@@ -481,8 +511,11 @@ const latencyStabilityBar = computed(() => {
   }))
 })
 
-const getLatencyTimelineChartState = (sourceName: string): LatencyTimelineChartState => {
-  const cacheKey = getProxyMetricsTimelineCacheKey(sourceName)
+const getLatencyTimelineChartState = (
+  sourceName: string,
+  window: ProxyMetricsTimelineWindow,
+): LatencyTimelineChartState => {
+  const cacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
   const timeline = proxyMetricsTimelineMap.value[cacheKey]
 
   if (timeline) {
@@ -750,24 +783,141 @@ const repositionLatencyDetailsTip = (instance: Instance, anchor: HTMLElement, co
   })
 }
 
+const renderActiveLatencyDetailsTip = () => {
+  const instance = activeLatencyDetailsTip
+  const anchor = activeLatencyDetailsAnchor
+
+  if (!instance || instance.state.isDestroyed || !anchor) {
+    return
+  }
+
+  instance.setContent(createLatencyDetailsTip())
+  repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
+}
+
+const exitLatencyBucketDrilldown = (updateContent = false) => {
+  clearLatencyBucketDrilldownResetTimer()
+  activeLatencyTimelineBucket = null
+  latencyBucketHistory = []
+  latencyBucketRequestGeneration += 1
+
+  if (updateContent) {
+    renderActiveLatencyDetailsTip()
+  }
+}
+
+const restartLatencyBucketDrilldownResetTimer = () => {
+  clearLatencyBucketDrilldownResetTimer()
+
+  if (!activeLatencyTimelineBucket || !activeLatencyDetailsTip) {
+    return
+  }
+
+  latencyBucketDrilldownResetTimer = window.setTimeout(
+    () => exitLatencyBucketDrilldown(true),
+    LATENCY_BUCKET_DRILLDOWN_RESET_DELAY,
+  )
+}
+
+const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsTimelineWindow) => {
+  const timelineCacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
+  const requestGeneration = (latencyTimelineRequestGeneration += 1)
+  const request = refreshProxyMetricsTimeline(sourceName, { window })
+
+  void request.then((timeline) => {
+    if (timeline) {
+      unavailableLatencyTimelineKeys.delete(timelineCacheKey)
+    } else {
+      unavailableLatencyTimelineKeys.add(timelineCacheKey)
+    }
+
+    if (
+      requestGeneration !== latencyTimelineRequestGeneration ||
+      activeLatencyTimelineWindow !== window ||
+      activeLatencyDetailsSourceName !== sourceName
+    ) {
+      return
+    }
+
+    renderActiveLatencyDetailsTip()
+  })
+
+  return request
+}
+
+const changeLatencyTimelineWindow = (window: ProxyMetricsTimelineWindow) => {
+  if (window === activeLatencyTimelineWindow) {
+    return
+  }
+
+  exitLatencyBucketDrilldown()
+  activeLatencyTimelineWindow = window
+  renderActiveLatencyDetailsTip()
+
+  const sourceName = activeLatencyDetailsSourceName
+
+  if (sourceName) {
+    void refreshLatencyDetailsTimeline(sourceName, window)
+  }
+}
+
+const activateLatencyTimelineBucket = async (bucket: ProxyMetricsTimelineBucket) => {
+  if (bucket.sampleCount <= 0) {
+    return
+  }
+
+  if (activeLatencyTimelineBucket) {
+    exitLatencyBucketDrilldown(true)
+    return
+  }
+
+  const instance = activeLatencyDetailsTip
+  const sourceName = activeLatencyDetailsSourceName
+
+  if (!instance || instance.state.isDestroyed || !sourceName) {
+    return
+  }
+
+  clearLatencyBucketDrilldownResetTimer()
+  const requestGeneration = (latencyBucketRequestGeneration += 1)
+  const response = await refreshProxyMetricsBucketSamples(sourceName, bucket.start, bucket.end)
+
+  if (
+    requestGeneration !== latencyBucketRequestGeneration ||
+    activeLatencyDetailsTip !== instance ||
+    activeLatencyDetailsSourceName !== sourceName ||
+    instance.state.isDestroyed ||
+    !response
+  ) {
+    return
+  }
+
+  activeLatencyTimelineBucket = bucket
+  latencyBucketHistory = mapLatencyBucketSamplesToHistory(response.samples, NOT_CONNECTED)
+  restartLatencyBucketDrilldownResetTimer()
+  renderActiveLatencyDetailsTip()
+}
+
 const buildLatencyStatusTimeline = (
   history: { delay: number; time?: string }[],
   compact = false,
   sourceLabel = '本机近30次',
   summaryLine?: HTMLElement,
+  options: { onInteraction?: () => void; preserveAll?: boolean } = {},
 ) => {
-  const recentHistory = history.slice(-LATENCY_DETAIL_SEGMENTS)
+  const displayedHistory = options.preserveAll ? history : history.slice(-LATENCY_DETAIL_SEGMENTS)
+  const targetSegmentCount = options.preserveAll ? displayedHistory.length : LATENCY_DETAIL_SEGMENTS
   const emptySegments: { delay?: number; time?: string }[] = Array.from(
-    { length: Math.max(0, LATENCY_DETAIL_SEGMENTS - recentHistory.length) },
+    { length: Math.max(0, targetSegmentCount - displayedHistory.length) },
     () => ({}),
   )
   const timeline = document.createElement('div')
   const header = document.createElement('div')
   const strip = document.createElement('div')
-  const sampleCount = recentHistory.length
-  const successTests = recentHistory.filter((item) => item.delay > NOT_CONNECTED).length
+  const sampleCount = displayedHistory.length
+  const successTests = displayedHistory.filter((item) => item.delay > NOT_CONNECTED).length
   const sampledSuccessRate = sampleCount > 0 ? Math.round((successTests / sampleCount) * 100) : 0
-  const timelineItems = [...emptySegments, ...recentHistory]
+  const timelineItems = [...emptySegments, ...displayedHistory]
   const segments: HTMLElement[] = []
 
   timeline.className = compact
@@ -778,7 +928,9 @@ const buildLatencyStatusTimeline = (
     : 'mb-1.5 flex items-center justify-between text-[11px] text-base-content/55'
 
   const oldestLabel = document.createElement('span')
+  oldestLabel.className = 'min-w-0 truncate'
   oldestLabel.textContent = sourceLabel
+  oldestLabel.title = sourceLabel
   const successLabel = document.createElement('span')
   successLabel.className =
     sampleCount && sampledSuccessRate >= 80
@@ -789,16 +941,25 @@ const buildLatencyStatusTimeline = (
           ? 'text-high-latency'
           : 'text-base-content/45'
   successLabel.textContent = sampleCount
-    ? `${sampledSuccessRate}% 可用 · ${sampleCount}/${LATENCY_DETAIL_SEGMENTS} 记录`
+    ? options.preserveAll
+      ? `${sampledSuccessRate}% 可用 · ${sampleCount} 记录`
+      : `${sampledSuccessRate}% 可用 · ${sampleCount}/${LATENCY_DETAIL_SEGMENTS} 记录`
     : '暂无记录'
   const newestLabel = document.createElement('span')
-  const newestTimestamp = recentHistory.at(-1)?.time
+  const newestTimestamp = displayedHistory.at(-1)?.time
   newestLabel.textContent = newestTimestamp
     ? `最后 ${dayjs(newestTimestamp).format('MM-DD HH:mm')}`
     : '暂无'
   header.append(oldestLabel, successLabel, newestLabel)
 
-  strip.className = `flex w-full items-end gap-1 ${compact ? 'touch-pan-y select-none' : ''}`
+  strip.className = `flex w-full items-end ${options.preserveAll ? 'gap-px' : 'gap-1'} ${
+    compact ? 'touch-pan-y select-none' : ''
+  }`
+  const reportInteraction = () => options.onInteraction?.()
+
+  strip.addEventListener('pointerdown', reportInteraction)
+  strip.addEventListener('pointermove', reportInteraction)
+  strip.addEventListener('touchmove', reportInteraction, { passive: true })
 
   let previousTimestamp: number | undefined
 
@@ -953,8 +1114,16 @@ const buildLatencyStatusTimeline = (
 const createLatencyDetailsTip = () => {
   const compact = isCompactLatencyDetails()
   const detailHistorySource = getLatencyDetailsHistorySource()
-  const history = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
-  const stats = getLatencyStats(history, LATENCY_DETAIL_SEGMENTS)
+  const recentHistory = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
+  const history = resolveLatencyStripHistory({
+    mode: activeLatencyTimelineBucket ? 'bucket' : 'recent',
+    recent: recentHistory,
+    bucket: latencyBucketHistory,
+  })
+  const stats = getLatencyStats(
+    history,
+    activeLatencyTimelineBucket ? history.length : LATENCY_DETAIL_SEGMENTS,
+  )
   const sharedMetricsResolution = getSharedMetricsResolution()
   const sharedMetrics = sharedMetricsResolution?.metrics
   const timelineSourceName = getR5sLatencySampleSourceName()
@@ -1007,10 +1176,17 @@ const createLatencyDetailsTip = () => {
     availabilityLine.append(availabilityMain)
     chart.append(availabilityLine)
     chart.append(
-      createLatencyTimelineChartSection(getLatencyTimelineChartState(timelineSourceName), {
-        compact,
-        sourceLabel: timelineSourceName !== props.name ? timelineSourceName : undefined,
-      }),
+      createLatencyTimelineChartSection(
+        getLatencyTimelineChartState(timelineSourceName, activeLatencyTimelineWindow),
+        {
+          compact,
+          onBucketActivate: activateLatencyTimelineBucket,
+          onInteraction: restartLatencyBucketDrilldownResetTimer,
+          onWindowChange: changeLatencyTimelineWindow,
+          sourceLabel: timelineSourceName !== props.name ? timelineSourceName : undefined,
+          window: activeLatencyTimelineWindow,
+        },
+      ),
     )
 
     const summaryLine = document.createElement('div')
@@ -1026,11 +1202,28 @@ const createLatencyDetailsTip = () => {
       summaryLine.append(min, avg, max)
     } else {
       summaryLine.className = 'mt-1 text-center text-xs text-base-content/55'
-      summaryLine.textContent = history.length ? '近30次暂无成功测速' : 'R5S近30次等待样本'
+      summaryLine.textContent = history.length
+        ? activeLatencyTimelineBucket
+          ? '该时段暂无成功测速'
+          : '近30次暂无成功测速'
+        : activeLatencyTimelineBucket
+          ? '该时段暂无记录'
+          : 'R5S近30次等待样本'
     }
 
     chart.append(
-      buildLatencyStatusTimeline(history, compact, detailHistorySource.label, summaryLine),
+      buildLatencyStatusTimeline(
+        history,
+        compact,
+        activeLatencyTimelineBucket
+          ? formatLatencyBucketTitle(activeLatencyTimelineBucket, latencyBucketHistory.length)
+          : detailHistorySource.label,
+        summaryLine,
+        {
+          onInteraction: restartLatencyBucketDrilldownResetTimer,
+          preserveAll: Boolean(activeLatencyTimelineBucket),
+        },
+      ),
       summaryLine,
     )
 
@@ -1047,6 +1240,8 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   const anchor = e.currentTarget as HTMLElement | null
 
   if (!anchor) return
+
+  resetLatencyBucketDrilldownState()
 
   const tipEvent = Object.create(e, {
     currentTarget: {
@@ -1067,31 +1262,8 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   const placement = compact ? mobilePlacement : 'top'
   const refresh = getR5sLatencyDetailsSamplesRefresh() ?? Promise.resolve(null)
   const timelineSourceName = getR5sLatencySampleSourceName()
-  const timelineCacheKey = getProxyMetricsTimelineCacheKey(timelineSourceName)
-  const requestGeneration = (latencyTimelineRequestGeneration += 1)
-  const timelineRefresh = refreshProxyMetricsTimeline(timelineSourceName)
 
-  void timelineRefresh.then((timeline) => {
-    if (timeline) {
-      unavailableLatencyTimelineKeys.delete(timelineCacheKey)
-    } else {
-      unavailableLatencyTimelineKeys.add(timelineCacheKey)
-    }
-
-    const instance = activeLatencyDetailsTip
-
-    if (
-      requestGeneration !== latencyTimelineRequestGeneration ||
-      activeLatencyDetailsSourceName !== timelineSourceName ||
-      !instance ||
-      instance.state.isDestroyed
-    ) {
-      return
-    }
-
-    instance.setContent(createLatencyDetailsTip())
-    repositionLatencyDetailsTip(instance, anchor, compact)
-  })
+  void refreshLatencyDetailsTimeline(timelineSourceName, activeLatencyTimelineWindow)
 
   await openWithDeferredRefresh({
     refresh,
@@ -1121,7 +1293,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             activeLatencyDetailsSourceName = ''
             activeLatencyDetailsAnchor = null
             stopActiveLatencyDetailsRefresh()
-            latencyTimelineRequestGeneration += 1
+            resetLatencyBucketDrilldownState()
           }
           cleanupLatencyDetailsTip()
         },
@@ -1212,6 +1384,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopActiveLatencyDetailsRefresh()
+  resetLatencyBucketDrilldownState()
   cleanupLatencyDetailsTip()
 })
 </script>

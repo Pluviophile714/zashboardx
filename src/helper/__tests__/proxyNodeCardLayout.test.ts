@@ -410,3 +410,90 @@ test('forces a fresh R5S sample request whenever node details open', () => {
     /const getR5sLatencyDetailsSamplesRefresh = \(\) => \{[\s\S]*return refreshR5sLatencyDetailsSamples\(true\)/,
   )
 })
+
+test('opens and closes latency details with a fresh 24h range state', () => {
+  assert.match(proxyNodeCardSource, /let activeLatencyTimelineWindow[^\n]*= '24h'/)
+  assert.match(
+    proxyNodeCardSource,
+    /const resetLatencyBucketDrilldownState = \([\s\S]*activeLatencyTimelineWindow = '24h'/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /const handlerLatencyDetailsTip = async[\s\S]*resetLatencyBucketDrilldownState\(\)/,
+  )
+  assert.match(proxyNodeCardSource, /onDestroy:[\s\S]*resetLatencyBucketDrilldownState\(\)/)
+})
+
+test('range changes exit drilldown and request the selected timeline', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /const changeLatencyTimelineWindow = \([\s\S]*exitLatencyBucketDrilldown\(\)[\s\S]*activeLatencyTimelineWindow = window[\s\S]*refreshLatencyDetailsTimeline\([^)]*window/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /createLatencyTimelineChartSection\([\s\S]*onWindowChange: changeLatencyTimelineWindow/,
+  )
+  assert.match(proxyNodeCardSource, /window: activeLatencyTimelineWindow/)
+  assert.match(
+    proxyNodeCardSource,
+    /getProxyMetricsTimelineCacheKey\(sourceName, window\)[\s\S]*refreshProxyMetricsTimeline\(sourceName, \{ window \}\)/,
+  )
+})
+
+test('enters bucket drilldown only after a successful exact-interval response', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /refreshProxyMetricsBucketSamples\(sourceName, bucket\.start, bucket\.end\)/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /if \([\s\S]*!response[\s\S]*\) \{\s*return\s*\}[\s\S]*activeLatencyTimelineBucket = bucket[\s\S]*mapLatencyBucketSamplesToHistory\(response\.samples, NOT_CONNECTED\)[\s\S]*restartLatencyBucketDrilldownResetTimer\(\)/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /resolveLatencyStripHistory\(\{[\s\S]*mode: activeLatencyTimelineBucket \? 'bucket' : 'recent'/,
+  )
+})
+
+test('renders every raw bucket record and uses its exact interval title', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /formatLatencyBucketTitle\(activeLatencyTimelineBucket, latencyBucketHistory\.length\)/,
+  )
+  assert.match(proxyNodeCardSource, /preserveAll: Boolean\(activeLatencyTimelineBucket\)/)
+  assert.match(
+    proxyNodeCardSource,
+    /const displayedHistory = options\.preserveAll\s*\? history\s*:\s*history\.slice\(-LATENCY_DETAIL_SEGMENTS\)/,
+  )
+})
+
+test('restarts the eight-second drilldown timer from chart and strip activity', () => {
+  assert.match(proxyNodeCardSource, /const LATENCY_BUCKET_DRILLDOWN_RESET_DELAY = 8000/)
+  assert.match(
+    proxyNodeCardSource,
+    /latencyBucketDrilldownResetTimer = window\.setTimeout\([\s\S]*LATENCY_BUCKET_DRILLDOWN_RESET_DELAY/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /createLatencyTimelineChartSection\([\s\S]*onInteraction: restartLatencyBucketDrilldownResetTimer/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /buildLatencyStatusTimeline\([\s\S]*onInteraction: restartLatencyBucketDrilldownResetTimer/,
+  )
+})
+
+test('a second activation exits immediately and teardown clears timer and requests', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /const activateLatencyTimelineBucket = async[\s\S]*if \(activeLatencyTimelineBucket\) \{\s*exitLatencyBucketDrilldown\(true\)\s*return/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /const resetLatencyBucketDrilldownState = \([\s\S]*clearLatencyBucketDrilldownResetTimer\(\)[\s\S]*latencyBucketRequestGeneration \+= 1/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /onUnmounted\(\(\) => \{[\s\S]*resetLatencyBucketDrilldownState\(\)/,
+  )
+})
