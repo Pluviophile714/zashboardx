@@ -1,16 +1,20 @@
+import { ref, shallowRef } from 'vue'
 import {
+  fetchProxyMetricsBucketSamplesAPI,
   fetchProxyMetricsHelperAPI,
   fetchProxyMetricsSamplesAPI,
   fetchProxyMetricsTimelineAPI,
+  type ProxyMetricsBucketSamplesResponse,
   type ProxyMetricsNode,
   type ProxyMetricsSample,
   type ProxyMetricsTimelineResponse,
-} from '@/api/metricsHelper'
-import { ref, shallowRef } from 'vue'
+  type ProxyMetricsTimelineWindow,
+} from '../api/metricsHelper.ts'
 
 const PROXY_METRICS_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_SAMPLES_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_TIMELINE_CACHE_TTL = 30 * 1000
+const PROXY_METRICS_BUCKET_SAMPLES_CACHE_TTL = 30 * 1000
 
 let lastFetchTime = 0
 let pendingRefresh: Promise<void> | undefined
@@ -18,10 +22,18 @@ const proxyMetricsSamplesFetchTimeMap = new Map<string, number>()
 const pendingSamplesRefreshMap = new Map<string, Promise<ProxyMetricsSample[] | null>>()
 const proxyMetricsTimelineFetchTimeMap = new Map<string, number>()
 const pendingTimelineRefreshMap = new Map<string, Promise<ProxyMetricsTimelineResponse | null>>()
+const proxyMetricsBucketSamplesFetchTimeMap = new Map<string, number>()
+const pendingBucketSamplesRefreshMap = new Map<
+  string,
+  Promise<ProxyMetricsBucketSamplesResponse | null>
+>()
 
 export const proxyMetricsMap = shallowRef<Record<string, ProxyMetricsNode>>({})
 export const proxyMetricsSamplesMap = shallowRef<Record<string, ProxyMetricsSample[]>>({})
 export const proxyMetricsTimelineMap = shallowRef<Record<string, ProxyMetricsTimelineResponse>>({})
+export const proxyMetricsBucketSamplesMap = shallowRef<
+  Record<string, ProxyMetricsBucketSamplesResponse>
+>({})
 export const proxyMetricsAvailable = ref(false)
 export const proxyMetricsUpdatedAt = ref(0)
 export const proxyMetricsRequestDurationMs = ref<number | null>(null)
@@ -123,9 +135,15 @@ export const getProxyMetricsSamplesCacheKey = (
 export const getProxyMetricsTimelineCacheKey = (nodeName: string, metricsWindow = '24h') =>
   `${metricsWindow}\n${nodeName}`
 
+export const getProxyMetricsBucketSamplesCacheKey = (
+  nodeName: string,
+  start: string,
+  end: string,
+) => `${start}\n${end}\n${nodeName}`
+
 export const refreshProxyMetricsTimeline = async (
   nodeName: string,
-  options: { force?: boolean; window?: string } = {},
+  options: { force?: boolean; window?: ProxyMetricsTimelineWindow } = {},
 ) => {
   if (!nodeName) {
     return null
@@ -169,6 +187,67 @@ export const refreshProxyMetricsTimeline = async (
   })
 
   pendingTimelineRefreshMap.set(key, request)
+
+  return request
+}
+
+export const refreshProxyMetricsBucketSamples = async (
+  nodeName: string,
+  start: string,
+  end: string,
+  options: { force?: boolean } = {},
+) => {
+  const startMs = Date.parse(start)
+  const endMs = Date.parse(end)
+
+  if (!nodeName || !Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return null
+  }
+
+  const normalizedStart = new Date(startMs).toISOString()
+  const normalizedEnd = new Date(endMs).toISOString()
+  const key = getProxyMetricsBucketSamplesCacheKey(nodeName, normalizedStart, normalizedEnd)
+  const now = Date.now()
+  const cached = proxyMetricsBucketSamplesMap.value[key]
+
+  if (
+    cached &&
+    !options.force &&
+    now - (proxyMetricsBucketSamplesFetchTimeMap.get(key) ?? 0) <
+      PROXY_METRICS_BUCKET_SAMPLES_CACHE_TTL
+  ) {
+    return cached
+  }
+
+  const pending = pendingBucketSamplesRefreshMap.get(key)
+
+  if (pending) {
+    return pending
+  }
+
+  const request = (async () => {
+    const response = await fetchProxyMetricsBucketSamplesAPI(
+      nodeName,
+      normalizedStart,
+      normalizedEnd,
+    )
+
+    if (!response) {
+      return null
+    }
+
+    proxyMetricsBucketSamplesFetchTimeMap.set(key, Date.now())
+    proxyMetricsBucketSamplesMap.value = {
+      ...proxyMetricsBucketSamplesMap.value,
+      [key]: response,
+    }
+
+    return response
+  })().finally(() => {
+    pendingBucketSamplesRefreshMap.delete(key)
+  })
+
+  pendingBucketSamplesRefreshMap.set(key, request)
 
   return request
 }

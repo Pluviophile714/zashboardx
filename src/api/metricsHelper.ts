@@ -38,6 +38,15 @@ export type ProxyMetricsSamplesResponse = {
   samples: ProxyMetricsSample[]
 }
 
+export type ProxyMetricsBucketSamplesResponse = {
+  start: string
+  end: string
+  generatedAt: string
+  nodeName: string
+  samples: ProxyMetricsSample[]
+  truncated: boolean
+}
+
 export type ProxyMetricsTimelineBucket = {
   start: string
   end: string
@@ -49,6 +58,32 @@ export type ProxyMetricsTimelineBucket = {
   maxDelay: number | null
   jitter: number | null
 }
+
+export type ProxyMetricsTimelineWindow = '1h' | '6h' | '24h'
+
+export const PROXY_METRICS_TIMELINE_PROFILES = {
+  '1h': {
+    bucketCount: 60,
+    bucketSeconds: 60,
+    windowSeconds: 3_600,
+  },
+  '6h': {
+    bucketCount: 72,
+    bucketSeconds: 300,
+    windowSeconds: 21_600,
+  },
+  '24h': {
+    bucketCount: 96,
+    bucketSeconds: 900,
+    windowSeconds: 86_400,
+  },
+} as const satisfies Record<
+  ProxyMetricsTimelineWindow,
+  { bucketCount: number; bucketSeconds: number; windowSeconds: number }
+>
+
+export const getProxyMetricsTimelineProfile = (window: ProxyMetricsTimelineWindow) =>
+  PROXY_METRICS_TIMELINE_PROFILES[window]
 
 export type ProxyMetricsTimelineResponse = {
   windowSeconds: number
@@ -298,14 +333,103 @@ export const fetchProxyMetricsSamplesAPI = async (
   }
 }
 
+export const fetchProxyMetricsBucketSamplesAPI = async (
+  nodeName: string,
+  start: string,
+  end: string,
+  timeout = 3000,
+): Promise<ProxyMetricsBucketSamplesResponse | null> => {
+  const startMs = Date.parse(start)
+  const endMs = Date.parse(end)
+
+  if (!nodeName || !Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return null
+  }
+
+  const normalizedStart = new Date(startMs).toISOString()
+  const normalizedEnd = new Date(endMs).toISOString()
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const params = new URLSearchParams({
+      end: normalizedEnd,
+      node: nodeName,
+      start: normalizedStart,
+    })
+    const response = await fetch(`/api/metrics/bucket-samples?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as Partial<ProxyMetricsBucketSamplesResponse>
+    const generatedAtMs =
+      typeof data.generatedAt === 'string' ? Date.parse(data.generatedAt) : Number.NaN
+
+    if (
+      data.nodeName !== nodeName ||
+      data.start !== normalizedStart ||
+      data.end !== normalizedEnd ||
+      !Number.isFinite(generatedAtMs) ||
+      typeof data.truncated !== 'boolean' ||
+      !Array.isArray(data.samples)
+    ) {
+      return null
+    }
+
+    const samples = data.samples.map(normalizeMetricsSample)
+
+    if (samples.some((sample) => sample === null)) {
+      return null
+    }
+
+    const normalizedSamples = samples as ProxyMetricsSample[]
+    let previousTimestampMs = startMs
+
+    for (const sample of normalizedSamples) {
+      const timestampMs = Date.parse(sample.timestamp)
+
+      if (
+        sample.nodeName !== nodeName ||
+        timestampMs < startMs ||
+        timestampMs >= endMs ||
+        timestampMs < previousTimestampMs
+      ) {
+        return null
+      }
+
+      previousTimestampMs = timestampMs
+    }
+
+    return {
+      start: normalizedStart,
+      end: normalizedEnd,
+      generatedAt: new Date(generatedAtMs).toISOString(),
+      nodeName,
+      samples: normalizedSamples,
+      truncated: data.truncated,
+    }
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
 export const fetchProxyMetricsTimelineAPI = async (
   nodeName: string,
-  metricsWindow = '24h',
+  metricsWindow: ProxyMetricsTimelineWindow = '24h',
   timeout = 3000,
 ): Promise<ProxyMetricsTimelineResponse | null> => {
   if (!nodeName) {
     return null
   }
+
+  const profile = getProxyMetricsTimelineProfile(metricsWindow)
 
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), timeout)
@@ -329,12 +453,12 @@ export const fetchProxyMetricsTimelineAPI = async (
       typeof data.generatedAt === 'string' ? Date.parse(data.generatedAt) : Number.NaN
 
     if (
-      data.windowSeconds !== 86_400 ||
-      data.bucketSeconds !== 900 ||
+      data.windowSeconds !== profile.windowSeconds ||
+      data.bucketSeconds !== profile.bucketSeconds ||
       data.nodeName !== nodeName ||
       !Number.isFinite(generatedAtMs) ||
       !Array.isArray(data.buckets) ||
-      data.buckets.length !== 96
+      data.buckets.length !== profile.bucketCount
     ) {
       return null
     }
@@ -353,11 +477,18 @@ export const fetchProxyMetricsTimelineAPI = async (
       const endMs = Date.parse(bucket.end)
 
       if (
-        endMs - startMs !== 900_000 ||
+        endMs - startMs !== profile.bucketSeconds * 1000 ||
         (index > 0 && normalizedBuckets[index - 1].end !== bucket.start)
       ) {
         return null
       }
+    }
+
+    if (
+      Date.parse(normalizedBuckets.at(-1)!.end) - Date.parse(normalizedBuckets[0].start) !==
+      profile.windowSeconds * 1000
+    ) {
+      return null
     }
 
     return {
