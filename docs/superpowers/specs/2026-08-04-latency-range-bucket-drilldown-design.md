@@ -26,12 +26,13 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 ### Bucket Selection And Drilldown
 
 - Pointer movement or touch movement over the chart selects a bucket and updates the existing bucket information card.
-- A stationary click/tap on the selected chart point activates a populated bucket. Empty buckets do not enter drilldown.
-- Activating the chart point replaces the normal `R5S recent 30` latency strip with all raw samples whose timestamps fall inside the selected bucket.
+- On desktop, the vertical guide follows the mouse pointer exactly within the chart viewBox. A chart-wide transparent hit layer resolves the current guide bucket from the click x-coordinate, so a stationary click on that layer activates a populated bucket; the bucket card remains display-only.
+- On mobile, touch movement over the chart selects a bucket, but the chart is selection-only because the guide/plot point is not a reliable touch target. A stationary tap on a populated information card activates the bucket. Empty buckets do not enter drilldown.
+- Activating the device-appropriate target replaces the normal `R5S recent 30` latency strip with all raw samples whose timestamps fall inside the selected bucket.
 - The drilldown title shows the exact interval and actual record count, for example `15:45-16:00 · 17 records`. It must not assume that a 15-minute bucket always contains 15 records.
 - Raw samples remain ordered oldest to newest. Success and failure use the same colors and semantics as the existing recent-sample strip.
 - Pointer/touch movement across the drilldown strip shows the selected sample timestamp, delay, and result using the existing sample inspector.
-- A second activation of the selected chart point exits drilldown immediately.
+- A second activation of the selected device-appropriate target exits drilldown immediately.
 - Eight seconds without chart or latency-strip interaction exits drilldown and restores `R5S recent 30`.
 - Any relevant interaction restarts the eight-second timer.
 - Closing or destroying the popover clears timers, exits drilldown, and resets the chart to `24h`.
@@ -77,10 +78,10 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 
 - Timeline cache keys continue to include node name and selected window.
 - Bucket-sample cache keys include node name, bucket start, and bucket end.
-- Selecting a range requests only that timeline. Selecting a bucket does not request raw data until the selected chart point is activated.
+- Selecting a range requests only that timeline. Selecting a bucket does not request raw data until the desktop chart-wide guide layer or mobile information card is activated.
 - A drilldown request uses generation tokens so a late response from a previous node, range, or bucket cannot replace the current popover.
 - The existing recent-30 cache and refresh behavior remain unchanged.
-- Desktop mouse and mobile touch share the same state machine; only their input events differ.
+- Desktop mouse and mobile touch share the same bucket state and stale guards. Desktop activation is resolved by the chart-wide guide hit layer; mobile activation is resolved by the populated information card.
 
 ## Failure Handling
 
@@ -109,6 +110,6 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 
 ## Interaction Adjustment
 
-- The chart is the drilldown activation target: horizontal sliding selects a time bucket, and a stationary tap/click on the selected chart point enters that bucket's raw-record view.
-- The bucket information card remains display-only and shows the selected bucket's interval and aggregate statistics.
-- A drag must never activate the bucket; only a stationary chart click/tap can do so.
+- Desktop mouse movement positions the vertical guide exactly under the pointer and selects its current time bucket. A chart-wide hit layer resolves that current bucket on stationary click; the bucket information card remains display-only.
+- Mobile touch-drag selects the bucket, while a stationary tap on the populated information card enters the raw-record view. The chart itself remains selection-only on mobile.
+- Empty buckets never activate, and a drag must never activate either surface or its following synthetic click.

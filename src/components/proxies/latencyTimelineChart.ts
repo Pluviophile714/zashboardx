@@ -27,7 +27,7 @@ export type LatencyTimelineChartOptions = {
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-const CARD_ACTIVATION_DRAG_THRESHOLD = 8
+const ACTIVATION_DRAG_THRESHOLD = 8
 let chartId = 0
 
 const createSvgElement = (tagName: string, attributes: Record<string, string | number> = {}) => {
@@ -238,6 +238,7 @@ export const createLatencyTimelineChartSection = (
   }
 
   const hoverLine = createSvgElement('line', {
+    'data-selected-guide': 'true',
     y1: model.axes.plotTop,
     y2: model.axes.plotBottom,
     stroke: 'currentColor',
@@ -252,8 +253,17 @@ export const createLatencyTimelineChartSection = (
     'stroke-width': 1.5,
     visibility: 'hidden',
   })
+  const chartHitArea = createSvgElement('rect', {
+    'data-chart-hit-target': 'true',
+    fill: 'transparent',
+    height: model.axes.plotBottom - model.axes.plotTop,
+    'pointer-events': 'all',
+    width: model.axes.plotRight - model.axes.plotLeft,
+    x: model.axes.plotLeft,
+    y: model.axes.plotTop,
+  })
 
-  plot.append(hoverLine, hoverPoint)
+  plot.append(hoverLine, hoverPoint, chartHitArea)
   svg.append(plot)
 
   for (const tick of model.axes.xTicks) {
@@ -291,16 +301,17 @@ export const createLatencyTimelineChartSection = (
   }
 
   let selectedBucket: ProxyMetricsTimelineBucket | undefined
+  let selectedBucketIndex = -1
 
-  const renderBucket = (bucketIndex: number) => {
+  const renderBucket = (bucketIndex: number, guideX?: number) => {
     const bucket = timeline.buckets[bucketIndex]
     const point = model.points[bucketIndex]
     const bucketCenter =
       model.axes.plotLeft +
       ((bucketIndex + 0.5) / timeline.buckets.length) * (model.axes.plotRight - model.axes.plotLeft)
 
-    hoverLine.setAttribute('x1', String(bucketCenter))
-    hoverLine.setAttribute('x2', String(bucketCenter))
+    hoverLine.setAttribute('x1', String(guideX ?? bucketCenter))
+    hoverLine.setAttribute('x2', String(guideX ?? bucketCenter))
     hoverLine.setAttribute('visibility', 'visible')
 
     if (point) {
@@ -333,7 +344,8 @@ export const createLatencyTimelineChartSection = (
     appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
 
     selectedBucket = bucket
-    const canActivate = bucket.sampleCount > 0
+    selectedBucketIndex = bucketIndex
+    const canActivate = options.compact && bucket.sampleCount > 0
 
     if (canActivate) {
       tooltip.setAttribute('aria-disabled', 'false')
@@ -359,22 +371,31 @@ export const createLatencyTimelineChartSection = (
     options.onBucketChange?.(bucket)
   }
 
-  const updateHover = (event: PointerEvent) => {
-    options.onInteraction?.()
+  const getChartPosition = (clientX: number) => {
     const rect = svg.getBoundingClientRect()
 
     if (!rect.width) {
-      return
+      return undefined
     }
 
-    const svgX = ((event.clientX - rect.left) / rect.width) * width
-    const relativeX = (svgX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
+    const svgX = ((clientX - rect.left) / rect.width) * width
+    const guideX = Math.max(model.axes.plotLeft, Math.min(model.axes.plotRight, svgX))
+    const relativeX = (guideX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
     const bucketIndex = Math.max(
       0,
       Math.min(timeline.buckets.length - 1, Math.floor(relativeX * timeline.buckets.length)),
     )
 
-    renderBucket(bucketIndex)
+    return { bucketIndex, guideX }
+  }
+
+  const updateHover = (event: Pick<PointerEvent, 'clientX'>) => {
+    options.onInteraction?.()
+    const position = getChartPosition(event.clientX)
+
+    if (position) {
+      renderBucket(position.bucketIndex, position.guideX)
+    }
   }
 
   const clearHover = () => {
@@ -391,6 +412,45 @@ export const createLatencyTimelineChartSection = (
     }
   }
 
+  let activeChartGesture:
+    | { id: number; source: 'pointer' | 'touch'; startX: number; startY: number }
+    | undefined
+  let suppressNextChartClick = false
+
+  const beginChartGesture = (
+    source: 'pointer' | 'touch',
+    id: number,
+    clientX: number,
+    clientY: number,
+  ) => {
+    suppressNextChartClick = false
+    activeChartGesture = { id, source, startX: clientX, startY: clientY }
+  }
+
+  const updateChartGesture = (
+    source: 'pointer' | 'touch',
+    id: number,
+    clientX: number,
+    clientY: number,
+  ) => {
+    if (
+      activeChartGesture?.source === source &&
+      activeChartGesture.id === id &&
+      Math.hypot(clientX - activeChartGesture.startX, clientY - activeChartGesture.startY) >=
+        ACTIVATION_DRAG_THRESHOLD
+    ) {
+      suppressNextChartClick = true
+    }
+  }
+
+  const endChartGesture = (source: 'pointer' | 'touch', id: number, cancelled = false) => {
+    options.onInteraction?.()
+    if (activeChartGesture?.source === source && activeChartGesture.id === id) {
+      suppressNextChartClick ||= cancelled
+      activeChartGesture = undefined
+    }
+  }
+
   let activeCardGesture:
     | { id: number; source: 'pointer' | 'touch'; startX: number; startY: number }
     | undefined
@@ -403,7 +463,6 @@ export const createLatencyTimelineChartSection = (
     clientX: number,
     clientY: number,
   ) => {
-    options.onInteraction?.()
     suppressNextCardClick = false
     activeCardGesture = { id, source, startX: clientX, startY: clientY }
   }
@@ -414,19 +473,17 @@ export const createLatencyTimelineChartSection = (
     clientX: number,
     clientY: number,
   ) => {
-    options.onInteraction?.()
     if (
       activeCardGesture?.source === source &&
       activeCardGesture.id === id &&
       Math.hypot(clientX - activeCardGesture.startX, clientY - activeCardGesture.startY) >=
-        CARD_ACTIVATION_DRAG_THRESHOLD
+        ACTIVATION_DRAG_THRESHOLD
     ) {
       suppressNextCardClick = true
     }
   }
 
   const endCardGesture = (source: 'pointer' | 'touch', id: number, cancelled = false) => {
-    options.onInteraction?.()
     if (activeCardGesture?.source === source && activeCardGesture.id === id) {
       suppressNextCardClick ||= cancelled
       activeCardGesture = undefined
@@ -445,104 +502,183 @@ export const createLatencyTimelineChartSection = (
     return undefined
   }
 
-  tooltip.addEventListener('click', () => {
-    if (suppressNextCardClick) {
-      suppressNextCardClick = false
-      return
-    }
+  if (!options.compact) {
+    chartHitArea.addEventListener('click', (event) => {
+      if (suppressNextChartClick) {
+        suppressNextChartClick = false
+        return
+      }
 
-    activateSelectedBucket()
+      const position = getChartPosition(event.clientX)
+
+      if (position && position.bucketIndex !== selectedBucketIndex) {
+        renderBucket(position.bucketIndex, position.guideX)
+      }
+      activateSelectedBucket()
+    })
+  } else {
+    tooltip.addEventListener('click', () => {
+      if (suppressNextCardClick) {
+        suppressNextCardClick = false
+        return
+      }
+
+      activateSelectedBucket()
+    })
+    tooltip.addEventListener('pointerdown', (event) => {
+      beginCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+    })
+    tooltip.addEventListener('pointermove', (event) => {
+      updateCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+    })
+    tooltip.addEventListener('pointerup', (event) => {
+      endCardGesture('pointer', event.pointerId)
+    })
+    tooltip.addEventListener('pointercancel', (event) => {
+      endCardGesture('pointer', event.pointerId, true)
+    })
+    tooltip.addEventListener(
+      'touchstart',
+      (event) => {
+        if (activeCardGesture?.source === 'pointer') {
+          return
+        }
+
+        const touch = event.changedTouches.item(0)
+        if (touch) {
+          beginCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        }
+      },
+      { passive: true },
+    )
+    tooltip.addEventListener(
+      'touchmove',
+      (event) => {
+        if (activeCardGesture?.source !== 'touch') {
+          return
+        }
+
+        const touch = findTouch(event.changedTouches, activeCardGesture.id)
+        if (touch) {
+          updateCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        }
+      },
+      { passive: true },
+    )
+    tooltip.addEventListener(
+      'touchend',
+      (event) => {
+        if (activeCardGesture?.source !== 'touch') {
+          return
+        }
+
+        const touch = findTouch(event.changedTouches, activeCardGesture.id)
+        if (touch) {
+          endCardGesture('touch', touch.identifier)
+        }
+      },
+      { passive: true },
+    )
+    tooltip.addEventListener(
+      'touchcancel',
+      () => {
+        if (activeCardGesture?.source === 'touch') {
+          endCardGesture('touch', activeCardGesture.id, true)
+        }
+      },
+      { passive: true },
+    )
+    tooltip.addEventListener('keydown', (event) => {
+      if (event.key === ' ') {
+        event.preventDefault()
+        if (!event.repeat) {
+          spacePressed = true
+        }
+      } else if (event.key === 'Enter' && !event.repeat) {
+        event.preventDefault()
+        activateSelectedBucket()
+      }
+    })
+    tooltip.addEventListener('keyup', (event) => {
+      if (event.key === ' ') {
+        event.preventDefault()
+        if (spacePressed) {
+          spacePressed = false
+          activateSelectedBucket()
+        }
+      }
+    })
+    tooltip.addEventListener('blur', () => {
+      spacePressed = false
+    })
+  }
+  svg.addEventListener('pointermove', (event) => {
+    updateChartGesture('pointer', event.pointerId, event.clientX, event.clientY)
+    updateHover(event)
   })
-  tooltip.addEventListener('pointerdown', (event) => {
-    beginCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+  svg.addEventListener('pointerdown', (event) => {
+    beginChartGesture('pointer', event.pointerId, event.clientX, event.clientY)
+    updateHover(event)
   })
-  tooltip.addEventListener('pointermove', (event) => {
-    updateCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
+  svg.addEventListener('pointerup', (event) => {
+    endChartGesture('pointer', event.pointerId)
   })
-  tooltip.addEventListener('pointerup', (event) => {
-    endCardGesture('pointer', event.pointerId)
+  svg.addEventListener('pointercancel', (event) => {
+    endChartGesture('pointer', event.pointerId, true)
   })
-  tooltip.addEventListener('pointercancel', (event) => {
-    endCardGesture('pointer', event.pointerId, true)
-  })
-  tooltip.addEventListener(
+  svg.addEventListener(
     'touchstart',
     (event) => {
-      if (activeCardGesture?.source === 'pointer') {
+      if (activeChartGesture?.source === 'pointer') {
         return
       }
 
       const touch = event.changedTouches.item(0)
       if (touch) {
-        beginCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        beginChartGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        updateHover(touch)
       }
     },
     { passive: true },
   )
-  tooltip.addEventListener(
+  svg.addEventListener(
     'touchmove',
     (event) => {
-      if (activeCardGesture?.source !== 'touch') {
+      if (activeChartGesture?.source !== 'touch') {
         return
       }
 
-      const touch = findTouch(event.changedTouches, activeCardGesture.id)
+      const touch = findTouch(event.changedTouches, activeChartGesture.id)
       if (touch) {
-        updateCardGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        updateChartGesture('touch', touch.identifier, touch.clientX, touch.clientY)
+        updateHover(touch)
       }
     },
     { passive: true },
   )
-  tooltip.addEventListener(
+  svg.addEventListener(
     'touchend',
     (event) => {
-      if (activeCardGesture?.source !== 'touch') {
+      if (activeChartGesture?.source !== 'touch') {
         return
       }
 
-      const touch = findTouch(event.changedTouches, activeCardGesture.id)
+      const touch = findTouch(event.changedTouches, activeChartGesture.id)
       if (touch) {
-        endCardGesture('touch', touch.identifier)
+        endChartGesture('touch', touch.identifier)
       }
     },
     { passive: true },
   )
-  tooltip.addEventListener(
+  svg.addEventListener(
     'touchcancel',
     () => {
-      if (activeCardGesture?.source === 'touch') {
-        endCardGesture('touch', activeCardGesture.id, true)
+      if (activeChartGesture?.source === 'touch') {
+        endChartGesture('touch', activeChartGesture.id, true)
       }
     },
     { passive: true },
   )
-  tooltip.addEventListener('keydown', (event) => {
-    if (event.key === ' ') {
-      event.preventDefault()
-      if (!event.repeat) {
-        spacePressed = true
-      }
-    } else if (event.key === 'Enter' && !event.repeat) {
-      event.preventDefault()
-      activateSelectedBucket()
-    }
-  })
-  tooltip.addEventListener('keyup', (event) => {
-    if (event.key === ' ') {
-      event.preventDefault()
-      if (spacePressed) {
-        spacePressed = false
-        activateSelectedBucket()
-      }
-    }
-  })
-  tooltip.addEventListener('blur', () => {
-    spacePressed = false
-  })
-
-  svg.addEventListener('pointermove', updateHover)
-  svg.addEventListener('pointerdown', updateHover)
-  svg.addEventListener('touchstart', () => options.onInteraction?.(), { passive: true })
   svg.addEventListener('pointerleave', clearHover)
 
   if (timeline.buckets.length) {

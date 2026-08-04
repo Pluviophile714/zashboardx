@@ -14,20 +14,22 @@
 - Do not add tables, columns, migrations, retention changes, collection-frequency changes, or dependencies.
 - Support exactly `1h`, `6h`, and `24h` timeline windows with 60x1m, 72x5m, and 96x15m buckets.
 - Keep first-level availability fixed at 24 hours and reset the popover chart to 24 hours when it closes.
-- Fetch raw bucket samples only after the user activates a populated selected chart point.
+- Fetch raw bucket samples only after the user activates a populated selected bucket: the desktop guide-resolving chart layer or the mobile information card.
 - Restore the normal R5S recent-30 strip after eight seconds without relevant interaction.
-- Keep desktop and mobile behavior equivalent and do not increase popover height.
+- Keep desktop and mobile data/state behavior equivalent, with desktop chart-layer activation and mobile information-card activation; do not increase popover height.
 
 ---
 
 ### Task 1: Fixed Timeline Profiles In Metrics Helper
 
 **Files:**
+
 - Modify: `packages/metrics-helper/src/server.ts:200-245`
 - Modify: `packages/metrics-helper/src/server.test.ts:350-455`
 - Modify: `packages/metrics-helper/src/storage.test.ts:650-760`
 
 **Interfaces:**
+
 - Produces: `TIMELINE_PROFILES` keyed by `'1h' | '6h' | '24h'` with `{ windowSeconds, bucketCount }`.
 - Uses: `MetricsStorage.getNodeTimeline(nodeName, windowSeconds, bucketCount, nowMs)` without changing its public signature.
 
@@ -43,7 +45,10 @@ for (const profile of [
 ]) {
   const buckets = storage.getNodeTimeline('HK-01', profile.windowSeconds, profile.bucketCount, now)
   assert.equal(buckets.length, profile.bucketCount)
-  assert.equal(Date.parse(buckets[0].end) - Date.parse(buckets[0].start), profile.bucketSeconds * 1000)
+  assert.equal(
+    Date.parse(buckets[0].end) - Date.parse(buckets[0].start),
+    profile.bucketSeconds * 1000,
+  )
 }
 ```
 
@@ -123,6 +128,7 @@ git commit -m "feat(metrics): support latency timeline ranges"
 ### Task 2: Bounded Raw Bucket Samples API
 
 **Files:**
+
 - Modify: `packages/metrics-helper/src/storage.ts:390-430`
 - Modify: `packages/metrics-helper/src/types.ts:1-25`
 - Modify: `packages/metrics-helper/src/storage.test.ts`
@@ -130,6 +136,7 @@ git commit -m "feat(metrics): support latency timeline ranges"
 - Modify: `packages/metrics-helper/src/server.test.ts`
 
 **Interfaces:**
+
 - Produces: `MetricsStorage.getProbeSamplesBetween(nodeName, startMs, endMs, limit)` returning `{ samples: ProbeSample[]; truncated: boolean }`.
 - Produces: `GET /api/metrics/bucket-samples?node=<name>&start=<iso>&end=<iso>`.
 - Response: `{ nodeName, start, end, generatedAt, samples, truncated }`.
@@ -140,7 +147,10 @@ Insert records at `start`, inside the interval, and exactly at `end`. Give two i
 
 ```ts
 const result = storage.getProbeSamplesBetween('HK-01', Date.parse(start), Date.parse(end), 200)
-assert.deepEqual(result.samples.map((sample) => sample.delay), [51, 52, 53])
+assert.deepEqual(
+  result.samples.map((sample) => sample.delay),
+  [51, 52, 53],
+)
 assert.equal(result.truncated, false)
 ```
 
@@ -200,12 +210,14 @@ git commit -m "feat(metrics): expose raw bucket samples"
 ### Task 3: Frontend Timeline Profiles And Bucket Cache
 
 **Files:**
+
 - Modify: `src/api/metricsHelper.ts:1-350`
 - Modify: `src/store/proxyMetrics.ts:1-170`
 - Modify: `src/helper/__tests__/metricsHelperTimeline.test.ts`
 - Create: `src/helper/__tests__/metricsHelperBucketSamples.test.ts`
 
 **Interfaces:**
+
 - Produces: `ProxyMetricsTimelineWindow = '1h' | '6h' | '24h'`.
 - Produces: `PROXY_METRICS_TIMELINE_PROFILES` with expected response geometry.
 - Produces: `fetchProxyMetricsBucketSamplesAPI(nodeName, start, end, timeout)`.
@@ -278,12 +290,14 @@ git commit -m "feat: cache latency bucket samples"
 ### Task 4: Timeline Range Control And Selection Callbacks
 
 **Files:**
+
 - Modify: `src/components/proxies/latencyTimelineChart.ts`
 - Modify: `src/helper/proxyMetricsTimeline.ts`
 - Modify: `src/helper/__tests__/proxyMetricsTimeline.test.ts`
 - Modify: `src/helper/__tests__/proxyNodeCardLayout.test.ts`
 
 **Interfaces:**
+
 - Extends `LatencyTimelineChartOptions` with `window`, `onWindowChange`, `onBucketChange`, `onBucketActivate`, and `onInteraction`.
 - Produces the selected `ProxyMetricsTimelineBucket` through callbacks without owning popover drilldown state.
 
@@ -301,9 +315,9 @@ Expected: FAIL because the renderer has a fixed `24h` title and no callbacks.
 
 Build a compact three-button segmented control in the chart header. Use `aria-pressed`, stable button dimensions, and text `1h`, `6h`, `24h`. Preserve an optional source label without allowing header overflow.
 
-- [ ] **Step 4: Make the selected chart point the activation target**
+- [ ] **Step 4: Split activation surfaces by device input**
 
-Keep the tooltip card display-only. Make the selected bucket point/plot area in the SVG interactive only when the selected bucket is populated. Keep sample inspection on the SVG. Emit `onBucketChange(bucket)` from `renderBucket`, `onBucketActivate(bucket)` from a stationary click/tap on the selected chart point, and `onInteraction()` from chart and strip pointer/touch activity. A drag must suppress the following synthetic click.
+Keep the bucket card display-only on desktop. Make the SVG use a chart-wide transparent hit layer that resolves the current guide bucket from the pointer x-coordinate; the guide follows the pointer exactly in the viewBox, and only a stationary desktop click on that layer activates a populated bucket. On compact/mobile charts, keep the chart as selection-only and make the populated information card the tap activation target. Keep sample inspection on the SVG, emit `onBucketChange(bucket)` from `renderBucket`, and emit `onInteraction()` from chart and strip pointer/touch activity. Empty buckets remain blocked, and drag must suppress the following synthetic click on either activation surface.
 
 - [ ] **Step 5: Replace fixed 24h labels with the selected window**
 
@@ -332,12 +346,14 @@ git commit -m "feat: add latency timeline range controls"
 ### Task 5: Popover Drilldown State And First-Level Consistency
 
 **Files:**
+
 - Modify: `src/components/proxies/ProxyNodeCard.vue:160-1150`
 - Create: `src/helper/latencyBucketDrilldown.ts`
 - Create: `src/helper/__tests__/latencyBucketDrilldown.test.ts`
 - Modify: `src/helper/__tests__/proxyNodeCardLayout.test.ts`
 
 **Interfaces:**
+
 - Produces pure helpers for strip content and title formatting.
 - Consumes timeline callbacks and bucket-sample store APIs from Tasks 3 and 4.
 - Preserves the already written first-level R5S-preference regression behavior.
@@ -407,9 +423,11 @@ git commit -m "feat: drill into latency timeline buckets"
 ### Task 6: Full Verification And Browser Inspection
 
 **Files:**
+
 - Verify only; modify implementation or tests only when a failure identifies a defect.
 
 **Interfaces:**
+
 - Validates the complete frontend/helper contract and the unchanged deployment contract.
 
 - [ ] **Step 1: Run all focused and package tests**
@@ -437,7 +455,7 @@ At `http://127.0.0.1:5175/#/proxies`, verify 1h/6h/24h axes, selected chart-poin
 
 - [ ] **Step 4: Inspect mobile behavior**
 
-Use a phone-sized viewport and verify touch chart selection, stationary chart-point activation, sample-strip sliding without closing the popover, outside-tap close, no overlap, and unchanged popover height constraints.
+Use a phone-sized viewport and verify touch chart selection, populated information-card tap activation, chart-drag suppression, sample-strip sliding without closing the popover, outside-tap close, no overlap, and unchanged popover height constraints.
 
 - [ ] **Step 5: Review final diff and commit any verification corrections**
 

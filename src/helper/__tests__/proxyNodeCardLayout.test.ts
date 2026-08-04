@@ -165,6 +165,7 @@ const renderTimelineChart = (
     onBucketChange?: (bucket: { sampleCount: number }) => void
     onInteraction?: () => void
     onWindowChange?: (window: '1h' | '6h' | '24h') => void
+    compact?: boolean
   } = {},
 ) => {
   Object.defineProperty(globalThis, 'document', {
@@ -184,7 +185,7 @@ const renderTimelineChart = (
       },
     },
     {
-      compact: true,
+      compact: callbacks.compact ?? false,
       onBucketActivate: callbacks.onBucketActivate,
       onBucketChange: callbacks.onBucketChange,
       onInteraction: callbacks.onInteraction,
@@ -195,9 +196,17 @@ const renderTimelineChart = (
 
   const buttons = findElements(section, (element) => element.tagName === 'button')
   const svg = findElements(section, (element) => element.tagName === 'svg')[0]
+  const chartHitArea = findElements(
+    section,
+    (element) => element.getAttribute('data-chart-hit-target') === 'true',
+  )[0]
+  const selectedGuide = findElements(
+    section,
+    (element) => element.getAttribute('data-selected-guide') === 'true',
+  )[0]
   const tooltip = findElements(section, (element) => element.className.includes('min-h-12'))[0]
 
-  return { buttons, section, svg, tooltip }
+  return { buttons, chartHitArea, section, selectedGuide, svg, tooltip }
 }
 
 const proxyNodeCardSource = readFileSync(
@@ -257,12 +266,12 @@ test('keeps 24h bucket details outside the plot on desktop and mobile', () => {
   assert.doesNotMatch(timelineChartSource, /body\.append\(svg, tooltip\)/)
 })
 
-test('dispatches renderer callbacks through the range control, chart, and populated card', () => {
+test('dispatches renderer callbacks through the range control and selected chart point', () => {
   const windowChanges: string[] = []
   const bucketChanges: number[] = []
   const bucketActivations: number[] = []
   let interactions = 0
-  const { buttons, svg, tooltip } = renderTimelineChart({
+  const { buttons, chartHitArea, svg } = renderTimelineChart({
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
     onBucketChange: (bucket) => bucketChanges.push(bucket.sampleCount),
     onInteraction: () => {
@@ -283,9 +292,9 @@ test('dispatches renderer callbacks through the range control, chart, and popula
 
   buttons[0].dispatchEvent(createEvent('click'))
   svg.dispatchEvent(createEvent('pointermove', { clientX: 40 }))
-  tooltip.dispatchEvent(createEvent('click'))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 40 }))
   svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
-  tooltip.dispatchEvent(createEvent('click'))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
 
   assert.deepEqual(windowChanges, ['1h'])
   assert.deepEqual(bucketChanges, [1, 0, 1])
@@ -293,65 +302,150 @@ test('dispatches renderer callbacks through the range control, chart, and popula
   assert.equal(interactions, 4)
 })
 
-test('suppresses a populated card click generated after a drag or cancellation', () => {
+test('blocks activation for an empty selected chart bucket', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, svg } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 40 }))
+  svg.dispatchEvent(createEvent('pointerdown', { clientX: 40, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointerup', { clientX: 40, clientY: 10, pointerId: 1 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 40 }))
+
+  assert.deepEqual(bucketActivations, [])
+})
+
+test('activates a selected chart bucket after a stationary click', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, svg } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  svg.dispatchEvent(createEvent('pointerdown', { clientX: 300, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointerup', { clientX: 300, clientY: 10, pointerId: 1 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+
+  assert.deepEqual(bucketActivations, [1])
+})
+
+test('suppresses a selected chart bucket click generated after a drag or cancellation', () => {
   const bucketActivations: number[] = []
   let interactions = 0
-  const { tooltip } = renderTimelineChart({
+  const { chartHitArea, svg } = renderTimelineChart({
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
     onInteraction: () => {
       interactions += 1
     },
   })
 
-  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 }))
-  tooltip.dispatchEvent(createEvent('pointermove', { clientX: 30, clientY: 10, pointerId: 1 }))
-  tooltip.dispatchEvent(createEvent('pointerup', { clientX: 30, clientY: 10, pointerId: 1 }))
-  tooltip.dispatchEvent(createEvent('click'))
-  tooltip.dispatchEvent(createEvent('click'))
-  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 10, clientY: 10, pointerId: 2 }))
-  tooltip.dispatchEvent(createEvent('pointercancel', { pointerId: 2 }))
-  tooltip.dispatchEvent(createEvent('click'))
-  tooltip.dispatchEvent(
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  svg.dispatchEvent(createEvent('pointerdown', { clientX: 300, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 330, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointerup', { clientX: 330, clientY: 10, pointerId: 1 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 330 }))
+  svg.dispatchEvent(createEvent('pointerdown', { clientX: 300, clientY: 10, pointerId: 2 }))
+  svg.dispatchEvent(createEvent('pointercancel', { pointerId: 2 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  svg.dispatchEvent(
     createEvent('touchstart', {
       changedTouches: createTouchList({ clientX: 10, clientY: 10, identifier: 3 }),
     }),
   )
-  tooltip.dispatchEvent(
+  svg.dispatchEvent(
     createEvent('touchmove', {
       changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 3 }),
     }),
   )
-  tooltip.dispatchEvent(
+  svg.dispatchEvent(
     createEvent('touchend', {
       changedTouches: createTouchList({ clientX: 30, clientY: 10, identifier: 3 }),
     }),
   )
-  tooltip.dispatchEvent(createEvent('click'))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 30 }))
 
-  assert.deepEqual(bucketActivations, [1])
+  assert.deepEqual(bucketActivations, [])
   assert.equal(interactions, 9)
 })
 
-test('activates a populated card once for Space keyup and ignores repeated keydowns', () => {
+test('keeps the selected bucket information card display-only', () => {
   const bucketActivations: number[] = []
-  const { tooltip } = renderTimelineChart({
+  const { svg, tooltip } = renderTimelineChart({
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
   })
-  const spaceDown = createEvent('keydown', { key: ' ', repeat: false })
-  const repeatedSpaceDown = createEvent('keydown', { key: ' ', repeat: true })
-  const spaceUp = createEvent('keyup', { key: ' ' })
 
-  tooltip.dispatchEvent(spaceDown)
-  tooltip.dispatchEvent(repeatedSpaceDown)
-  tooltip.dispatchEvent(spaceUp)
-  tooltip.dispatchEvent(createEvent('keyup', { key: ' ' }))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  tooltip.dispatchEvent(createEvent('click'))
   tooltip.dispatchEvent(createEvent('keydown', { key: 'Enter', repeat: false }))
-  tooltip.dispatchEvent(createEvent('keydown', { key: 'Enter', repeat: true }))
+  tooltip.dispatchEvent(createEvent('keyup', { key: ' ' }))
 
-  assert.equal(spaceDown.defaultPrevented, true)
-  assert.equal(repeatedSpaceDown.defaultPrevented, true)
-  assert.equal(spaceUp.defaultPrevented, true)
-  assert.deepEqual(bucketActivations, [1, 1])
+  assert.equal(tooltip.getAttribute('role'), null)
+  assert.equal(tooltip.tabIndex, -1)
+  assert.deepEqual(bucketActivations, [])
+})
+
+test('uses the populated information card as the mobile activation target', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, svg, tooltip } = renderTimelineChart({
+    compact: true,
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  assert.equal(tooltip.getAttribute('role'), 'button')
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(bucketActivations, [])
+
+  tooltip.dispatchEvent(createEvent('pointerdown', { clientX: 20, clientY: 20, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('pointerup', { clientX: 20, clientY: 20, pointerId: 1 }))
+  tooltip.dispatchEvent(createEvent('click'))
+  assert.deepEqual(bucketActivations, [1])
+})
+
+test('keeps mobile chart drags from activating while preserving card tap entry', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, svg, tooltip } = renderTimelineChart({
+    compact: true,
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+
+  svg.dispatchEvent(createEvent('pointerdown', { clientX: 300, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 330, clientY: 10, pointerId: 1 }))
+  svg.dispatchEvent(createEvent('pointerup', { clientX: 330, clientY: 10, pointerId: 1 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(bucketActivations, [])
+
+  tooltip.dispatchEvent(
+    createEvent('touchstart', {
+      changedTouches: createTouchList({ clientX: 20, clientY: 20, identifier: 2 }),
+    }),
+  )
+  tooltip.dispatchEvent(
+    createEvent('touchend', {
+      changedTouches: createTouchList({ clientX: 20, clientY: 20, identifier: 2 }),
+    }),
+  )
+  tooltip.dispatchEvent(createEvent('click'))
+  assert.deepEqual(bucketActivations, [1])
+})
+
+test('activates the bucket represented by the current guide through the chart-wide hit layer', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, selectedGuide, svg } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+  })
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 40 }))
+  assert.equal(selectedGuide.getAttribute('visibility'), 'visible')
+  assert.equal(Number(selectedGuide.getAttribute('x1')), (40 / 360) * 420)
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 40 }))
+  assert.deepEqual(bucketActivations, [])
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  assert.equal(Number(selectedGuide.getAttribute('x1')), (300 / 360) * 420)
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(bucketActivations, [1])
 })
 
 test('shows selected bucket jitter next to its range details', () => {
