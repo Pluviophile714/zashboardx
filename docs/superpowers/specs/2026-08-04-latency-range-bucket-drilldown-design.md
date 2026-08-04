@@ -26,13 +26,13 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 ### Bucket Selection And Drilldown
 
 - Pointer movement or touch movement over the chart selects a bucket and updates the existing bucket information card.
-- A populated bucket information card is clickable/tappable. Empty buckets do not enter drilldown.
-- Activating the card replaces the normal `R5S recent 30` latency strip with all raw samples whose timestamps fall inside the selected bucket.
+- A stationary click/tap on the selected chart point activates a populated bucket. Empty buckets do not enter drilldown.
+- Activating the chart point replaces the normal `R5S recent 30` latency strip with all raw samples whose timestamps fall inside the selected bucket.
 - The drilldown title shows the exact interval and actual record count, for example `15:45-16:00 · 17 records`. It must not assume that a 15-minute bucket always contains 15 records.
 - Raw samples remain ordered oldest to newest. Success and failure use the same colors and semantics as the existing recent-sample strip.
 - Pointer/touch movement across the drilldown strip shows the selected sample timestamp, delay, and result using the existing sample inspector.
-- A second activation of the bucket information card exits drilldown immediately.
-- Eight seconds without chart, information-card, or latency-strip interaction exits drilldown and restores `R5S recent 30`.
+- A second activation of the selected chart point exits drilldown immediately.
+- Eight seconds without chart or latency-strip interaction exits drilldown and restores `R5S recent 30`.
 - Any relevant interaction restarts the eight-second timer.
 - Closing or destroying the popover clears timers, exits drilldown, and resets the chart to `24h`.
 
@@ -77,7 +77,7 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 
 - Timeline cache keys continue to include node name and selected window.
 - Bucket-sample cache keys include node name, bucket start, and bucket end.
-- Selecting a range requests only that timeline. Selecting a bucket does not request raw data until the information card is activated.
+- Selecting a range requests only that timeline. Selecting a bucket does not request raw data until the selected chart point is activated.
 - A drilldown request uses generation tokens so a late response from a previous node, range, or bucket cannot replace the current popover.
 - The existing recent-30 cache and refresh behavior remain unchanged.
 - Desktop mouse and mobile touch share the same state machine; only their input events differ.
@@ -106,3 +106,9 @@ The change must preserve the existing 24-hour availability calculation, metrics 
 - Layout tests cover the segmented control and unchanged popover height on desktop and mobile.
 - Regression tests verify that the first-level final 10 segments use the same cached R5S samples as the second-level recent-30 strip.
 - Final validation includes type checking, metrics-helper tests, frontend helper tests, production build, and desktop/mobile browser inspection.
+
+## Interaction Adjustment
+
+- The chart is the drilldown activation target: horizontal sliding selects a time bucket, and a stationary tap/click on the selected chart point enters that bucket's raw-record view.
+- The bucket information card remains display-only and shows the selected bucket's interval and aggregate statistics.
+- A drag must never activate the bucket; only a stationary chart click/tap can do so.

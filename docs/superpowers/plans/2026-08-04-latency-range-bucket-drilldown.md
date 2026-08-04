@@ -14,7 +14,7 @@
 - Do not add tables, columns, migrations, retention changes, collection-frequency changes, or dependencies.
 - Support exactly `1h`, `6h`, and `24h` timeline windows with 60x1m, 72x5m, and 96x15m buckets.
 - Keep first-level availability fixed at 24 hours and reset the popover chart to 24 hours when it closes.
-- Fetch raw bucket samples only after the user activates a populated bucket information card.
+- Fetch raw bucket samples only after the user activates a populated selected chart point.
 - Restore the normal R5S recent-30 strip after eight seconds without relevant interaction.
 - Keep desktop and mobile behavior equivalent and do not increase popover height.
 
@@ -289,7 +289,7 @@ git commit -m "feat: cache latency bucket samples"
 
 - [ ] **Step 1: Write failing layout tests for the segmented control and callbacks**
 
-Assert that the renderer creates three buttons, marks the selected window, calls `onWindowChange`, emits bucket selection from pointer movement, and activates only buckets with `sampleCount > 0` when the information card is clicked.
+Assert that the renderer creates three buttons, marks the selected window, calls `onWindowChange`, emits bucket selection from pointer movement, and activates only populated buckets when the selected chart point is clicked.
 
 - [ ] **Step 2: Run targeted tests and verify RED**
 
@@ -301,9 +301,9 @@ Expected: FAIL because the renderer has a fixed `24h` title and no callbacks.
 
 Build a compact three-button segmented control in the chart header. Use `aria-pressed`, stable button dimensions, and text `1h`, `6h`, `24h`. Preserve an optional source label without allowing header overflow.
 
-- [ ] **Step 4: Make the information card the activation target**
+- [ ] **Step 4: Make the selected chart point the activation target**
 
-Change the tooltip card from pointer-events-none to an interactive button-like region only when the selected bucket is populated. Keep sample inspection on the SVG. Emit `onBucketChange(bucket)` from `renderBucket`, `onBucketActivate(bucket)` from card click/pointer activation, and `onInteraction()` from chart/card pointer and touch activity.
+Keep the tooltip card display-only. Make the selected bucket point/plot area in the SVG interactive only when the selected bucket is populated. Keep sample inspection on the SVG. Emit `onBucketChange(bucket)` from `renderBucket`, `onBucketActivate(bucket)` from a stationary click/tap on the selected chart point, and `onInteraction()` from chart and strip pointer/touch activity. A drag must suppress the following synthetic click.
 
 - [ ] **Step 5: Replace fixed 24h labels with the selected window**
 
@@ -433,11 +433,11 @@ Expected: zero errors; existing Rollup chunk warnings are acceptable.
 
 - [ ] **Step 3: Inspect desktop behavior at the local preview**
 
-At `http://127.0.0.1:5175/#/proxies`, verify 1h/6h/24h axes, selected bucket details, card activation, raw sample inspection, eight-second restoration, first-level rightmost-10 correspondence, and reset to 24h after close/reopen.
+At `http://127.0.0.1:5175/#/proxies`, verify 1h/6h/24h axes, selected chart-point activation, raw sample inspection, eight-second restoration, first-level rightmost-10 correspondence, and reset to 24h after close/reopen.
 
 - [ ] **Step 4: Inspect mobile behavior**
 
-Use a phone-sized viewport and verify touch chart selection, information-card activation, sample-strip sliding without closing the popover, outside-tap close, no overlap, and unchanged popover height constraints.
+Use a phone-sized viewport and verify touch chart selection, stationary chart-point activation, sample-strip sliding without closing the popover, outside-tap close, no overlap, and unchanged popover height constraints.
 
 - [ ] **Step 5: Review final diff and commit any verification corrections**
 
