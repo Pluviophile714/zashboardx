@@ -609,6 +609,44 @@ test('validates bounded raw bucket sample requests and retains the global method
   }
 })
 
+test('rejects parseable non-ISO and rollover-invalid bucket sample bounds', async () => {
+  const storage = createStorage()
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const responses = await Promise.all([
+      fetch(
+        `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent('July 4, 2026 00:10:00 UTC')}&end=${encodeURIComponent(at(15))}`,
+      ),
+      fetch(
+        `${baseUrl}/api/metrics/bucket-samples?node=HK-01&start=${encodeURIComponent('2026-02-30T00:00:00.000Z')}&end=${encodeURIComponent('2026-03-02T00:15:00.000Z')}`,
+      ),
+    ])
+
+    for (const response of responses) {
+      assert.equal(response.status, 400)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+    }
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
 test('limits raw bucket sample responses to 200 records', async () => {
   const storage = createStorage()
   const start = at(10)

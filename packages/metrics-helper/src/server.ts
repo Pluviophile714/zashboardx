@@ -19,6 +19,7 @@ const TIMELINE_PROFILES = {
 } as const
 const MAX_BUCKET_SAMPLE_INTERVAL_MS = 900_000
 const BUCKET_SAMPLE_LIMIT = 200
+const CANONICAL_UTC_ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 const parseWindowSeconds = (value: string | null, fallback: number) => {
   if (!value) {
@@ -63,6 +64,18 @@ const parseLimit = (value: string | null, fallback: number) => {
   }
 
   return Math.min(200, amount)
+}
+
+const parseCanonicalUtcTimestamp = (value: string | null) => {
+  if (!value || !CANONICAL_UTC_ISO_TIMESTAMP.test(value)) {
+    return Number.NaN
+  }
+
+  const timestampMs = Date.parse(value)
+
+  return Number.isFinite(timestampMs) && new Date(timestampMs).toISOString() === value
+    ? timestampMs
+    : Number.NaN
 }
 
 const sendJson = (response: ServerResponse, body: unknown) => {
@@ -254,8 +267,8 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
 
     if (url.pathname === '/api/metrics/bucket-samples') {
       const nodeName = url.searchParams.get('node')?.trim() ?? ''
-      const startMs = Date.parse(url.searchParams.get('start') ?? '')
-      const endMs = Date.parse(url.searchParams.get('end') ?? '')
+      const startMs = parseCanonicalUtcTimestamp(url.searchParams.get('start'))
+      const endMs = parseCanonicalUtcTimestamp(url.searchParams.get('end'))
 
       if (!nodeName || nodeName.length > 512) {
         sendStatus(response, 400, { error: 'invalid_node' })
