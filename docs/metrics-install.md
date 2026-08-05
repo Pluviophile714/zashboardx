@@ -1,89 +1,78 @@
-# Optional Metrics Installation
+# 可选 Metrics 版安装
 
-The ordinary Docker installation remains the default:
+普通 Docker 单容器版仍是默认选择：
 
 ```sh
 docker run -d -p 80:80 ghcr.io/pluviophile714/zashboardx:latest
 ```
 
-Use Metrics when you want durable node latency history and availability
-metrics. The installer starts two private services:
+若需要持久保存节点延迟历史和可用率数据，可使用 Metrics 版。安装脚本会
+启动两个内部服务：
 
-- `zashboardx`: the browser-facing panel and the only published port.
-- `zashboardx-metrics`: the collector and SQLite history store, with no host
-  port exposed.
+- `zashboardx`：面向浏览器的面板，也是唯一对外开放端口的服务。
+- `zashboardx-metrics`：采集器和 SQLite 历史数据存储，不开放宿主机端口。
 
-The installer creates a private Compose network and stores history under
-`${XDG_DATA_HOME:-$HOME/.local/share}/zashboardx-metrics/metrics-data`.
+安装脚本会创建私有 Compose 网络，并将历史数据保存到
+`${XDG_DATA_HOME:-$HOME/.local/share}/zashboardx-metrics/metrics-data`。
 
-## Requirements
+## 环境要求
 
-- Docker Engine with the Docker Compose v2 plugin.
-- A Mihomo external-controller URL reachable from the helper container, such
-  as `http://192.168.1.1:9090`.
-- The Mihomo controller secret, if authentication is enabled.
+- 已安装 Docker Engine 和 Docker Compose v2 插件。
+- 小后端容器可访问的 Mihomo `external-controller` 地址，例如
+  `http://192.168.1.1:9090`。
+- 若 Mihomo 已启用认证，还需要控制器密钥。
 
-Do not use `127.0.0.1` for the controller URL unless Mihomo is running inside
-the same helper container. For a normal Docker bridge network, use the router
-or host LAN address instead. Keep the controller restricted to the LAN and
-do not expose it directly to the Internet.
+除非 Mihomo 运行在同一个小后端容器内，否则控制器地址不要填
+`127.0.0.1`。普通 Docker bridge 网络请使用路由器或宿主机的局域网地址。
+控制器应仅限局域网访问，不要直接暴露到互联网。
 
-## Install
+## 安装
 
-Run this command on the Docker host:
+在 Docker 主机终端运行：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Pluviophile714/zashboardx/master/scripts/install-metrics.sh | sh
 ```
 
-The script asks for the panel port, Mihomo controller URL, and optional secret.
-The secret is entered without echoing and is stored only in the local `.env`
-file with restrictive permissions. No YAML editing or second browser port is
-required.
+脚本会询问面板端口、Mihomo 控制器地址和可选密钥。密钥输入时不会回显，
+只会保存到本机权限受限的 `.env` 文件。无需编辑 YAML，也不会为小后端
+额外开放浏览器端口。
 
-When it finds one recognizable ordinary ZashboardX container from either the
-official ZashboardX or upstream image, the script offers to migrate it. A
-confirmed migration preserves its published panel port and restart policy,
-saves an `inspect` backup, and restores the old container if the new panel
-cannot start. Containers with custom mounts, networks, or unfamiliar images
-are never taken over automatically.
+若脚本发现一个可识别的普通 ZashboardX 容器，且它使用官方 ZashboardX 或
+上游镜像，会提供迁移选项。确认迁移后会保留原来的面板端口和重启策略，保存
+`inspect` 备份；新面板无法启动时会恢复旧容器。带有自定义挂载、网络或未知
+镜像的容器永远不会被自动接管。
 
-After startup, open the printed panel URL. Metrics history starts accumulating
-from the first successful collection round; it is not retroactively generated.
-The panel can still load if the helper cannot reach Mihomo, but its health
-endpoint will report the connection problem.
+启动后打开脚本打印的面板地址。Metrics 历史会从首次成功采集后开始积累，
+不会补录过去的数据。即使小后端无法连接 Mihomo，面板仍可打开；健康接口会
+报告该连接问题。
 
-## Update
+## 更新
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Pluviophile714/zashboardx/master/scripts/update-metrics.sh | sh
 ```
 
-Updates pull both images and recreate the managed services without deleting
-`metrics-data`.
+更新会拉取两个镜像并重建受管理服务，不会删除 `metrics-data`。
 
-## Disable
+## 关闭 Metrics 版
 
-To return to the ordinary panel while retaining the collected history:
+若要切回普通面板，同时保留已采集的历史数据：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Pluviophile714/zashboardx/master/scripts/disable-metrics.sh | sh
 ```
 
-History is retained so Metrics can be enabled again later. Permanent deletion
-requires an explicit confirmation:
+历史数据会保留，之后仍可再次启用 Metrics 版。永久删除需要明确确认：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Pluviophile714/zashboardx/master/scripts/disable-metrics.sh | sh -s -- --purge-data
 ```
 
-## Troubleshooting
+## 常见问题
 
-- **Port already in use:** an official ordinary panel can be migrated after
-  confirmation. For every other container, choose another port or stop it
-  yourself; the installer never replaces an unrecognized container.
-- **Mihomo unreachable:** verify the controller URL is reachable from a
-  temporary container and that the controller secret is correct. Rerun the
-  installer to update the saved URL or secret without deleting history.
-- **No history yet:** allow at least one collection interval. A newly created
-  database has no previous samples.
+- **端口已被占用：** 可识别的官方普通面板在确认后可以迁移。其他容器请改用
+  其他端口或自行停止，脚本不会替换未识别的容器。
+- **无法连接 Mihomo：** 确认临时容器也能访问控制器地址，且控制器密钥正确。
+  可重新运行安装脚本更新已保存的地址或密钥，不会删除历史数据。
+- **还没有历史数据：** 等待至少一个采集周期。新建数据库没有过去的样本。
