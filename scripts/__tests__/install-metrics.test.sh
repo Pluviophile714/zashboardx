@@ -176,7 +176,7 @@ fi
 test ! -e "${CONFLICT_DATA_HOME}/zashboardx-metrics"
 
 ordinary_line="$(grep -n 'docker run -d -p 80:80 ghcr.io/pluviophile714/zashboardx:latest' "${ROOT_DIR}/README.md" | cut -d: -f1)"
-metrics_line="$(grep -n 'Optional Metrics Installation' "${ROOT_DIR}/README.md" | cut -d: -f1)"
+metrics_line="$(grep -nF '[Metrics 安装说明](./docs/metrics-install.md)' "${ROOT_DIR}/README.md" | cut -d: -f1)"
 test -n "$ordinary_line"
 test -n "$metrics_line"
 test "$ordinary_line" -lt "$metrics_line"
