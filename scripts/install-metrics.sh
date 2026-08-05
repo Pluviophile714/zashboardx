@@ -5,6 +5,7 @@ APP_NAME="zashboardx-metrics"
 APP_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/${APP_NAME}"
 IMAGE="ghcr.io/pluviophile714/zashboardx:latest"
 METRICS_IMAGE="ghcr.io/pluviophile714/zashboardx:metrics-latest"
+UPSTREAM_IMAGE="ghcr.io/zephyruso/zashboard:latest"
 MANAGED_LABEL="com.zashboardx.metrics.managed"
 DEFAULT_PORT="2080"
 DEFAULT_MIHOMO_BASE_URL="http://192.168.1.1:9090"
@@ -53,6 +54,12 @@ prompt_secret() {
   printf '%s' "$value"
 }
 
+prompt_confirmation() {
+  printf '%s' "$1" >&2
+  IFS= read -r answer <&$INPUT_FD || answer=""
+  printf '%s' "$answer"
+}
+
 read_env_value() {
   key="$1"
   fallback="$2"
@@ -96,9 +103,66 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+existing_ordinary_id=""
+existing_ordinary_name=""
+existing_ordinary_port=""
+existing_ordinary_running="false"
+existing_ordinary_restart="unless-stopped"
+existing_ordinary_count=0
+for container_id in $(docker ps -a --format '{{.ID}}' 2>/dev/null || true); do
+  managed="$(docker inspect "$container_id" --format "{{index .Config.Labels \"${MANAGED_LABEL}\"}}" 2>/dev/null || true)"
+  [ "$managed" = "true" ] && continue
+  image="$(docker inspect "$container_id" --format '{{.Config.Image}}' 2>/dev/null || true)"
+  case "$image" in
+    "$IMAGE"|"$UPSTREAM_IMAGE") ;;
+    *) continue ;;
+  esac
+  binds="$(docker inspect "$container_id" --format '{{json .HostConfig.Binds}}' 2>/dev/null || true)"
+  case "$binds" in
+    ""|null|\[\]) ;;
+    *) continue ;;
+  esac
+  network_mode="$(docker inspect "$container_id" --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || true)"
+  case "$network_mode" in
+    ""|default|bridge) ;;
+    *) continue ;;
+  esac
+  port_line="$(docker port "$container_id" 80/tcp 2>/dev/null | head -n 1 || true)"
+  ordinary_port="$(printf '%s' "$port_line" | sed -n 's/.*://p' | sed 's#/.*##')"
+  if ! printf '%s' "$ordinary_port" | grep -Eq '^[0-9]+$'; then
+    continue
+  fi
+  existing_ordinary_count=$((existing_ordinary_count + 1))
+  existing_ordinary_id="$container_id"
+  existing_ordinary_name="$(docker inspect "$container_id" --format '{{.Name}}' 2>/dev/null | sed 's#^/##' || true)"
+  existing_ordinary_port="$ordinary_port"
+  existing_ordinary_running="$(docker inspect "$container_id" --format '{{.State.Running}}' 2>/dev/null || echo false)"
+  existing_ordinary_restart="$(docker inspect "$container_id" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || echo unless-stopped)"
+  [ -n "$existing_ordinary_restart" ] || existing_ordinary_restart="unless-stopped"
+done
+
+if [ "$existing_ordinary_count" -gt 1 ]; then
+  echo "Found multiple recognizable ordinary panels; refusing automatic migration." >&2
+  echo "Stop or migrate them manually, then rerun this installer." >&2
+  exit 1
+fi
+
 saved_port="$(read_env_value PORT "$DEFAULT_PORT")"
 saved_mihomo_url="$(read_env_value MIHOMO_BASE_URL "$DEFAULT_MIHOMO_BASE_URL")"
 saved_mihomo_secret="$(read_env_value MIHOMO_SECRET "")"
+
+if [ -n "$existing_ordinary_id" ]; then
+  echo "Detected official ordinary panel '${existing_ordinary_name:-$existing_ordinary_id}' on port ${existing_ordinary_port}." >&2
+  answer="$(prompt_confirmation "Migrate it to Metrics? [y/N]: ")"
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *)
+      echo "Migration cancelled. No containers or files were changed." >&2
+      exit 0
+      ;;
+  esac
+  saved_port="$existing_ordinary_port"
+fi
 
 PORT="$(prompt_value "Panel port [${saved_port}]: " "$saved_port")"
 MIHOMO_BASE_URL="$(prompt_value "Mihomo controller URL [${saved_mihomo_url}]: " "$saved_mihomo_url")"
@@ -129,7 +193,7 @@ if [ -n "$occupied" ]; then
   for row in $occupied; do
     container_id="${row%%|*}"
     managed="$(docker inspect "$container_id" --format "{{index .Config.Labels \"${MANAGED_LABEL}\"}}" 2>/dev/null || true)"
-    if [ "$managed" != "true" ]; then
+    if [ "$managed" != "true" ] && [ "$container_id" != "$existing_ordinary_id" ]; then
       unmanaged="${unmanaged}${row}
 "
     fi
@@ -145,12 +209,20 @@ fi
 
 mkdir -p "${APP_DIR}/metrics-data"
 
+restart_policy="unless-stopped"
+if [ -n "$existing_ordinary_id" ]; then
+  restart_policy="$existing_ordinary_restart"
+  backup_stamp="$(date +%Y%m%d%H%M%S)"
+  docker inspect "$existing_ordinary_id" >"${APP_DIR}/ordinary-container-${existing_ordinary_id}-${backup_stamp}.inspect.json"
+fi
+
 {
   write_env_value PORT "$PORT"
   write_env_value IMAGE "$IMAGE"
   write_env_value METRICS_IMAGE "$METRICS_IMAGE"
   write_env_value MIHOMO_BASE_URL "$MIHOMO_BASE_URL"
   write_env_value MIHOMO_SECRET "$MIHOMO_SECRET"
+  write_env_value RESTART_POLICY "$restart_policy"
 } >"${APP_DIR}/.env"
 chmod 600 "${APP_DIR}/.env"
 
@@ -164,7 +236,7 @@ services:
       - "com.zashboardx.metrics.managed=true"
     depends_on:
       - zashboardx-metrics
-    restart: unless-stopped
+    restart: ${RESTART_POLICY}
 
   zashboardx-metrics:
     image: ${METRICS_IMAGE}
@@ -184,6 +256,32 @@ EOF
 
 cd "$APP_DIR"
 docker compose --project-name "$APP_NAME" pull
+
+migration_was_running=false
+migration_old_removed=false
+
+rollback_migration() {
+  docker compose --project-name "$APP_NAME" down || true
+  if [ "$migration_was_running" = "true" ] && [ "$migration_old_removed" = "false" ]; then
+    docker start "$existing_ordinary_id" || true
+  fi
+}
+
+migration_exit_handler() {
+  status="$?"
+  if [ "$status" -ne 0 ] && [ -n "$existing_ordinary_id" ]; then
+    rollback_migration
+  fi
+  exit "$status"
+}
+
+trap migration_exit_handler EXIT HUP INT TERM
+
+if [ -n "$existing_ordinary_id" ] && [ "$existing_ordinary_running" = "true" ]; then
+  docker stop "$existing_ordinary_id"
+  migration_was_running=true
+fi
+
 docker compose --project-name "$APP_NAME" up -d
 
 panel_url="http://127.0.0.1:${PORT}"
@@ -200,8 +298,13 @@ done
 
 if [ "$panel_ready" != "true" ]; then
   echo "The panel did not become ready within 30 seconds. Stopping the new stack." >&2
-  docker compose --project-name "$APP_NAME" down
+  rollback_migration
   exit 1
+fi
+
+if [ -n "$existing_ordinary_id" ]; then
+  docker rm "$existing_ordinary_id"
+  migration_old_removed=true
 fi
 
 health=""

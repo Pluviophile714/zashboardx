@@ -36,7 +36,7 @@ jobs:
         run: pnpm metrics:test
 
       - name: Metrics installer tests
-        run: bash scripts/__tests__/install-metrics.test.sh
+        run: for test in scripts/__tests__/*.test.sh; do bash "$test"; done
 
       - name: Build
         env:

@@ -31,7 +31,11 @@ fi
 
 if [ "$1" = "ps" ]; then
   if [ "${DOCKER_OCCUPIED:-}" = "1" ]; then
-    echo "custom-id|custom-panel|custom/image:latest"
+    if [ "${4:-}" = "{{.ID}}" ]; then
+      echo "custom-id"
+    else
+      echo "custom-id|custom-panel|custom/image:latest"
+    fi
   fi
   exit 0
 fi
