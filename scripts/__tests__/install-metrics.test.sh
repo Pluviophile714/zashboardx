@@ -66,7 +66,12 @@ done
 
 case "$url" in
   */api/metrics/health)
-    printf '%s\n' '{"ok":true,"mihomoReachable":true}'
+    if [ "${CURL_HEALTH_PENDING:-}" = "1" ] && [ ! -f "$HEALTH_MARKER" ]; then
+      : >"$HEALTH_MARKER"
+      printf '%s\n' '{"ok":false,"mihomoReachable":false}'
+    else
+      printf '%s\n' '{"ok":true,"mihomoReachable":true}'
+    fi
     ;;
   http://127.0.0.1:2180/)
     printf '%s\n' '<!doctype html><title>ZashboardX</title>'
@@ -89,9 +94,10 @@ export PATH="${BIN_DIR}:$PATH"
 export HOME="$HOME_DIR"
 export XDG_DATA_HOME="$DATA_HOME"
 export DOCKER_LOG
+export HEALTH_MARKER="${TMP_DIR}/health-ready"
 
 printf '2180\nhttp://mihomo.test:9090\nsecret-for-test\n' |
-  sh "${ROOT_DIR}/scripts/install-metrics.sh" >"${TMP_DIR}/install.out" 2>&1
+  CURL_HEALTH_PENDING=1 sh "${ROOT_DIR}/scripts/install-metrics.sh" >"${TMP_DIR}/install.out" 2>&1
 
 APP_DIR="${DATA_HOME}/zashboardx-metrics"
 COMPOSE_FILE="${APP_DIR}/compose.yaml"
@@ -124,6 +130,10 @@ esac
 grep -q 'compose --project-name zashboardx-metrics pull' "$DOCKER_LOG"
 grep -q 'compose --project-name zashboardx-metrics up -d' "$DOCKER_LOG"
 grep -q 'Installation complete' "${TMP_DIR}/install.out"
+if grep -q 'Metrics cannot reach Mihomo yet' "${TMP_DIR}/install.out"; then
+  echo "installer warned before the first reachable health result" >&2
+  exit 1
+fi
 
 if grep -q 'secret-for-test' "${TMP_DIR}/install.out"; then
   echo "installer printed the Mihomo secret" >&2

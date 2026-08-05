@@ -41,6 +41,13 @@ The secret is entered without echoing and is stored only in the local `.env`
 file with restrictive permissions. No YAML editing or second browser port is
 required.
 
+When it finds one recognizable ordinary ZashboardX container from either the
+official ZashboardX or upstream image, the script offers to migrate it. A
+confirmed migration preserves its published panel port and restart policy,
+saves an `inspect` backup, and restores the old container if the new panel
+cannot start. Containers with custom mounts, networks, or unfamiliar images
+are never taken over automatically.
+
 After startup, open the printed panel URL. Metrics history starts accumulating
 from the first successful collection round; it is not retroactively generated.
 The panel can still load if the helper cannot reach Mihomo, but its health
@@ -72,8 +79,9 @@ curl -fsSL https://raw.githubusercontent.com/Pluviophile714/zashboardx/master/sc
 
 ## Troubleshooting
 
-- **Port already in use:** choose another panel port, or stop the existing
-  service yourself. The installer never replaces an unrecognized container.
+- **Port already in use:** an official ordinary panel can be migrated after
+  confirmation. For every other container, choose another port or stop it
+  yourself; the installer never replaces an unrecognized container.
 - **Mihomo unreachable:** verify the controller URL is reachable from a
   temporary container and that the controller secret is correct. Rerun the
   installer to update the saved URL or secret without deleting history.

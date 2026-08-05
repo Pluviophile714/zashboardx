@@ -308,10 +308,15 @@ if [ -n "$existing_ordinary_id" ]; then
 fi
 
 health=""
+health_reachable=false
 attempt=0
 while [ "$attempt" -lt 30 ]; do
-  health="$(curl -fsS "${panel_url}/api/metrics/health" 2>/dev/null || true)"
-  if [ -n "$health" ]; then
+  candidate_health="$(curl -fsS "${panel_url}/api/metrics/health" 2>/dev/null || true)"
+  if [ -n "$candidate_health" ]; then
+    health="$candidate_health"
+  fi
+  if printf '%s' "$health" | grep -Eq '"mihomoReachable"[[:space:]]*:[[:space:]]*true'; then
+    health_reachable=true
     break
   fi
   attempt=$((attempt + 1))
@@ -323,7 +328,7 @@ echo "Installation complete."
 echo "Panel: http://<docker-host>:${PORT}"
 echo "Data: ${APP_DIR}/metrics-data"
 
-if ! printf '%s' "$health" | grep -Eq '"mihomoReachable"[[:space:]]*:[[:space:]]*true'; then
+if [ "$health_reachable" != "true" ]; then
   echo "The panel is running, but Metrics cannot reach Mihomo yet." >&2
   echo "Check the controller URL and secret, then rerun this installer." >&2
 fi

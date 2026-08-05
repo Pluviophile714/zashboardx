@@ -1,4 +1,17 @@
-# Migrating A Custom Installation
+# Migrating An Existing Installation
+
+## Official ordinary installation
+
+The Metrics installer can migrate one ordinary container when it was started
+from `ghcr.io/pluviophile714/zashboardx:latest` or
+`ghcr.io/zephyruso/zashboard:latest`, uses the default bridge network, has no
+custom bind mounts, and publishes its panel `80/tcp` port. Run the normal
+[Metrics installation command](./metrics-install.md#install), confirm the
+prompt, and verify the printed panel URL. The script retains an `inspect`
+backup in its managed data directory and restores the old container if the new
+panel does not become ready.
+
+## Custom installation
 
 The Metrics installer automatically protects containers it does not recognize.
 This is intentional: a custom `docker run` or Compose setup may contain mounts,
