@@ -51,8 +51,17 @@ dev:
 To run zashboard via Docker, use the following command:
 
 ```
-docker run -d -p 80:80 ghcr.io/zephyruso/zashboard:latest
+docker run -d -p 80:80 ghcr.io/pluviophile714/zashboardx:latest
 ```
+
+## Optional Metrics Installation
+
+The ordinary single-container installation above remains the recommended
+lightweight choice. If you want durable node latency history and availability
+metrics, use the optional two-container installation guide:
+
+- [Metrics installation guide](./docs/metrics-install.md)
+- [Custom installation migration guide](./docs/metrics-migration.md)
 
 ## Tips
 

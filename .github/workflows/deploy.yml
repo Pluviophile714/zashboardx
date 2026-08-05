@@ -35,6 +35,9 @@ jobs:
       - name: Metrics helper tests
         run: pnpm metrics:test
 
+      - name: Metrics installer tests
+        run: bash scripts/__tests__/install-metrics.test.sh
+
       - name: Build
         env:
           SINGBOX_NATIVE: true
