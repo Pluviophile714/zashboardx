@@ -167,6 +167,7 @@ const renderTimelineChart = (
     onWindowChange?: (window: '1h' | '6h' | '24h') => void
     compact?: boolean
     inputMode?: 'coarse' | 'fine'
+    selectedBucketIndex?: number
   } = {},
 ) => {
   Object.defineProperty(globalThis, 'document', {
@@ -174,12 +175,13 @@ const renderTimelineChart = (
     value: new TestDocument(),
   })
 
+  const buckets = [createTimelineBucket(0, 0), createTimelineBucket(1, 1)]
   const section = createLatencyTimelineChartSection(
     {
       status: 'ready',
       timeline: {
         bucketSeconds: 900,
-        buckets: [createTimelineBucket(0, 0), createTimelineBucket(1, 1)],
+        buckets,
         generatedAt: '2026-07-04T00:30:00.000Z',
         nodeName: 'HK-01',
         windowSeconds: 86_400,
@@ -192,6 +194,10 @@ const renderTimelineChart = (
       onBucketChange: callbacks.onBucketChange,
       onInteraction: callbacks.onInteraction,
       onWindowChange: callbacks.onWindowChange,
+      selectedBucket:
+        callbacks.selectedBucketIndex === undefined
+          ? undefined
+          : buckets[callbacks.selectedBucketIndex],
       window: '6h',
     },
   ) as unknown as TestElement
@@ -439,22 +445,19 @@ test('keeps mobile chart drags from activating while preserving card tap entry',
   assert.deepEqual(bucketActivations, [1])
 })
 
-test('selects activation surface from pointer capability instead of compact layout', () => {
-  const narrowFineDesktop = renderTimelineChart({
+test('uses the information card for compact layouts or coarse pointers', () => {
+  const compactFineActivations: number[] = []
+  const compactFine = renderTimelineChart({
     compact: true,
     inputMode: 'fine',
-  })
-  const fineActivations: number[] = []
-  const fineChart = renderTimelineChart({
-    compact: true,
-    inputMode: 'fine',
-    onBucketActivate: (bucket) => fineActivations.push(bucket.sampleCount),
+    onBucketActivate: (bucket) => compactFineActivations.push(bucket.sampleCount),
   })
 
-  fineChart.svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
-  fineChart.chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
-  assert.deepEqual(fineActivations, [1])
-  assert.equal(narrowFineDesktop.tooltip.getAttribute('role'), null)
+  compactFine.svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  compactFine.chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  compactFine.tooltip.dispatchEvent(createEvent('click'))
+  assert.deepEqual(compactFineActivations, [1])
+  assert.equal(compactFine.tooltip.getAttribute('role'), 'button')
 
   const coarseWideTouchActivations: number[] = []
   const coarseWideTouch = renderTimelineChart({
@@ -468,6 +471,32 @@ test('selects activation surface from pointer capability instead of compact layo
   coarseWideTouch.tooltip.dispatchEvent(createEvent('click'))
   assert.deepEqual(coarseWideTouchActivations, [1])
   assert.equal(coarseWideTouch.tooltip.getAttribute('role'), 'button')
+
+  const wideFineActivations: number[] = []
+  const wideFine = renderTimelineChart({
+    compact: false,
+    inputMode: 'fine',
+    onBucketActivate: (bucket) => wideFineActivations.push(bucket.sampleCount),
+  })
+
+  wideFine.svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  wideFine.chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(wideFineActivations, [1])
+  assert.equal(wideFine.tooltip.getAttribute('role'), null)
+})
+
+test('keeps the selected guide latched on mobile after the pointer leaves', () => {
+  const mobile = renderTimelineChart({ compact: true, inputMode: 'fine' })
+
+  mobile.svg.dispatchEvent(createEvent('pointermove', { clientX: 120 }))
+  mobile.svg.dispatchEvent(createEvent('pointerleave'))
+  assert.equal(mobile.selectedGuide.getAttribute('visibility'), 'visible')
+
+  const desktop = renderTimelineChart({ compact: false, inputMode: 'fine' })
+
+  desktop.svg.dispatchEvent(createEvent('pointermove', { clientX: 120 }))
+  desktop.svg.dispatchEvent(createEvent('pointerleave'))
+  assert.equal(desktop.selectedGuide.getAttribute('visibility'), 'hidden')
 })
 
 test('derives coarse input safely from pointer media and touch points', () => {
@@ -562,6 +591,18 @@ test('activates the bucket represented by the current guide through the chart-wi
 
 test('shows selected bucket jitter next to its range details', () => {
   assert.match(timelineChartSource, /'波动'/)
+})
+
+test('restores the active bucket instead of resetting the guide to the latest sample', () => {
+  const selectedSampleCounts: number[] = []
+
+  renderTimelineChart({
+    onBucketChange: (bucket) => selectedSampleCounts.push(bucket.sampleCount),
+    selectedBucketIndex: 0,
+  })
+
+  assert.deepEqual(selectedSampleCounts, [0])
+  assert.match(proxyNodeCardSource, /selectedBucket: activeLatencyTimelineBucket \?\? undefined/)
 })
 
 test('inspects recent samples by touch on mobile and hover on desktop', () => {
@@ -686,6 +727,37 @@ test('renders every raw bucket record and uses its exact interval title', () => 
   assert.match(
     proxyNodeCardSource,
     /const displayedHistory = options\.preserveAll\s*\? history\s*:\s*history\.slice\(-LATENCY_DETAIL_SEGMENTS\)/,
+  )
+})
+
+test('centers small bucket histories with the same tracks and spacing as recent 30', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /getLatencyStripPlaceholderCounts\([\s\S]*displayedHistory\.length[\s\S]*LATENCY_DETAIL_SEGMENTS[\s\S]*options\.centerStableTracks/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /const timelineItems = \[\.\.\.leadingEmptySegments, \.\.\.displayedHistory, \.\.\.trailingEmptySegments\]/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /targetSegmentCount <= LATENCY_DETAIL_SEGMENTS \? 'gap-1' : 'gap-px'/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /item\.delay === undefined && options\.centerStableTracks[\s\S]*segment\.style\.visibility = 'hidden'/,
+  )
+  assert.match(proxyNodeCardSource, /centerStableTracks: Boolean\(activeLatencyTimelineBucket\)/)
+})
+
+test('shows a manual recent-30 restore control only during bucket drilldown', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /if \(options\.onRestoreRecent\) \{[\s\S]*restoreButton\.textContent = '返回近 30 次'[\s\S]*options\.onRestoreRecent\?\.\(\)/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /onRestoreRecent: activeLatencyTimelineBucket[\s\S]*\? \(\) => exitLatencyBucketDrilldown\(true\)[\s\S]*: undefined/,
   )
 })
 

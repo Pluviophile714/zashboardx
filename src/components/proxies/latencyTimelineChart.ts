@@ -25,6 +25,7 @@ export type LatencyTimelineChartOptions = {
   onBucketChange?: (bucket: ProxyMetricsTimelineBucket) => void
   onInteraction?: () => void
   onWindowChange?: (window: ProxyMetricsTimelineWindow) => void
+  selectedBucket?: ProxyMetricsTimelineBucket
   sourceLabel?: string
   window?: ProxyMetricsTimelineWindow
 }
@@ -109,6 +110,7 @@ export const createLatencyTimelineChartSection = (
   const body = document.createElement('div')
   const height = getProxyMetricsTimelineHeight(options.compact)
   const isCoarseInput = options.inputMode === 'coarse'
+  const usesInformationCardActivation = options.compact || isCoarseInput
   const selectedWindow = options.window ?? '24h'
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
@@ -369,7 +371,7 @@ export const createLatencyTimelineChartSection = (
 
     selectedBucket = bucket
     selectedBucketIndex = bucketIndex
-    const canActivate = isCoarseInput && bucket.sampleCount > 0
+    const canActivate = usesInformationCardActivation && bucket.sampleCount > 0
 
     if (canActivate) {
       tooltip.setAttribute('aria-disabled', 'false')
@@ -529,7 +531,7 @@ export const createLatencyTimelineChartSection = (
     return undefined
   }
 
-  if (!isCoarseInput) {
+  if (!usesInformationCardActivation) {
     chartHitArea.addEventListener('click', (event) => {
       if (suppressNextChartClick) {
         suppressNextChartClick = false
@@ -706,7 +708,9 @@ export const createLatencyTimelineChartSection = (
     },
     { passive: true },
   )
-  svg.addEventListener('pointerleave', clearHover)
+  if (!usesInformationCardActivation) {
+    svg.addEventListener('pointerleave', clearHover)
+  }
 
   if (timeline.buckets.length) {
     let latestSampleIndex = timeline.buckets.length - 1
@@ -718,7 +722,15 @@ export const createLatencyTimelineChartSection = (
       }
     }
 
-    renderBucket(latestSampleIndex)
+    const activeBucketIndex = options.selectedBucket
+      ? timeline.buckets.findIndex(
+          (bucket) =>
+            bucket.start === options.selectedBucket?.start &&
+            bucket.end === options.selectedBucket.end,
+        )
+      : -1
+
+    renderBucket(activeBucketIndex >= 0 ? activeBucketIndex : latestSampleIndex)
   }
 
   return section

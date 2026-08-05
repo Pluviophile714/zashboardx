@@ -81,6 +81,7 @@ import { NOT_CONNECTED, PROXY_CARD_SIZE, PROXY_SORT_TYPE } from '@/constant'
 import { openWithDeferredRefresh } from '@/helper/deferredRefresh'
 import {
   formatLatencyBucketTitle,
+  getLatencyStripPlaceholderCounts,
   getLatencyStripTargetCount,
   mapLatencyBucketSamplesToHistory,
   resolveLatencyStripHistory,
@@ -905,15 +906,29 @@ const buildLatencyStatusTimeline = (
   compact = false,
   sourceLabel = '本机近30次',
   summaryLine?: HTMLElement,
-  options: { onInteraction?: () => void; preserveAll?: boolean } = {},
+  options: {
+    centerStableTracks?: boolean
+    onInteraction?: () => void
+    onRestoreRecent?: () => void
+    preserveAll?: boolean
+  } = {},
 ) => {
   const displayedHistory = options.preserveAll ? history : history.slice(-LATENCY_DETAIL_SEGMENTS)
   const targetSegmentCount = getLatencyStripTargetCount(
     displayedHistory.length,
     LATENCY_DETAIL_SEGMENTS,
   )
-  const emptySegments: { delay?: number; time?: string }[] = Array.from(
-    { length: Math.max(0, targetSegmentCount - displayedHistory.length) },
+  const placeholderCounts = getLatencyStripPlaceholderCounts(
+    displayedHistory.length,
+    LATENCY_DETAIL_SEGMENTS,
+    Boolean(options.centerStableTracks),
+  )
+  const leadingEmptySegments: { delay?: number; time?: string }[] = Array.from(
+    { length: placeholderCounts.leading },
+    () => ({}),
+  )
+  const trailingEmptySegments: { delay?: number; time?: string }[] = Array.from(
+    { length: placeholderCounts.trailing },
     () => ({}),
   )
   const timeline = document.createElement('div')
@@ -922,7 +937,7 @@ const buildLatencyStatusTimeline = (
   const sampleCount = displayedHistory.length
   const successTests = displayedHistory.filter((item) => item.delay > NOT_CONNECTED).length
   const sampledSuccessRate = sampleCount > 0 ? Math.round((successTests / sampleCount) * 100) : 0
-  const timelineItems = [...emptySegments, ...displayedHistory]
+  const timelineItems = [...leadingEmptySegments, ...displayedHistory, ...trailingEmptySegments]
   const segments: HTMLElement[] = []
 
   timeline.className = compact
@@ -955,11 +970,21 @@ const buildLatencyStatusTimeline = (
   newestLabel.textContent = newestTimestamp
     ? `最后 ${dayjs(newestTimestamp).format('MM-DD HH:mm')}`
     : '暂无'
-  header.append(oldestLabel, successLabel, newestLabel)
+  header.append(oldestLabel, successLabel)
+  if (options.onRestoreRecent) {
+    const restoreButton = document.createElement('button')
 
-  strip.className = `flex w-full items-end ${options.preserveAll ? 'gap-px' : 'gap-1'} ${
-    compact ? 'touch-pan-y select-none' : ''
-  }`
+    restoreButton.type = 'button'
+    restoreButton.className = 'shrink-0 font-medium text-primary hover:text-primary/80'
+    restoreButton.textContent = '返回近 30 次'
+    restoreButton.addEventListener('click', () => options.onRestoreRecent?.())
+    header.append(restoreButton)
+  } else {
+    header.append(newestLabel)
+  }
+
+  const stripGap = targetSegmentCount <= LATENCY_DETAIL_SEGMENTS ? 'gap-1' : 'gap-px'
+  strip.className = `flex w-full items-end ${stripGap} ${compact ? 'touch-pan-y select-none' : ''}`
   const reportInteraction = () => options.onInteraction?.()
 
   strip.addEventListener('pointerdown', reportInteraction)
@@ -983,6 +1008,10 @@ const buildLatencyStatusTimeline = (
           ? 'oklch(0.648 0.15 160)'
           : 'color-mix(in oklch, var(--color-base-content) 18%, transparent)'
     segment.style.opacity = item.delay === undefined ? '0.7' : '1'
+
+    if (item.delay === undefined && options.centerStableTracks) {
+      segment.style.visibility = 'hidden'
+    }
 
     if (
       previousTimestamp &&
@@ -1189,6 +1218,7 @@ const createLatencyDetailsTip = () => {
           onBucketActivate: activateLatencyTimelineBucket,
           onInteraction: restartLatencyBucketDrilldownResetTimer,
           onWindowChange: changeLatencyTimelineWindow,
+          selectedBucket: activeLatencyTimelineBucket ?? undefined,
           sourceLabel: timelineSourceName !== props.name ? timelineSourceName : undefined,
           window: activeLatencyTimelineWindow,
         },
@@ -1226,7 +1256,11 @@ const createLatencyDetailsTip = () => {
           : detailHistorySource.label,
         summaryLine,
         {
+          centerStableTracks: Boolean(activeLatencyTimelineBucket),
           onInteraction: restartLatencyBucketDrilldownResetTimer,
+          onRestoreRecent: activeLatencyTimelineBucket
+            ? () => exitLatencyBucketDrilldown(true)
+            : undefined,
           preserveAll: Boolean(activeLatencyTimelineBucket),
         },
       ),
