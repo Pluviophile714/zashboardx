@@ -2,6 +2,7 @@
 	root * .
 
 	handle /api/metrics* {
+		encode gzip
 		reverse_proxy {$METRICS_UPSTREAM}
 	}
 
