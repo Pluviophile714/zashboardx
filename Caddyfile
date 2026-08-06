@@ -2,7 +2,7 @@
 	root * .
 
 	handle /api/metrics* {
-		reverse_proxy http://zashboardx-metrics:8787
+		reverse_proxy {$METRICS_UPSTREAM}
 	}
 
 	handle {
