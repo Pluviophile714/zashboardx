@@ -54,6 +54,7 @@
           :name="node.name"
           :loading="isLatencyTesting"
           :group-name="groupName"
+          :latency-override="cardLatencyOverride"
           :disable-history-tip="true"
           @click.stop="handlerLatencyTest"
           @pointerenter.stop="handlerLatencyDetailsTip"
@@ -537,6 +538,27 @@ const latencyStabilityAnimationName = computed(() => {
   return getProxyMetricsSamplesUpdateKind(sourceName, '24h', LATENCY_DETAIL_SEGMENTS) === 'appended'
     ? 'latency-strip'
     : ''
+})
+
+const cardLatencyOverride = computed(() => {
+  const resolution = getSharedMetricsResolution()
+
+  if (!resolution?.metrics.sampleCount) {
+    return undefined
+  }
+
+  const { metrics, sourceName } = resolution
+  const samples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ]
+  const latest = samples?.at(-1)
+
+  if (latest) {
+    return latest.success && latest.delay !== null ? latest.delay : NOT_CONNECTED
+  }
+
+  return metrics.lastDelay ?? NOT_CONNECTED
 })
 
 const getLatencyTimelineChartState = (

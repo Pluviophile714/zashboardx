@@ -73,9 +73,14 @@ const props = defineProps<{
   loading?: boolean
   groupName?: string
   disableHistoryTip?: boolean
+  latencyOverride?: number | null
 }>()
 const latencyRef = ref()
-const latency = computed(() => getLatencyByName(props.name ?? '', props.groupName))
+const latency = computed(() =>
+  props.latencyOverride !== undefined
+    ? (props.latencyOverride ?? NOT_CONNECTED)
+    : getLatencyByName(props.name ?? '', props.groupName),
+)
 let countUp: CountUp | null = null
 
 onMounted(() => {

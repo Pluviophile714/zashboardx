@@ -665,6 +665,25 @@ test('uses the shared recent-30 R5S samples for the first-level latency stabilit
   assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
 })
 
+test('uses the shared R5S latest sample for the first-level latency tag', () => {
+  assert.match(proxyNodeCardSource, /<LatencyTag[\s\S]*:latency-override="cardLatencyOverride"/)
+
+  const overrideSourceStart = proxyNodeCardSource.indexOf('const cardLatencyOverride = computed')
+  const overrideSourceEnd = proxyNodeCardSource.indexOf(
+    'const getLatencyTimelineChartState =',
+    overrideSourceStart,
+  )
+  const overrideSource = proxyNodeCardSource.slice(overrideSourceStart, overrideSourceEnd)
+
+  assert.match(overrideSource, /proxyMetricsSamplesMap\.value/)
+  assert.match(
+    overrideSource,
+    /getProxyMetricsSamplesCacheKey\(sourceName, '24h', LATENCY_DETAIL_SEGMENTS\)/,
+  )
+  assert.match(overrideSource, /latest\.success && latest\.delay !== null/)
+  assert.match(overrideSource, /metrics\.lastDelay/)
+})
+
 test('animates first-level latency samples by stable identity when the shared window appends', () => {
   assert.match(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
   assert.match(proxyNodeCardSource, /:key="segment\.identity"/)
