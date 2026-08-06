@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   classifyRecentSampleUpdate,
   getProxyMetricsSampleIdentity,
+  reconcileMetricsNodeRecentSamples,
   reconcileRecentSampleUpdate,
 } from '../proxyMetricsRecentSamples.ts'
 
@@ -59,4 +60,23 @@ test('uses timestamp and outcome fields to identify a probe sample', () => {
   const second = sample('2026-08-06T10:00:00.000Z', null)
 
   assert.notEqual(getProxyMetricsSampleIdentity(first), getProxyMetricsSampleIdentity(second))
+})
+
+test('reconciles recent samples embedded in the metrics nodes response', () => {
+  const cacheKey = '24h\n30\nHK-01'
+  const previous = {
+    [cacheKey]: [sample('2026-08-06T10:00:00.000Z'), sample('2026-08-06T10:01:00.000Z')],
+  }
+  const next = {
+    'HK-01': {
+      recentSamples: [sample('2026-08-06T10:01:00.000Z'), sample('2026-08-06T10:02:00.000Z', 120)],
+    },
+  }
+
+  const updates = reconcileMetricsNodeRecentSamples(previous, next, (nodeName) => {
+    return `24h\n30\n${nodeName}`
+  })
+
+  assert.equal(updates[cacheKey]?.kind, 'appended')
+  assert.deepEqual(updates[cacheKey]?.samples, next['HK-01'].recentSamples)
 })

@@ -74,3 +74,39 @@ export const reconcileRecentSampleUpdate = (
     samples: kind === 'unchanged' && previous ? previous : next,
   }
 }
+
+export const reconcileMetricsNodeRecentSamples = (
+  previousSamplesByKey: Record<string, ProxyMetricsSample[]>,
+  nodes: Record<string, { recentSamples?: ProxyMetricsSample[] }>,
+  getCacheKey: (nodeName: string) => string,
+) => {
+  const updates: Record<
+    string,
+    { kind: ProxyMetricsSampleUpdateKind; samples: ProxyMetricsSample[] }
+  > = {}
+
+  for (const [nodeName, node] of Object.entries(nodes)) {
+    if (!Array.isArray(node.recentSamples)) {
+      continue
+    }
+
+    const key = getCacheKey(nodeName)
+    const previous = previousSamplesByKey[key]
+    const previousLastTimestamp = Date.parse(previous?.at(-1)?.timestamp ?? '')
+    const nextLastTimestamp = Date.parse(node.recentSamples.at(-1)?.timestamp ?? '')
+
+    if (
+      previous?.length &&
+      Number.isFinite(previousLastTimestamp) &&
+      Number.isFinite(nextLastTimestamp) &&
+      nextLastTimestamp < previousLastTimestamp
+    ) {
+      updates[key] = { kind: 'unchanged', samples: previous }
+      continue
+    }
+
+    updates[key] = reconcileRecentSampleUpdate(previous, node.recentSamples)
+  }
+
+  return updates
+}

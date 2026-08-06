@@ -11,6 +11,7 @@ import {
   type ProxyMetricsTimelineWindow,
 } from '../api/metricsHelper.ts'
 import {
+  reconcileMetricsNodeRecentSamples,
   reconcileRecentSampleUpdate,
   type ProxyMetricsSampleUpdateKind,
 } from '../helper/proxyMetricsRecentSamples.ts'
@@ -72,6 +73,27 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
     }
 
     proxyMetricsMap.value = response.nodes
+    const recentSampleUpdates = reconcileMetricsNodeRecentSamples(
+      proxyMetricsSamplesMap.value,
+      response.nodes,
+      (nodeName) => getProxyMetricsSamplesCacheKey(nodeName, '24h', 30),
+    )
+
+    if (Object.keys(recentSampleUpdates).length) {
+      const nextSamplesMap = { ...proxyMetricsSamplesMap.value }
+      const nextUpdatesMap = { ...proxyMetricsSamplesUpdateMap.value }
+      const updatedAt = Date.now()
+
+      for (const [key, update] of Object.entries(recentSampleUpdates)) {
+        nextSamplesMap[key] = update.samples
+        nextUpdatesMap[key] = update.kind
+        proxyMetricsSamplesFetchTimeMap.set(key, updatedAt)
+      }
+
+      proxyMetricsSamplesMap.value = nextSamplesMap
+      proxyMetricsSamplesUpdateMap.value = nextUpdatesMap
+    }
+
     proxyMetricsAvailable.value = true
     proxyMetricsRequestFailed.value = false
     proxyMetricsUpdatedAt.value = Date.parse(response.generatedAt) || Date.now()
@@ -80,20 +102,6 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
   })
 
   return pendingRefresh
-}
-
-export const refreshProxyMetricsRecentSamples = async (options: { force?: boolean } = {}) => {
-  const nodeNames = Object.keys(proxyMetricsMap.value)
-
-  await Promise.all(
-    nodeNames.map((nodeName) =>
-      refreshProxyMetricsSamples(nodeName, {
-        force: options.force,
-        limit: 30,
-        window: '24h',
-      }),
-    ),
-  )
 }
 
 export const refreshProxyMetricsSamples = async (
