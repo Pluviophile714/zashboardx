@@ -63,7 +63,7 @@ import { PROXY_TAB_TYPE } from '@/constant'
 import { isMiddleScreen } from '@/helper/utils'
 import { fetchProxies } from '@/assembly/proxies'
 import { proxiesTabShow } from '@/assembly/proxies'
-import { refreshProxyMetrics } from '@/store/proxyMetrics'
+import { refreshProxyMetrics, refreshProxyMetricsRecentSamples } from '@/store/proxyMetrics'
 import { disableProxiesPageTextSelect, twoColumnProxyGroup } from '@/store/settings'
 import { folderManagerOpen, isProxyFolderModeActive } from '@/store/proxyFolders'
 import { useSessionStorage } from '@vueuse/core'
@@ -120,11 +120,13 @@ onMounted(() => {
     nextTick(() => {
       waitTickUntilReady()
       void fetchProxies().finally(() => {
-        void refreshProxyMetrics({ force: true })
+        void refreshProxyMetrics({ force: true }).then(() =>
+          refreshProxyMetricsRecentSamples({ force: true }),
+        )
       })
     })
     metricsRefreshTimer = setInterval(() => {
-      void refreshProxyMetrics()
+      void refreshProxyMetrics().then(() => refreshProxyMetricsRecentSamples())
     }, 30 * 1000)
   })
 })

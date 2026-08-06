@@ -10,6 +10,10 @@ import {
   type ProxyMetricsTimelineResponse,
   type ProxyMetricsTimelineWindow,
 } from '../api/metricsHelper.ts'
+import {
+  reconcileRecentSampleUpdate,
+  type ProxyMetricsSampleUpdateKind,
+} from '../helper/proxyMetricsRecentSamples.ts'
 
 const PROXY_METRICS_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_SAMPLES_CACHE_TTL = 30 * 1000
@@ -30,6 +34,9 @@ const pendingBucketSamplesRefreshMap = new Map<
 
 export const proxyMetricsMap = shallowRef<Record<string, ProxyMetricsNode>>({})
 export const proxyMetricsSamplesMap = shallowRef<Record<string, ProxyMetricsSample[]>>({})
+export const proxyMetricsSamplesUpdateMap = shallowRef<
+  Record<string, ProxyMetricsSampleUpdateKind>
+>({})
 export const proxyMetricsTimelineMap = shallowRef<Record<string, ProxyMetricsTimelineResponse>>({})
 export const proxyMetricsBucketSamplesMap = shallowRef<
   Record<string, ProxyMetricsBucketSamplesResponse>
@@ -75,6 +82,20 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
   return pendingRefresh
 }
 
+export const refreshProxyMetricsRecentSamples = async (options: { force?: boolean } = {}) => {
+  const nodeNames = Object.keys(proxyMetricsMap.value)
+
+  await Promise.all(
+    nodeNames.map((nodeName) =>
+      refreshProxyMetricsSamples(nodeName, {
+        force: options.force,
+        limit: 30,
+        window: '24h',
+      }),
+    ),
+  )
+}
+
 export const refreshProxyMetricsSamples = async (
   nodeName: string,
   options: { force?: boolean; limit?: number; window?: string } = {},
@@ -110,13 +131,37 @@ export const refreshProxyMetricsSamples = async (
       return null
     }
 
+    const previous = proxyMetricsSamplesMap.value[key]
+    const previousLastTimestamp = Date.parse(previous?.at(-1)?.timestamp ?? '')
+    const responseLastTimestamp = Date.parse(response.samples.at(-1)?.timestamp ?? '')
+
+    if (
+      previous?.length &&
+      Number.isFinite(previousLastTimestamp) &&
+      Number.isFinite(responseLastTimestamp) &&
+      responseLastTimestamp < previousLastTimestamp
+    ) {
+      proxyMetricsSamplesFetchTimeMap.set(key, Date.now())
+      proxyMetricsSamplesUpdateMap.value = {
+        ...proxyMetricsSamplesUpdateMap.value,
+        [key]: 'unchanged',
+      }
+
+      return previous
+    }
+
+    const update = reconcileRecentSampleUpdate(previous, response.samples)
     proxyMetricsSamplesFetchTimeMap.set(key, Date.now())
     proxyMetricsSamplesMap.value = {
       ...proxyMetricsSamplesMap.value,
-      [key]: response.samples,
+      [key]: update.samples,
+    }
+    proxyMetricsSamplesUpdateMap.value = {
+      ...proxyMetricsSamplesUpdateMap.value,
+      [key]: update.kind,
     }
 
-    return response.samples
+    return update.samples
   })().finally(() => {
     pendingSamplesRefreshMap.delete(key)
   })
@@ -125,6 +170,13 @@ export const refreshProxyMetricsSamples = async (
 
   return request
 }
+
+export const getProxyMetricsSamplesUpdateKind = (
+  nodeName: string,
+  metricsWindow = '24h',
+  limit = 30,
+) =>
+  proxyMetricsSamplesUpdateMap.value[getProxyMetricsSamplesCacheKey(nodeName, metricsWindow, limit)]
 
 export const getProxyMetricsSamplesCacheKey = (
   nodeName: string,

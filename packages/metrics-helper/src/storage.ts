@@ -258,7 +258,7 @@ export class MetricsStorage {
     for (const row of this.#metricRows(windowSeconds, nowMs)) {
       metrics[row.node_name] = {
         ...this.#nodeMetricsFromRow(row),
-        recentSamples: this.getRecentProbeSamples(row.node_name, windowSeconds, 10, nowMs),
+        recentSamples: this.getRecentProbeSamples(row.node_name, windowSeconds, 30, nowMs),
       }
     }
 
@@ -271,7 +271,7 @@ export class MetricsStorage {
     return row
       ? {
           ...this.#nodeMetricsFromRow(row),
-          recentSamples: this.getRecentProbeSamples(nodeName, windowSeconds, 10, nowMs),
+          recentSamples: this.getRecentProbeSamples(nodeName, windowSeconds, 30, nowMs),
         }
       : null
   }
