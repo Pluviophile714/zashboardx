@@ -485,11 +485,13 @@ const getR5sLatencySampleSourceName = () =>
   getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
 
 const getLatencyStabilityHistory = () => {
+  const metrics = getSharedMetricsResolution()?.metrics
   const sourceName = getR5sLatencySampleSourceName()
-  const r5sSamples =
-    proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-    ]
+  const r5sSamples = metrics?.recentSamples?.length
+    ? metrics.recentSamples
+    : proxyMetricsSamplesMap.value[
+        getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+      ]
 
   if (r5sSamples?.length) {
     return r5sSamples.map((sample) => ({

@@ -167,7 +167,9 @@ const renderTimelineChart = (
     onWindowChange?: (window: '1h' | '6h' | '24h') => void
     compact?: boolean
     inputMode?: 'coarse' | 'fine'
+    jitter?: number | null
     selectedBucketIndex?: number
+    window?: '1h' | '6h' | '24h'
   } = {},
 ) => {
   Object.defineProperty(globalThis, 'document', {
@@ -183,6 +185,7 @@ const renderTimelineChart = (
         bucketSeconds: 900,
         buckets,
         generatedAt: '2026-07-04T00:30:00.000Z',
+        jitter: callbacks.jitter ?? null,
         nodeName: 'HK-01',
         windowSeconds: 86_400,
       },
@@ -198,7 +201,7 @@ const renderTimelineChart = (
         callbacks.selectedBucketIndex === undefined
           ? undefined
           : buckets[callbacks.selectedBucketIndex],
-      window: '6h',
+      window: callbacks.window ?? '6h',
     },
   ) as unknown as TestElement
 
@@ -589,8 +592,22 @@ test('activates the bucket represented by the current guide through the chart-wi
   assert.deepEqual(bucketActivations, [1])
 })
 
-test('shows selected bucket jitter next to its range details', () => {
-  assert.match(timelineChartSource, /'波动'/)
+test('shows 1h jitter in the header and removes jitter from its bucket details', () => {
+  const { section, svg, tooltip } = renderTimelineChart({ jitter: 23, window: '1h' })
+
+  assert.equal(
+    findElements(section, (element) => element.textContent === '1h 抖动: 23ms').length,
+    1,
+  )
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  assert.equal(findElements(tooltip, (element) => element.textContent === '波动').length, 0)
+})
+
+test('keeps bucket jitter details for longer timeline windows', () => {
+  const { svg, tooltip } = renderTimelineChart({ window: '6h' })
+
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  assert.equal(findElements(tooltip, (element) => element.textContent === '波动').length, 1)
 })
 
 test('restores the active bucket instead of resetting the guide to the latest sample', () => {
@@ -632,10 +649,10 @@ test('keeps the node title from shrinking when a detail popover is height constr
   )
 })
 
-test('uses cached R5S samples for the first-level latency stability bar', () => {
+test('uses periodically refreshed R5S samples for the first-level latency stability bar', () => {
   assert.match(
     proxyNodeCardSource,
-    /const getLatencyStabilityHistory = \(\) => \{[\s\S]*proxyMetricsSamplesMap\.value[\s\S]*return r5sSamples[\s\S]*getHistoryByName/,
+    /const getLatencyStabilityHistory = \(\) => \{[\s\S]*metrics\.recentSamples[\s\S]*return r5sSamples[\s\S]*getHistoryByName/,
   )
   assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
 })

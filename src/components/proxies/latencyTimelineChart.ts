@@ -121,6 +121,15 @@ export const createLatencyTimelineChartSection = (
   source.className = 'min-w-0 flex-1 truncate text-[10px] text-base-content/45'
   source.textContent = options.sourceLabel ? `来源 ${options.sourceLabel}` : ''
   headerInfo.append(title)
+  if (selectedWindow === '1h') {
+    const jitter = document.createElement('span')
+    const windowJitter =
+      state.status === 'ready' || state.status === 'empty' ? state.timeline.jitter : null
+
+    jitter.className = 'shrink-0 text-[10px] text-base-content/55'
+    jitter.textContent = `1h 抖动: ${windowJitter === null ? '--' : `${Math.round(windowJitter)}ms`}`
+    headerInfo.append(jitter)
+  }
   if (source.textContent) {
     headerInfo.append(source)
   }
@@ -358,11 +367,13 @@ export const createLatencyTimelineChartSection = (
     if (bucket.successCount > 0) {
       appendTooltipLine(tooltip, '平均', `${Math.round(bucket.avgDelay ?? 0)}ms`)
       appendTooltipLine(tooltip, '范围', `${bucket.minDelay ?? 0}-${bucket.maxDelay ?? 0}ms`)
-      appendTooltipLine(
-        tooltip,
-        '波动',
-        bucket.jitter === null ? '--' : `${Math.round(bucket.jitter)}ms`,
-      )
+      if (selectedWindow !== '1h') {
+        appendTooltipLine(
+          tooltip,
+          '波动',
+          bucket.jitter === null ? '--' : `${Math.round(bucket.jitter)}ms`,
+        )
+      }
     } else {
       appendTooltipLine(tooltip, '延迟', bucket.sampleCount ? '测速失败' : '无样本')
     }

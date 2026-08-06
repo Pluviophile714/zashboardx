@@ -256,7 +256,10 @@ export class MetricsStorage {
     const metrics: Record<string, NodeMetrics> = {}
 
     for (const row of this.#metricRows(windowSeconds, nowMs)) {
-      metrics[row.node_name] = this.#nodeMetricsFromRow(row)
+      metrics[row.node_name] = {
+        ...this.#nodeMetricsFromRow(row),
+        recentSamples: this.getRecentProbeSamples(row.node_name, windowSeconds, 10, nowMs),
+      }
     }
 
     return metrics
@@ -265,7 +268,12 @@ export class MetricsStorage {
   getSingleNodeMetrics(nodeName: string, windowSeconds: number, nowMs = Date.now()) {
     const row = this.#metricRows(windowSeconds, nowMs, nodeName)[0]
 
-    return row ? this.#nodeMetricsFromRow(row) : null
+    return row
+      ? {
+          ...this.#nodeMetricsFromRow(row),
+          recentSamples: this.getRecentProbeSamples(nodeName, windowSeconds, 10, nowMs),
+        }
+      : null
   }
 
   getNodeTimeline(
@@ -367,6 +375,33 @@ export class MetricsStorage {
         jitter: row?.jitter === null || row === undefined ? null : Number(row.jitter),
       }
     })
+  }
+
+  getNodeJitter(nodeName: string, windowSeconds: number, nowMs = Date.now()) {
+    const windowStart = new Date(nowMs - windowSeconds * 1000).toISOString()
+    const now = new Date(nowMs).toISOString()
+    const row = this.#db
+      .prepare(
+        `
+        WITH successful_samples AS (
+          SELECT
+            delay,
+            LAG(delay) OVER (ORDER BY timestamp ASC, id ASC) AS previous_delay
+          FROM probe_samples
+          WHERE node_name = ?
+            AND timestamp >= ?
+            AND timestamp <= ?
+            AND success = 1
+            AND delay IS NOT NULL
+        )
+        SELECT AVG(ABS(delay - previous_delay)) AS jitter
+        FROM successful_samples
+        WHERE previous_delay IS NOT NULL
+      `,
+      )
+      .get(nodeName, windowStart, now) as { jitter: number | null }
+
+    return row.jitter === null ? null : Number(row.jitter)
   }
 
   getProbeSamplesBetween(

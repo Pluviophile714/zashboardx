@@ -84,6 +84,7 @@ test('serves health and node metrics as JSON', async () => {
           availability: number | null
           firstSampleAt: string | null
           lastSampleAt: string | null
+          recentSamples?: { delay: number | null; success: boolean; timestamp: string }[]
           sampleCount: number
         }
       >
@@ -95,6 +96,15 @@ test('serves health and node metrics as JSON', async () => {
     assert.equal(nodesBody.nodes['HK-01'].firstSampleAt, at(0))
     assert.equal(nodesBody.nodes['HK-01'].lastSampleAt, at(0))
     assert.equal(nodesBody.nodes['HK-01'].sampleCount, 1)
+    assert.deepEqual(nodesBody.nodes['HK-01'].recentSamples, [
+      {
+        nodeName: 'HK-01',
+        testUrl: 'https://example.com',
+        timestamp: at(0),
+        delay: 80,
+        success: true,
+      },
+    ])
 
     const nodeResponse = await fetch(`${baseUrl}/api/metrics/nodes/HK-01?window=24h`)
     const nodeBody = (await nodeResponse.json()) as {
@@ -353,6 +363,13 @@ test('serves fixed timeline profiles for a Unicode node name', async () => {
     delay: 95,
     success: true,
   })
+  storage.insertProbeSample({
+    nodeName,
+    testUrl: 'https://example.com',
+    timestamp: at(29),
+    delay: 85,
+    success: true,
+  })
 
   const server = createMetricsServer({
     storage,
@@ -385,6 +402,7 @@ test('serves fixed timeline profiles for a Unicode node name', async () => {
         bucketSeconds: number
         buckets: { sampleCount: number }[]
         generatedAt: string
+        jitter: number | null
         nodeName: string
         windowSeconds: number
       }
@@ -394,9 +412,10 @@ test('serves fixed timeline profiles for a Unicode node name', async () => {
       assert.equal(body.windowSeconds, timelineCase.windowSeconds)
       assert.equal(body.generatedAt, at(30))
       assert.equal(body.nodeName, nodeName)
+      assert.equal(body.jitter, 10)
       assert.equal(body.bucketSeconds, timelineCase.bucketSeconds)
       assert.equal(body.buckets.length, timelineCase.bucketCount)
-      assert.equal(body.buckets[timelineCase.bucketCount - 1].sampleCount, 1)
+      assert.equal(body.buckets[timelineCase.bucketCount - 1].sampleCount, 2)
     }
   } finally {
     server.close()

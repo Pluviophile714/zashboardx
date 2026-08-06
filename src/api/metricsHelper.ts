@@ -14,6 +14,7 @@ export type ProxyMetricsNode = {
   lastFailureAt: string | null
   lossRate: number | null
   lossSource: 'official' | 'probe' | 'log-inferred' | null
+  recentSamples?: ProxyMetricsSample[]
 }
 
 export type ProxyMetricsResponse = {
@@ -90,6 +91,7 @@ export type ProxyMetricsTimelineResponse = {
   generatedAt: string
   nodeName: string
   bucketSeconds: number
+  jitter: number | null
   buckets: ProxyMetricsTimelineBucket[]
 }
 
@@ -470,6 +472,17 @@ export const fetchProxyMetricsTimelineAPI = async (
     }
 
     const normalizedBuckets = buckets as ProxyMetricsTimelineBucket[]
+    const jitter = data.jitter === undefined ? null : normalizeTimelineDelay(data.jitter)
+
+    if (jitter === undefined) {
+      return null
+    }
+
+    const successCount = normalizedBuckets.reduce((total, bucket) => total + bucket.successCount, 0)
+
+    if (successCount < 2 && jitter !== null) {
+      return null
+    }
 
     for (let index = 0; index < normalizedBuckets.length; index += 1) {
       const bucket = normalizedBuckets[index]
@@ -496,6 +509,7 @@ export const fetchProxyMetricsTimelineAPI = async (
       generatedAt: new Date(generatedAtMs).toISOString(),
       nodeName: data.nodeName,
       bucketSeconds: data.bucketSeconds,
+      jitter,
       buckets: normalizedBuckets,
     }
   } catch {

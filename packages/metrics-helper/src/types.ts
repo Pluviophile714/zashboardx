@@ -49,6 +49,7 @@ export type NodeMetrics = {
   lastFailureAt: string | null
   lossRate: number | null
   lossSource: LossSource | null
+  recentSamples?: ProbeSample[]
 }
 
 export type HelperHealth = {

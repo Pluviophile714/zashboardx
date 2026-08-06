@@ -132,6 +132,80 @@ test('aggregates delay ranges from successful samples only', () => {
   storage.close()
 })
 
+test('includes the latest ten raw samples in node metrics in chronological order', () => {
+  const storage = createStorage()
+
+  for (let minute = 0; minute < 12; minute += 1) {
+    storage.insertProbeSample({
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com',
+      timestamp: at(minute),
+      delay: minute === 8 ? null : 80 + minute,
+      success: minute !== 8,
+      ...(minute === 8 ? { errorType: 'timeout' } : {}),
+    })
+  }
+
+  const metrics = storage.getNodeMetrics(24 * 60 * 60, Date.parse(at(20)))['HK-01']
+
+  assert.deepEqual(
+    metrics.recentSamples?.map((sample) => ({
+      timestamp: sample.timestamp,
+      delay: sample.delay,
+      success: sample.success,
+      errorType: sample.errorType,
+    })),
+    [
+      ...Array.from({ length: 10 }, (_, index) => ({
+        timestamp: at(index + 2),
+        delay: index + 2 === 8 ? null : 80 + index + 2,
+        success: index + 2 !== 8,
+        errorType: index + 2 === 8 ? 'timeout' : undefined,
+      })),
+    ],
+  )
+
+  storage.close()
+})
+
+test('calculates window jitter across successful samples and ignores failures', () => {
+  const storage = createStorage()
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(0),
+    delay: 100,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(5),
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(10),
+    delay: 160,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(20),
+    delay: 130,
+    success: true,
+  })
+
+  assert.equal(storage.getNodeJitter('HK-01', 60 * 60, Date.parse(at(30))), 45)
+  assert.equal(storage.getNodeJitter('HK-01', 60 * 60, Date.parse(at(1))), null)
+  storage.close()
+})
+
 test('returns null for a single node without samples in the window', () => {
   const storage = createStorage()
 

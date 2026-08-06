@@ -255,6 +255,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         generatedAt: new Date(nowMs).toISOString(),
         nodeName,
         bucketSeconds: profile.windowSeconds / profile.bucketCount,
+        jitter: options.storage.getNodeJitter(nodeName, profile.windowSeconds, nowMs),
         buckets: options.storage.getNodeTimeline(
           nodeName,
           profile.windowSeconds,

@@ -40,6 +40,7 @@ const createTimelineResponse = (
     bucketSeconds: profile.bucketSeconds,
     buckets,
     generatedAt: new Date(startMs + profile.windowSeconds * 1000).toISOString(),
+    jitter: 23,
     nodeName: 'HK-01',
     windowSeconds: profile.windowSeconds,
     ...overrides,
@@ -168,6 +169,7 @@ for (const window of ['1h', '6h', '24h'] as const) {
       assert.equal(result?.windowSeconds, getProxyMetricsTimelineProfile(window).windowSeconds)
       assert.equal(result?.bucketSeconds, getProxyMetricsTimelineProfile(window).bucketSeconds)
       assert.equal(result?.buckets.length, getProxyMetricsTimelineProfile(window).bucketCount)
+      assert.equal(result?.jitter, 23)
     })
   })
 
@@ -198,3 +200,12 @@ for (const window of ['1h', '6h', '24h'] as const) {
     })
   })
 }
+
+test('defaults missing window jitter to null for an older helper response', async () => {
+  const response = createTimelineResponse('1h')
+  delete response.jitter
+
+  await withTimelineResponse(response, async () => {
+    assert.equal((await fetchProxyMetricsTimelineAPI('HK-01', '1h'))?.jitter, null)
+  })
+})
