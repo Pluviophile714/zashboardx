@@ -649,12 +649,27 @@ test('keeps the node title from shrinking when a detail popover is height constr
   )
 })
 
-test('uses periodically refreshed R5S samples for the first-level latency stability bar', () => {
-  assert.match(
-    proxyNodeCardSource,
-    /const getLatencyStabilityHistory = \(\) => \{[\s\S]*metrics\.recentSamples[\s\S]*return r5sSamples[\s\S]*getHistoryByName/,
+test('uses the shared recent-30 R5S samples for the first-level latency stability bar', () => {
+  const stabilitySourceStart = proxyNodeCardSource.indexOf('const getLatencyStabilityHistory =')
+  const stabilitySourceEnd = proxyNodeCardSource.indexOf(
+    'const latencyStabilityBar =',
+    stabilitySourceStart,
   )
+  const stabilitySource = proxyNodeCardSource.slice(stabilitySourceStart, stabilitySourceEnd)
+
+  assert.match(
+    stabilitySource,
+    /proxyMetricsSamplesMap\.value\[[\s\S]*getProxyMetricsSamplesCacheKey\(sourceName, '24h', LATENCY_DETAIL_SEGMENTS\)/,
+  )
+  assert.doesNotMatch(stabilitySource, /metrics\.recentSamples/)
   assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
+})
+
+test('animates first-level latency samples by stable identity when the shared window appends', () => {
+  assert.match(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
+  assert.match(proxyNodeCardSource, /:key="segment\.identity"/)
+  assert.match(proxyNodeCardSource, /latency-strip-move/)
+  assert.match(proxyNodeCardSource, /prefers-reduced-motion/)
 })
 
 test('uses a short desktop hover delay without changing the mobile long-press trigger', () => {

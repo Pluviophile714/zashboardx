@@ -132,7 +132,7 @@ test('aggregates delay ranges from successful samples only', () => {
   storage.close()
 })
 
-test('includes the latest ten raw samples in node metrics in chronological order', () => {
+test('includes the latest thirty raw samples in node metrics in chronological order', () => {
   const storage = createStorage()
 
   for (let minute = 0; minute < 12; minute += 1) {
@@ -156,11 +156,11 @@ test('includes the latest ten raw samples in node metrics in chronological order
       errorType: sample.errorType,
     })),
     [
-      ...Array.from({ length: 10 }, (_, index) => ({
-        timestamp: at(index + 2),
-        delay: index + 2 === 8 ? null : 80 + index + 2,
-        success: index + 2 !== 8,
-        errorType: index + 2 === 8 ? 'timeout' : undefined,
+      ...Array.from({ length: 12 }, (_, index) => ({
+        timestamp: at(index),
+        delay: index === 8 ? null : 80 + index,
+        success: index !== 8,
+        errorType: index === 8 ? 'timeout' : undefined,
       })),
     ],
   )

@@ -62,16 +62,23 @@
     </div>
 
     <div
-      class="flex w-full gap-px overflow-hidden rounded-full"
+      class="w-full overflow-hidden rounded-full"
       :class="isSmallCard ? 'h-1' : 'h-1.5'"
       aria-hidden="true"
     >
-      <div
-        v-for="(segment, index) in latencyStabilityBar"
-        :key="index"
-        class="h-full min-w-0 flex-1"
-        :class="segment.class"
-      />
+      <TransitionGroup
+        tag="div"
+        name="latency-strip"
+        class="flex h-full w-full gap-px"
+        :css="latencyStabilityAnimationName === 'latency-strip'"
+      >
+        <div
+          v-for="segment in latencyStabilityBar"
+          :key="segment.identity"
+          class="h-full min-w-0 flex-1"
+          :class="segment.class"
+        />
+      </TransitionGroup>
     </div>
   </div>
 </template>
@@ -92,6 +99,7 @@ import {
   getLatencyDetailsViewportSize,
 } from '@/helper/latencyDetailsViewport'
 import { getLatencySampleIndexAtPointer } from '@/helper/latencySampleSelection'
+import { getProxyMetricsSampleIdentity } from '@/helper/proxyMetricsRecentSamples'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
 import {
@@ -113,6 +121,7 @@ import {
 } from '@/store/settings'
 import {
   getProxyMetricsSamplesCacheKey,
+  getProxyMetricsSamplesUpdateKind,
   getProxyMetricsTimelineCacheKey,
   invalidateProxyMetricsTimeline,
   proxyMetricsMap,
@@ -485,35 +494,49 @@ const getR5sLatencySampleSourceName = () =>
   getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
 
 const getLatencyStabilityHistory = () => {
-  const metrics = getSharedMetricsResolution()?.metrics
   const sourceName = getR5sLatencySampleSourceName()
-  const r5sSamples = metrics?.recentSamples?.length
-    ? metrics.recentSamples
-    : proxyMetricsSamplesMap.value[
-        getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-      ]
+  const r5sSamples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ]
 
   if (r5sSamples?.length) {
     return r5sSamples.map((sample) => ({
       delay: sample.success && sample.delay !== null ? sample.delay : NOT_CONNECTED,
+      identity: getProxyMetricsSampleIdentity(sample),
     }))
   }
 
-  return getHistoryByName(props.name, props.groupName) ?? []
+  return (getHistoryByName(props.name, props.groupName) ?? []).map((item, index) => ({
+    delay: item.delay,
+    identity: `local:${item.time}:${item.delay}:${index}`,
+  }))
 }
 
 const latencyStabilityBar = computed(() => {
   const history = getLatencyStabilityHistory()
   const recentHistory = history.slice(-LATENCY_BAR_SEGMENTS)
-  const emptySegments: { delay?: number }[] = Array.from(
+  const emptySegments = Array.from(
     { length: Math.max(0, LATENCY_BAR_SEGMENTS - recentHistory.length) },
-    () => ({}),
+    (_, index) => ({ delay: undefined, identity: `placeholder:${index}` }),
   )
-  const recentSegments = recentHistory.map((item) => ({ delay: item.delay }))
+  const recentSegments = recentHistory.map((item) => ({
+    delay: item.delay,
+    identity: item.identity,
+  }))
 
   return [...emptySegments, ...recentSegments].map((item) => ({
     class: getLatencySegmentClass(item?.delay),
+    identity: item.identity,
   }))
+})
+
+const latencyStabilityAnimationName = computed(() => {
+  const sourceName = getR5sLatencySampleSourceName()
+
+  return getProxyMetricsSamplesUpdateKind(sourceName, '24h', LATENCY_DETAIL_SEGMENTS) === 'appended'
+    ? 'latency-strip'
+    : ''
 })
 
 const getLatencyTimelineChartState = (
@@ -1434,5 +1457,34 @@ onUnmounted(() => {
 <style scoped>
 .tooltip:before {
   z-index: 20;
+}
+
+.latency-strip-move {
+  transition: transform 250ms ease;
+}
+
+.latency-strip-enter-active,
+.latency-strip-leave-active {
+  transition:
+    opacity 250ms ease,
+    transform 250ms ease;
+}
+
+.latency-strip-enter-from {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+.latency-strip-leave-to {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .latency-strip-move,
+  .latency-strip-enter-active,
+  .latency-strip-leave-active {
+    transition-duration: 0ms;
+  }
 }
 </style>
