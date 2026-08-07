@@ -684,10 +684,16 @@ test('uses the shared R5S latest sample for the first-level latency tag', () => 
   assert.match(overrideSource, /metrics\.lastDelay/)
 })
 
-test('animates first-level latency samples by stable identity when the shared window appends', () => {
-  assert.match(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
+test('animates first-level latency samples by translating one fixed track', () => {
+  assert.doesNotMatch(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
+  assert.match(proxyNodeCardSource, /class="latency-strip-track"/)
+  assert.match(proxyNodeCardSource, /latency-strip-track--appending/)
+  assert.match(proxyNodeCardSource, /latency-strip-track--sliding/)
   assert.match(proxyNodeCardSource, /:key="segment\.identity"/)
-  assert.match(proxyNodeCardSource, /latency-strip-move/)
+  assert.match(proxyNodeCardSource, /requestAnimationFrame/)
+  assert.match(proxyNodeCardSource, /@transitionend="finishLatencyStripAnimation"/)
+  assert.match(proxyNodeCardSource, /translate3d/)
+  assert.match(proxyNodeCardSource, /IntersectionObserver/)
   assert.match(proxyNodeCardSource, /prefers-reduced-motion/)
 })
 

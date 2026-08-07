@@ -67,19 +67,21 @@
       :class="isSmallCard ? 'h-1' : 'h-1.5'"
       aria-hidden="true"
     >
-      <TransitionGroup
-        tag="div"
-        name="latency-strip"
-        class="flex h-full w-full gap-px"
-        :css="latencyStabilityAnimationName === 'latency-strip'"
+      <div
+        class="latency-strip-track"
+        :class="{
+          'latency-strip-track--appending': latencyStripAppending,
+          'latency-strip-track--sliding': latencyStripSliding,
+        }"
+        @transitionend="finishLatencyStripAnimation"
       >
         <div
-          v-for="segment in latencyStabilityBar"
+          v-for="segment in latencyStripSegments"
           :key="segment.identity"
-          class="h-full min-w-0 flex-1"
+          class="h-full min-w-0"
           :class="segment.class"
         />
-      </TransitionGroup>
+      </div>
     </div>
   </div>
 </template>
@@ -138,7 +140,7 @@ import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import {
@@ -159,6 +161,7 @@ const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
 const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
 const LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000
 const LATENCY_BUCKET_DRILLDOWN_RESET_DELAY = 8000
+const LATENCY_STRIP_ANIMATION_FALLBACK_DELAY = 650
 const { t } = useI18n()
 const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
@@ -532,13 +535,116 @@ const latencyStabilityBar = computed(() => {
   }))
 })
 
-const latencyStabilityAnimationName = computed(() => {
-  const sourceName = getR5sLatencySampleSourceName()
+type LatencyStripSegment = (typeof latencyStabilityBar.value)[number]
 
-  return getProxyMetricsSamplesUpdateKind(sourceName, '24h', LATENCY_DETAIL_SEGMENTS) === 'appended'
-    ? 'latency-strip'
-    : ''
-})
+const latencyStripSegments = shallowRef<LatencyStripSegment[]>([])
+const latencyStripAppending = ref(false)
+const latencyStripSliding = ref(false)
+const latencyStripVisible = ref(true)
+let latencyStripPendingSegments: LatencyStripSegment[] | undefined
+let latencyStripFirstFrame: number | undefined
+let latencyStripSecondFrame: number | undefined
+let latencyStripFallbackTimer: ReturnType<typeof window.setTimeout> | undefined
+let latencyStripVisibilityObserver: IntersectionObserver | undefined
+
+const clearLatencyStripAnimationSchedule = () => {
+  if (latencyStripFirstFrame !== undefined) {
+    window.cancelAnimationFrame(latencyStripFirstFrame)
+    latencyStripFirstFrame = undefined
+  }
+  if (latencyStripSecondFrame !== undefined) {
+    window.cancelAnimationFrame(latencyStripSecondFrame)
+    latencyStripSecondFrame = undefined
+  }
+  if (latencyStripFallbackTimer !== undefined) {
+    window.clearTimeout(latencyStripFallbackTimer)
+    latencyStripFallbackTimer = undefined
+  }
+}
+
+const settleLatencyStrip = (segments: LatencyStripSegment[]) => {
+  clearLatencyStripAnimationSchedule()
+  latencyStripPendingSegments = undefined
+  latencyStripSliding.value = false
+  latencyStripAppending.value = false
+  latencyStripSegments.value = segments
+}
+
+const finishLatencyStripAnimation = (event?: TransitionEvent) => {
+  if (event && event.propertyName !== 'transform') {
+    return
+  }
+
+  settleLatencyStrip(latencyStripPendingSegments ?? latencyStabilityBar.value)
+}
+
+const isSameLatencyStripSlot = (first: LatencyStripSegment, second: LatencyStripSegment) =>
+  first.identity === second.identity ||
+  (first.identity.startsWith('placeholder:') && second.identity.startsWith('placeholder:'))
+
+const canAnimateLatencyStripAppend = (
+  previous: LatencyStripSegment[],
+  next: LatencyStripSegment[],
+) =>
+  previous.length === LATENCY_BAR_SEGMENTS &&
+  next.length === LATENCY_BAR_SEGMENTS &&
+  previous.at(-1)?.identity !== next.at(-1)?.identity &&
+  previous.slice(1).every((segment, index) => isSameLatencyStripSlot(segment, next[index]))
+
+const startLatencyStripAnimation = (
+  previous: LatencyStripSegment[],
+  next: LatencyStripSegment[],
+) => {
+  const newestSegment = next.at(-1)
+
+  if (!newestSegment) {
+    settleLatencyStrip(next)
+    return
+  }
+
+  clearLatencyStripAnimationSchedule()
+  latencyStripPendingSegments = next
+  latencyStripSegments.value = [...previous, newestSegment]
+  latencyStripAppending.value = true
+  latencyStripSliding.value = false
+
+  latencyStripFirstFrame = window.requestAnimationFrame(() => {
+    latencyStripFirstFrame = undefined
+    latencyStripSecondFrame = window.requestAnimationFrame(() => {
+      latencyStripSecondFrame = undefined
+      latencyStripSliding.value = true
+      latencyStripFallbackTimer = window.setTimeout(
+        () => finishLatencyStripAnimation(),
+        LATENCY_STRIP_ANIMATION_FALLBACK_DELAY,
+      )
+    })
+  })
+}
+
+watch(
+  latencyStabilityBar,
+  (next) => {
+    const previous = latencyStripSegments.value.slice(0, LATENCY_BAR_SEGMENTS)
+    const sourceName = getR5sLatencySampleSourceName()
+    const appended =
+      sourceName &&
+      getProxyMetricsSamplesUpdateKind(sourceName, '24h', LATENCY_DETAIL_SEGMENTS) === 'appended'
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+    if (
+      !appended ||
+      !latencyStripVisible.value ||
+      reducedMotion ||
+      !canAnimateLatencyStripAppend(previous, next)
+    ) {
+      settleLatencyStrip(next)
+      return
+    }
+
+    startLatencyStripAnimation(previous, next)
+  },
+  { immediate: true },
+)
 
 const cardLatencyOverride = computed(() => {
   const resolution = getSharedMetricsResolution()
@@ -1462,6 +1568,20 @@ const handlerLatencyTest = async () => {
 }
 
 onMounted(() => {
+  if (cardRef.value && typeof IntersectionObserver !== 'undefined') {
+    latencyStripVisibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        latencyStripVisible.value = entry?.isIntersecting ?? true
+
+        if (!latencyStripVisible.value && latencyStripAppending.value) {
+          finishLatencyStripAnimation()
+        }
+      },
+      { rootMargin: '80px 0px' },
+    )
+    latencyStripVisibilityObserver.observe(cardRef.value)
+  }
+
   if (props.active) {
     setTimeout(() => {
       scrollIntoCenter(cardRef.value)
@@ -1470,6 +1590,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearLatencyStripAnimationSchedule()
+  latencyStripVisibilityObserver?.disconnect()
+  latencyStripVisibilityObserver = undefined
   stopActiveLatencyDetailsRefresh()
   resetLatencyBucketDrilldownState()
   cleanupLatencyDetailsTip()
@@ -1481,31 +1604,29 @@ onUnmounted(() => {
   z-index: 20;
 }
 
-.latency-strip-move {
-  transition: transform 250ms ease;
+.latency-strip-track {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  width: 100%;
+  height: 100%;
+  gap: 1px;
+  contain: layout paint;
+  transform: translate3d(0, 0, 0);
 }
 
-.latency-strip-enter-active,
-.latency-strip-leave-active {
-  transition:
-    opacity 250ms ease,
-    transform 250ms ease;
+.latency-strip-track--appending {
+  grid-template-columns: repeat(11, minmax(0, 1fr));
+  width: calc(110% + 0.1px);
+  will-change: transform;
 }
 
-.latency-strip-enter-from {
-  opacity: 0;
-  transform: translateX(100%);
-}
-
-.latency-strip-leave-to {
-  opacity: 0;
-  transform: translateX(-100%);
+.latency-strip-track--sliding {
+  transform: translate3d(calc(-9.090909% - 0.090909px), 0, 0);
+  transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .latency-strip-move,
-  .latency-strip-enter-active,
-  .latency-strip-leave-active {
+  .latency-strip-track--sliding {
     transition-duration: 0ms;
   }
 }
