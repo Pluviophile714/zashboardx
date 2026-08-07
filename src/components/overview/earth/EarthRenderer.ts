@@ -38,8 +38,9 @@ const MAX_INITIAL_LATITUDE = 15
 const FLOW_DURATION_SECONDS = 0.85
 const FLOW_STREAK_LENGTH = 0.14
 const FLOW_STREAK_SEGMENTS = 14
-const UPLOAD_COLOR = new THREE.Color('#ffb45e')
-const DOWNLOAD_COLOR = new THREE.Color('#64d8ff')
+const UPLOAD_COLOR = new THREE.Color('#ffdc5e')
+const DOWNLOAD_COLOR = new THREE.Color('#3235ee')
+const FLOW_TAIL_COLOR = new THREE.Color('#5fcaff')
 const LINE_ORIGIN_COLOR = new THREE.Color('#b8f7ff')
 const LINE_DESTINATION_COLOR = new THREE.Color('#4f9dff')
 const ROLE_COLORS = {
@@ -56,9 +57,24 @@ const ROLE_SCALES = {
   origin: 1.18,
   destination: 1,
 } as const
+const FLAT_GLOBE_PALETTES = {
+  light: {
+    ocean: '#dce6f0',
+    land: '#65788d',
+  },
+  dark: {
+    ocean: '#243241',
+    land: '#8ca2b8',
+  },
+} as const
+
+type EarthColorScheme = 'dark' | 'light'
+type EarthVisualMode = 'flat' | 'space'
 
 interface RendererOptions {
   reducedMotion: boolean
+  visualMode: EarthVisualMode
+  colorScheme: EarthColorScheme
   onEndpointHover: (info: EarthEndpointInfo | null, x?: number, y?: number) => void
 }
 
@@ -76,6 +92,8 @@ export interface EarthRenderer {
   setRoutes: (routes: EarthRoute[]) => void
   setReducedMotion: (reduced: boolean) => void
   setAutoRotation: (enabled: boolean) => void
+  setVisualMode: (mode: EarthVisualMode) => void
+  setColorScheme: (scheme: EarthColorScheme) => void
   dispose: () => void
 }
 
@@ -183,7 +201,7 @@ export const createEarthRenderer = async (
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100)
   camera.position.set(3.7, 1.55, 3.2)
 
-  const renderer = new THREE.WebGPURenderer({ antialias: true })
+  const renderer = new THREE.WebGPURenderer({ alpha: true, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.05
@@ -277,9 +295,20 @@ export const createEarthRenderer = async (
   globeMaterial.outputNode = vec4(finalOutput, output.a)
   globeMaterial.normalNode = bumpMap(max(texture(surfaceTexture).r, cloudsStrength))
 
+  // The surface texture separates land (green channel) from water (blue channel),
+  // which lets the flat renderer keep the same coastline without photo shading.
+  const flatOceanColor = uniform(new THREE.Color())
+  const flatLandColor = uniform(new THREE.Color())
+  const flatSurface = texture(surfaceTexture, uv())
+  const flatLandMask = flatSurface.g.sub(flatSurface.b).smoothstep(0.02, 0.16)
+  const flatGlobeMaterial = new THREE.MeshBasicNodeMaterial()
+
+  flatGlobeMaterial.colorNode = mix(flatOceanColor, flatLandColor, flatLandMask)
+  flatGlobeMaterial.toneMapped = false
+
   const sphereGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64)
   const earthGroup = new THREE.Group()
-  const globe = new THREE.Mesh(sphereGeometry, globeMaterial)
+  const globe = new THREE.Mesh<THREE.SphereGeometry, THREE.Material>(sphereGeometry, globeMaterial)
   earthGroup.add(globe)
   scene.add(earthGroup)
 
@@ -383,6 +412,7 @@ export const createEarthRenderer = async (
   const endpointHotCore = endpointFacing.pow(8).mul(0.5)
   const endpointGeometry = new THREE.SphereGeometry(ENDPOINT_CORE_RADIUS, 12, 8)
   const endpointMaterial = new THREE.MeshBasicNodeMaterial()
+  const flatEndpointMaterial = new THREE.MeshBasicNodeMaterial()
 
   endpointMaterial.outputNode = vec4(
     output.rgb
@@ -418,6 +448,8 @@ export const createEarthRenderer = async (
   let runtimeRoutes: RuntimeRoute[] = []
   let currentSignature = ''
   let reducedMotion = options.reducedMotion
+  let visualMode = options.visualMode
+  let colorScheme = options.colorScheme
   let autoRotation = true
   let disposed = false
   let visible = !document.hidden
@@ -437,6 +469,32 @@ export const createEarthRenderer = async (
   const raycaster = new THREE.Raycaster()
   const pointer = new THREE.Vector2()
   const clock = new THREE.Clock()
+
+  const applyColorScheme = () => {
+    const palette = FLAT_GLOBE_PALETTES[colorScheme]
+
+    flatOceanColor.value.set(palette.ocean)
+    flatLandColor.value.set(palette.land)
+  }
+
+  const applyVisualMode = () => {
+    const flat = visualMode === 'flat'
+
+    scene.background = flat ? null : backgroundTexture
+    renderer.toneMapping = flat ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping
+    globe.material = flat ? flatGlobeMaterial : globeMaterial
+    sun.visible = !flat
+    atmosphere.visible = !flat
+    lineGlow.visible = !flat && lines.visible
+    flowGlow.visible = !flat && flows.visible
+    if (endpointMesh) endpointMesh.material = flat ? flatEndpointMaterial : endpointMaterial
+    if (endpointGlowMesh) endpointGlowMesh.visible = !flat
+    flowMaterial.blending = flat ? THREE.NormalBlending : THREE.AdditiveBlending
+    flowMaterial.needsUpdate = true
+  }
+
+  applyColorScheme()
+  applyVisualMode()
 
   const render = () => {
     if (!disposed && visible && intersecting) renderer.render(scene, camera)
@@ -499,19 +557,19 @@ export const createEarthRenderer = async (
           flowPositions[offset + 5] = flowEnd.z
           const startStrength = 0.06 + Math.pow(startRatio, 1.7) * 0.94
           const endStrength = 0.06 + Math.pow(endRatio, 1.7) * 0.94
-          flowColors[offset] = color.r * startStrength
-          flowColors[offset + 1] = color.g * startStrength
-          flowColors[offset + 2] = color.b * startStrength
-          flowColors[offset + 3] = color.r * endStrength
-          flowColors[offset + 4] = color.g * endStrength
-          flowColors[offset + 5] = color.b * endStrength
+          flowColors[offset] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.r, color.r, startStrength)
+          flowColors[offset + 1] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.g, color.g, startStrength)
+          flowColors[offset + 2] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.b, color.b, startStrength)
+          flowColors[offset + 3] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.r, color.r, endStrength)
+          flowColors[offset + 4] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.g, color.g, endStrength)
+          flowColors[offset + 5] = THREE.MathUtils.lerp(FLOW_TAIL_COLOR.b, color.b, endStrength)
           flowSegmentIndex += 1
         }
       }
     }
 
     flowGeometry.instanceCount = flowSegmentIndex
-    flowGlow.visible = flowSegmentIndex > 0
+    flowGlow.visible = visualMode === 'space' && flowSegmentIndex > 0
     flows.visible = flowSegmentIndex > 0
     if (flowPositionBuffer) flowPositionBuffer.needsUpdate = true
     if (flowColorBuffer) flowColorBuffer.needsUpdate = true
@@ -525,7 +583,7 @@ export const createEarthRenderer = async (
     if (autoRotation) earthGroup.rotation.y += delta * 0.025
     pulseTime += delta
     endpointPulse.value = 0.82 + Math.sin(pulseTime * 2.1) * 0.18
-    syncSunLight()
+    if (visualMode === 'space') syncSunLight()
     controls.update(delta)
     updateFlows(elapsed, true)
 
@@ -538,7 +596,7 @@ export const createEarthRenderer = async (
 
     if (!visible || !intersecting || disposed) return
 
-    updateSunForTime()
+    if (visualMode === 'space') updateSunForTime()
 
     if (reducedMotion) {
       controls.enableDamping = false
@@ -588,10 +646,15 @@ export const createEarthRenderer = async (
 
     endpointRuntime = [...endpoints.values()]
     const capacity = Math.max(1, endpointRuntime.length)
-    endpointMesh = new THREE.InstancedMesh(endpointGeometry, endpointMaterial, capacity)
+    endpointMesh = new THREE.InstancedMesh(
+      endpointGeometry,
+      visualMode === 'flat' ? flatEndpointMaterial : endpointMaterial,
+      capacity,
+    )
     endpointGlowMesh = new THREE.InstancedMesh(endpointGlowGeometry, endpointGlowMaterial, capacity)
     endpointMesh.count = endpointRuntime.length
     endpointGlowMesh.count = endpointRuntime.length
+    endpointGlowMesh.visible = visualMode === 'space'
     endpointRotation.identity()
 
     for (let index = 0; index < endpointRuntime.length; index += 1) {
@@ -692,7 +755,7 @@ export const createEarthRenderer = async (
     if (positions.length > 0) {
       lineGeometry.setPositions(positions)
       lineGeometry.setColors(colors)
-      lineGlow.visible = true
+      lineGlow.visible = visualMode === 'space'
       lines.visible = true
     } else {
       lineGlow.visible = false
@@ -816,7 +879,7 @@ export const createEarthRenderer = async (
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
   const sunTimer = window.setInterval(() => {
-    updateSunForTime()
+    if (visualMode === 'space') updateSunForTime()
     if (reducedMotion) render()
   }, 60_000)
   const onControlsChange = () => {
@@ -859,6 +922,18 @@ export const createEarthRenderer = async (
     setAutoRotation(enabled) {
       autoRotation = enabled
     },
+    setVisualMode(mode) {
+      if (visualMode === mode) return
+      visualMode = mode
+      applyVisualMode()
+      render()
+    },
+    setColorScheme(scheme) {
+      if (colorScheme === scheme) return
+      colorScheme = scheme
+      applyColorScheme()
+      if (visualMode === 'flat') render()
+    },
     dispose() {
       if (disposed) return
       disposed = true
@@ -883,9 +958,11 @@ export const createEarthRenderer = async (
       endpointGeometry.dispose()
       endpointGlowGeometry.dispose()
       endpointMaterial.dispose()
+      flatEndpointMaterial.dispose()
       endpointGlowMaterial.dispose()
       sphereGeometry.dispose()
       globeMaterial.dispose()
+      flatGlobeMaterial.dispose()
       atmosphereMaterial.dispose()
       textures.forEach((item) => item.dispose())
       renderer.dispose()
