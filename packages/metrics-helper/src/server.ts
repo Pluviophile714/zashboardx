@@ -325,9 +325,20 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
     }
 
     if (url.pathname === '/api/metrics/nodes') {
+      const metricsSnapshot = options.metricsCache?.get(windowSeconds, nowMs)
+
+      if (options.metricsCache && !metricsSnapshot) {
+        response.setHeader('Retry-After', '1')
+        sendStatus(response, 503, {
+          error: 'metrics_warming_up',
+          retryAfterMs: 1000,
+        })
+        return
+      }
+
       sendJson(
         response,
-        options.metricsCache?.get(windowSeconds, nowMs) ?? {
+        metricsSnapshot ?? {
           windowSeconds,
           generatedAt: new Date(nowMs).toISOString(),
           nodes: options.storage.getNodeMetrics(windowSeconds, nowMs),
@@ -339,13 +350,14 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
     if (url.pathname.startsWith('/api/metrics/nodes/')) {
       const encodedName = url.pathname.slice('/api/metrics/nodes/'.length)
       const nodeName = decodeURIComponent(encodedName)
+      const metricsSnapshot = options.metricsCache?.get(windowSeconds, nowMs)
 
       sendJson(response, {
         windowSeconds,
         generatedAt: new Date(nowMs).toISOString(),
         name: nodeName,
         metrics:
-          options.metricsCache?.get(windowSeconds, nowMs).nodes[nodeName] ??
+          metricsSnapshot?.nodes[nodeName] ??
           options.storage.getSingleNodeMetrics(nodeName, windowSeconds, nowMs),
       })
       return

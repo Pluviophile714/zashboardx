@@ -352,6 +352,44 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
   }
 })
 
+test('returns a warming response while the metrics cache is still cold', async () => {
+  const storage = createStorage()
+  const metricsCache = new MetricsAggregationCache({
+    storage,
+    defaultWindowSeconds: 24 * 60 * 60,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+  const server = createMetricsServer({
+    storage,
+    metricsCache,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
+    const body = (await response.json()) as { error: string; retryAfterMs: number }
+
+    assert.equal(response.status, 503)
+    assert.equal(body.error, 'metrics_warming_up')
+    assert.equal(body.retryAfterMs, 1000)
+  } finally {
+    metricsCache.stop()
+    server.close()
+    storage.close()
+  }
+})
+
 test('serves fixed timeline profiles for a Unicode node name', async () => {
   const storage = createStorage()
   const nodeName = '\ud83c\udded\ud83c\uddf0 HKG \u9999\u6e2f 07 [\u4e3b]'

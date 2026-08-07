@@ -57,7 +57,8 @@ export class MetricsAggregationCache {
     const snapshot = this.#snapshots.get(windowSeconds)
 
     if (!snapshot) {
-      return this.refresh(windowSeconds, nowMs)
+      this.scheduleRefresh(0, windowSeconds)
+      return null
     }
 
     if (this.#isStale(snapshot, nowMs) || this.#dirtyWindows.has(windowSeconds)) {
@@ -68,7 +69,7 @@ export class MetricsAggregationCache {
   }
 
   getSingleNodeMetrics(nodeName: string, windowSeconds = this.#defaultWindowSeconds) {
-    return this.get(windowSeconds).nodes[nodeName] ?? null
+    return this.get(windowSeconds)?.nodes[nodeName] ?? null
   }
 
   refresh(windowSeconds = this.#defaultWindowSeconds, nowMs = this.#now()) {

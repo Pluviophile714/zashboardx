@@ -65,7 +65,7 @@ test('returns stale node metrics after ttl and refreshes asynchronously', async 
     success: true,
   })
 
-  const first = cache.get()
+  const first = cache.refresh()
 
   storage.insertProbeSample({
     nodeName: 'HK-01',
@@ -78,12 +78,14 @@ test('returns stale node metrics after ttl and refreshes asynchronously', async 
   nowMs += 5000
   const cached = cache.get()
 
+  assert.ok(cached)
   assert.equal(cached.nodes['HK-01'].sampleCount, 1)
   assert.equal(cached.cacheGeneratedAt, first.cacheGeneratedAt)
 
   nowMs += 6000
   const stale = cache.get()
 
+  assert.ok(stale)
   assert.equal(stale.nodes['HK-01'].sampleCount, 1)
   assert.equal(stale.cacheGeneratedAt, first.cacheGeneratedAt)
 
@@ -91,6 +93,7 @@ test('returns stale node metrics after ttl and refreshes asynchronously', async 
 
   const refreshed = cache.get()
 
+  assert.ok(refreshed)
   assert.equal(refreshed.nodes['HK-01'].sampleCount, 2)
   assert.notEqual(refreshed.cacheGeneratedAt, first.cacheGeneratedAt)
 
@@ -118,7 +121,7 @@ test('refreshes stale snapshots in a worker when a database path is provided', a
     success: true,
   })
 
-  const first = cache.get()
+  const first = cache.refresh()
 
   storage.insertProbeSample({
     nodeName: 'HK-01',
@@ -131,12 +134,32 @@ test('refreshes stale snapshots in a worker when a database path is provided', a
   nowMs += 11_000
   const stale = cache.get()
 
+  assert.ok(stale)
   assert.equal(stale.nodes['HK-01'].sampleCount, 1)
   assert.equal(stale.cacheGeneratedAt, first.cacheGeneratedAt)
 
-  await waitFor(() => cache.get().nodes['HK-01'].sampleCount === 2)
+  await waitFor(() => cache.get()?.nodes['HK-01'].sampleCount === 2)
 
-  assert.notEqual(cache.get().cacheGeneratedAt, first.cacheGeneratedAt)
+  const refreshed = cache.get()
+
+  assert.ok(refreshed)
+  assert.notEqual(refreshed.cacheGeneratedAt, first.cacheGeneratedAt)
+
+  cache.stop()
+  storage.close()
+})
+
+test('does not synchronously aggregate when the cache has no snapshot', () => {
+  const { databasePath, storage } = createStorageWithPath()
+  const cache = new MetricsAggregationCache({
+    storage,
+    databasePath,
+    defaultWindowSeconds: 24 * 60 * 60,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+
+  assert.equal(cache.get(), null)
 
   cache.stop()
   storage.close()
