@@ -92,7 +92,7 @@ export class MetricsAggregationCache {
   }
 
   markDirty(windowSeconds = this.#defaultWindowSeconds) {
-    this.#dirtyWindows.add(windowSeconds)
+    this.scheduleRefresh(0, windowSeconds)
   }
 
   scheduleRefresh(delayMs = this.#refreshDebounceMs, windowSeconds = this.#defaultWindowSeconds) {

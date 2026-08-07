@@ -330,13 +330,6 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
         ],
       }),
     })
-    const staleResponse = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
-    const staleBody = (await staleResponse.json()) as {
-      nodes: Record<string, { sampleCount: number }>
-    }
-
-    assert.equal(staleBody.nodes['JP-01'], undefined)
-
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     const refreshedResponse = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)

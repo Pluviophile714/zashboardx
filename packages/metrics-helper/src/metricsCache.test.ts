@@ -149,6 +149,47 @@ test('refreshes stale snapshots in a worker when a database path is provided', a
   storage.close()
 })
 
+test('refreshes marked snapshots without waiting for the next read', async () => {
+  const nowMs = at(30)
+  const storage = createStorage()
+  const cache = new MetricsAggregationCache({
+    storage,
+    defaultWindowSeconds: 24 * 60 * 60,
+    ttlMs: 10_000,
+    refreshDebounceMs: 0,
+    now: () => nowMs,
+  })
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: new Date(at(1)).toISOString(),
+    delay: 80,
+    success: true,
+  })
+
+  cache.refresh()
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: new Date(at(2)).toISOString(),
+    delay: 82,
+    success: true,
+  })
+
+  cache.markDirty()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+
+  const refreshed = cache.get()
+
+  assert.ok(refreshed)
+  assert.equal(refreshed.nodes['HK-01'].sampleCount, 2)
+
+  cache.stop()
+  storage.close()
+})
+
 test('does not synchronously aggregate when the cache has no snapshot', () => {
   const { databasePath, storage } = createStorageWithPath()
   const cache = new MetricsAggregationCache({
