@@ -35,6 +35,9 @@ export default defineConfig({
     __FONT__: JSON.stringify(font),
   },
   base: './',
+  worker: {
+    format: 'es',
+  },
   plugins: [
     vue(),
     vueJsx(),

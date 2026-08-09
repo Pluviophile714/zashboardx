@@ -90,6 +90,7 @@ interface EndpointRuntime extends EarthEndpointInfo {
 
 export interface EarthRenderer {
   setRoutes: (routes: EarthRoute[]) => void
+  setInitialLocation: (location: EarthLocation) => void
   setReducedMotion: (reduced: boolean) => void
   setAutoRotation: (enabled: boolean) => void
   setVisualMode: (mode: EarthVisualMode) => void
@@ -450,6 +451,7 @@ export const createEarthRenderer = async (
   let reducedMotion = options.reducedMotion
   let visualMode = options.visualMode
   let colorScheme = options.colorScheme
+  let initialLocationSet = false
   let autoRotation = true
   let disposed = false
   let visible = !document.hidden

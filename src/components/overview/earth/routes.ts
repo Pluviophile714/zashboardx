@@ -132,5 +132,5 @@ export const buildEarthRoutes = async (
     }
   }
 
-  return { routes: [...aggregated.values()] }
+  return { routes: [...aggregated.values()], origin }
 }
