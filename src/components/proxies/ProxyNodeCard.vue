@@ -140,7 +140,7 @@ import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import {
@@ -1559,6 +1559,7 @@ const handlerLatencyTest = async () => {
   ) {
     const classList = ['bg-info/20!', 'transition-colors', 'duration-1500']
 
+    await nextTick()
     scrollIntoCenter(cardRef.value)
     latencyTipAnimationClass.value = classList
     setTimeout(() => {

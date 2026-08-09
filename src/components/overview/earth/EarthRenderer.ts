@@ -225,10 +225,9 @@ export const createEarthRenderer = async (
   controls.maxDistance = 7.5
   controls.rotateSpeed = 0.55
   controls.zoomSpeed = 0.75
-  controls.touches.ONE = THREE.TOUCH.PAN
+  controls.touches.ONE = THREE.TOUCH.ROTATE
   controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE
-  // OrbitControls sets `none`; restoring vertical pan lets a single finger scroll the page.
-  renderer.domElement.style.touchAction = 'pan-y'
+  renderer.domElement.style.touchAction = 'none'
 
   const loader = new THREE.TextureLoader()
   let loadedTextures: [THREE.Texture, THREE.Texture, THREE.Texture, THREE.Texture]

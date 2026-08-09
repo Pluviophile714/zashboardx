@@ -25,7 +25,7 @@
 
 写明保留项、可移植项、手动适配项、明确跳过项和验收标准。
 
-- [ ] **Step 2: 提交同步范围文档**
+- [x] **Step 2: 提交同步范围文档**
 
 ```bash
 git add docs/superpowers/specs/2026-08-09-upstream-feature-sync-design.md docs/superpowers/plans/2026-08-09-upstream-feature-sync.md
@@ -47,11 +47,11 @@ git commit -m "docs: define safe upstream sync boundary"
 
 验证官方修复不会改变 Metrics 样本接口、代理卡片的共享延迟记录和现有节点分类。
 
-- [ ] **Step 2: 移植 All 连接标签、版本/历史修复、LatencyTag 加载优化和可见性修复**
+- [x] **Step 2: 移植 All 连接标签、版本/历史修复、LatencyTag 加载优化和可见性修复**
 
 只复制对应函数和模板片段，不替换整个代理组件。
 
-- [ ] **Step 3: 运行针对性检查**
+- [x] **Step 3: 运行针对性检查**
 
 ```bash
 pnpm run type-check
@@ -70,11 +70,11 @@ pnpm metrics:test
 
 仅吸收官方视口高度、过渡和通用样式修复，不能覆盖移动端详情布局或 Metrics 图表容器。
 
-- [ ] **Step 2: 检查地球仪触摸控制和资源加载**
+- [x] **Step 2: 检查地球仪触摸控制和资源加载**
 
 确保地球仪只使用浏览器 IndexedDB 缓存城市数据库，不把数据库写入 Docker 或 R5S 数据目录。
 
-- [ ] **Step 3: 运行构建**
+- [x] **Step 3: 运行构建**
 
 ```bash
 pnpm run build
@@ -90,7 +90,7 @@ pnpm run build
 - Modify: `Caddyfile`
 - Modify: `scripts/*.sh`
 
-- [ ] **Step 1: 保留 Metrics 镜像、环境变量和双容器网络**
+- [x] **Step 1: 保留 Metrics 镜像、环境变量和双容器网络**
 
 验证 `METRICS_UPSTREAM`、Metrics 镜像、持久化挂载和 R5S 更新脚本仍存在。
 
@@ -98,7 +98,7 @@ pnpm run build
 
 只保留地球仪依赖及必要的传递依赖，避免无关格式化噪音。
 
-- [ ] **Step 3: 运行部署回归测试**
+- [x] **Step 3: 运行部署回归测试**
 
 ```bash
 pnpm metrics:test
