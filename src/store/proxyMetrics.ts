@@ -1,10 +1,12 @@
 import { ref, shallowRef } from 'vue'
 import {
   fetchProxyMetricsBucketSamplesAPI,
+  fetchProxyMetricsDetailsAPI,
   fetchProxyMetricsHelperAPI,
   fetchProxyMetricsSamplesAPI,
   fetchProxyMetricsTimelineAPI,
   type ProxyMetricsBucketSamplesResponse,
+  type ProxyMetricsDetailsResponse,
   type ProxyMetricsNode,
   type ProxyMetricsSample,
   type ProxyMetricsTimelineResponse,
@@ -25,6 +27,8 @@ let lastFetchTime = 0
 let pendingRefresh: Promise<void> | undefined
 const proxyMetricsSamplesFetchTimeMap = new Map<string, number>()
 const pendingSamplesRefreshMap = new Map<string, Promise<ProxyMetricsSample[] | null>>()
+const proxyMetricsDetailsFetchTimeMap = new Map<string, number>()
+const pendingDetailsRefreshMap = new Map<string, Promise<ProxyMetricsDetailsResponse | null>>()
 const proxyMetricsTimelineFetchTimeMap = new Map<string, number>()
 const pendingTimelineRefreshMap = new Map<string, Promise<ProxyMetricsTimelineResponse | null>>()
 const proxyMetricsBucketSamplesFetchTimeMap = new Map<string, number>()
@@ -35,10 +39,12 @@ const pendingBucketSamplesRefreshMap = new Map<
 
 export const proxyMetricsMap = shallowRef<Record<string, ProxyMetricsNode>>({})
 export const proxyMetricsSamplesMap = shallowRef<Record<string, ProxyMetricsSample[]>>({})
+export const proxyMetricsSamplesSnapshotMap = shallowRef<Record<string, string>>({})
 export const proxyMetricsSamplesUpdateMap = shallowRef<
   Record<string, ProxyMetricsSampleUpdateKind>
 >({})
 export const proxyMetricsTimelineMap = shallowRef<Record<string, ProxyMetricsTimelineResponse>>({})
+export const proxyMetricsDetailsMap = shallowRef<Record<string, ProxyMetricsDetailsResponse>>({})
 export const proxyMetricsBucketSamplesMap = shallowRef<
   Record<string, ProxyMetricsBucketSamplesResponse>
 >({})
@@ -92,6 +98,12 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
 
       proxyMetricsSamplesMap.value = nextSamplesMap
       proxyMetricsSamplesUpdateMap.value = nextUpdatesMap
+      proxyMetricsSamplesSnapshotMap.value = {
+        ...proxyMetricsSamplesSnapshotMap.value,
+        ...Object.fromEntries(
+          Object.keys(recentSampleUpdates).map((key) => [key, response.generatedAt]),
+        ),
+      }
     }
 
     proxyMetricsAvailable.value = true
@@ -164,6 +176,10 @@ export const refreshProxyMetricsSamples = async (
       ...proxyMetricsSamplesMap.value,
       [key]: update.samples,
     }
+    proxyMetricsSamplesSnapshotMap.value = {
+      ...proxyMetricsSamplesSnapshotMap.value,
+      [key]: response.snapshotAt,
+    }
     proxyMetricsSamplesUpdateMap.value = {
       ...proxyMetricsSamplesUpdateMap.value,
       [key]: update.kind,
@@ -192,8 +208,115 @@ export const getProxyMetricsSamplesCacheKey = (
   limit = 30,
 ) => `${metricsWindow}\n${limit}\n${nodeName}`
 
+export const getProxyMetricsSamplesSnapshotAt = (
+  nodeName: string,
+  metricsWindow = '24h',
+  limit = 30,
+) =>
+  proxyMetricsSamplesSnapshotMap.value[
+    getProxyMetricsSamplesCacheKey(nodeName, metricsWindow, limit)
+  ]
+
 export const getProxyMetricsTimelineCacheKey = (nodeName: string, metricsWindow = '24h') =>
   `${metricsWindow}\n${nodeName}`
+
+export const getProxyMetricsDetailsCacheKey = (
+  nodeName: string,
+  metricsWindow: ProxyMetricsTimelineWindow = '24h',
+) => `${metricsWindow}\n${nodeName}`
+
+export const getProxyMetricsDetailsSnapshot = (
+  nodeName: string,
+  metricsWindow: ProxyMetricsTimelineWindow = '24h',
+) => proxyMetricsDetailsMap.value[getProxyMetricsDetailsCacheKey(nodeName, metricsWindow)]
+
+export const refreshProxyMetricsDetails = async (
+  nodeName: string,
+  options: {
+    force?: boolean
+    limit?: number
+    snapshotAt?: string
+    window?: ProxyMetricsTimelineWindow
+  } = {},
+) => {
+  if (!nodeName) {
+    return null
+  }
+
+  const metricsWindow = options.window ?? '24h'
+  const limit = options.limit ?? 30
+  const detailsKey = getProxyMetricsDetailsCacheKey(nodeName, metricsWindow)
+  const now = Date.now()
+  const cached = proxyMetricsDetailsMap.value[detailsKey]
+
+  if (
+    cached &&
+    !options.force &&
+    now - (proxyMetricsDetailsFetchTimeMap.get(detailsKey) ?? 0) < PROXY_METRICS_TIMELINE_CACHE_TTL
+  ) {
+    return cached
+  }
+
+  const pending = pendingDetailsRefreshMap.get(detailsKey)
+
+  if (pending) {
+    return pending
+  }
+
+  const requestedSnapshotAt = options.snapshotAt ?? new Date().toISOString()
+  const request = (async () => {
+    const response = await fetchProxyMetricsDetailsAPI(
+      nodeName,
+      metricsWindow,
+      limit,
+      requestedSnapshotAt,
+    )
+
+    if (!response || response.snapshotAt !== response.timeline.snapshotAt) {
+      return null
+    }
+
+    const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', limit)
+    const previous = proxyMetricsSamplesMap.value[samplesKey]
+    const update = reconcileRecentSampleUpdate(previous, response.samples)
+    const timelineKey = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
+
+    proxyMetricsDetailsFetchTimeMap.set(detailsKey, Date.now())
+    proxyMetricsSamplesFetchTimeMap.set(samplesKey, Date.now())
+    proxyMetricsSamplesMap.value = {
+      ...proxyMetricsSamplesMap.value,
+      [samplesKey]: update.samples,
+    }
+    proxyMetricsSamplesSnapshotMap.value = {
+      ...proxyMetricsSamplesSnapshotMap.value,
+      [samplesKey]: response.snapshotAt,
+    }
+    proxyMetricsSamplesUpdateMap.value = {
+      ...proxyMetricsSamplesUpdateMap.value,
+      [samplesKey]: update.kind,
+    }
+    proxyMetricsTimelineFetchTimeMap.set(timelineKey, Date.now())
+    proxyMetricsTimelineMap.value = {
+      ...proxyMetricsTimelineMap.value,
+      [timelineKey]: response.timeline,
+    }
+    proxyMetricsDetailsMap.value = {
+      ...proxyMetricsDetailsMap.value,
+      [detailsKey]: {
+        ...response,
+        samples: update.samples,
+      },
+    }
+
+    return proxyMetricsDetailsMap.value[detailsKey]
+  })().finally(() => {
+    pendingDetailsRefreshMap.delete(detailsKey)
+  })
+
+  pendingDetailsRefreshMap.set(detailsKey, request)
+
+  return request
+}
 
 export const getProxyMetricsBucketSamplesCacheKey = (
   nodeName: string,

@@ -35,6 +35,7 @@ export type ProxyMetricsSample = {
 export type ProxyMetricsSamplesResponse = {
   windowSeconds: number
   generatedAt: string
+  snapshotAt: string
   nodeName: string
   samples: ProxyMetricsSample[]
 }
@@ -43,6 +44,7 @@ export type ProxyMetricsBucketSamplesResponse = {
   start: string
   end: string
   generatedAt: string
+  snapshotAt: string
   nodeName: string
   samples: ProxyMetricsSample[]
   truncated: boolean
@@ -89,10 +91,19 @@ export const getProxyMetricsTimelineProfile = (window: ProxyMetricsTimelineWindo
 export type ProxyMetricsTimelineResponse = {
   windowSeconds: number
   generatedAt: string
+  snapshotAt: string
   nodeName: string
   bucketSeconds: number
   jitter: number | null
   buckets: ProxyMetricsTimelineBucket[]
+}
+
+export type ProxyMetricsDetailsResponse = {
+  generatedAt: string
+  snapshotAt: string
+  nodeName: string
+  samples: ProxyMetricsSample[]
+  timeline: ProxyMetricsTimelineResponse
 }
 
 const proxyMetricsSampleQueue: ProxyMetricsSample[] = []
@@ -324,6 +335,7 @@ export const fetchProxyMetricsSamplesAPI = async (
 
     return {
       generatedAt: data.generatedAt || new Date().toISOString(),
+      snapshotAt: data.snapshotAt || data.generatedAt || new Date().toISOString(),
       nodeName: typeof data.nodeName === 'string' ? data.nodeName : nodeName,
       samples,
       windowSeconds: Number(data.windowSeconds) || 24 * 60 * 60,
@@ -411,6 +423,10 @@ export const fetchProxyMetricsBucketSamplesAPI = async (
       start: normalizedStart,
       end: normalizedEnd,
       generatedAt: new Date(generatedAtMs).toISOString(),
+      snapshotAt:
+        typeof data.snapshotAt === 'string' && Number.isFinite(Date.parse(data.snapshotAt))
+          ? new Date(Date.parse(data.snapshotAt)).toISOString()
+          : new Date(generatedAtMs).toISOString(),
       nodeName,
       samples: normalizedSamples,
       truncated: data.truncated,
@@ -507,10 +523,137 @@ export const fetchProxyMetricsTimelineAPI = async (
     return {
       windowSeconds: data.windowSeconds,
       generatedAt: new Date(generatedAtMs).toISOString(),
+      snapshotAt:
+        typeof data.snapshotAt === 'string' && Number.isFinite(Date.parse(data.snapshotAt))
+          ? new Date(Date.parse(data.snapshotAt)).toISOString()
+          : new Date(generatedAtMs).toISOString(),
       nodeName: data.nodeName,
       bucketSeconds: data.bucketSeconds,
       jitter,
       buckets: normalizedBuckets,
+    }
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+export const fetchProxyMetricsDetailsAPI = async (
+  nodeName: string,
+  metricsWindow: ProxyMetricsTimelineWindow = '24h',
+  limit = 30,
+  snapshotAt?: string,
+  timeout = 3000,
+): Promise<ProxyMetricsDetailsResponse | null> => {
+  if (!nodeName) {
+    return null
+  }
+
+  const profile = getProxyMetricsTimelineProfile(metricsWindow)
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      node: nodeName,
+      window: metricsWindow,
+    })
+
+    if (snapshotAt) {
+      params.set('asOf', snapshotAt)
+    }
+
+    const response = await fetch(`/api/metrics/details?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as Partial<ProxyMetricsDetailsResponse> & {
+      timeline?: Partial<ProxyMetricsTimelineResponse>
+    }
+    const generatedAtMs =
+      typeof data.generatedAt === 'string' ? Date.parse(data.generatedAt) : Number.NaN
+    const snapshotAtMs =
+      typeof data.snapshotAt === 'string' ? Date.parse(data.snapshotAt) : Number.NaN
+    const timeline = data.timeline
+
+    if (
+      data.nodeName !== nodeName ||
+      !Number.isFinite(generatedAtMs) ||
+      !Number.isFinite(snapshotAtMs) ||
+      new Date(generatedAtMs).toISOString() !== new Date(snapshotAtMs).toISOString() ||
+      !timeline ||
+      timeline.windowSeconds !== profile.windowSeconds ||
+      timeline.bucketSeconds !== profile.bucketSeconds ||
+      timeline.nodeName !== nodeName ||
+      !Array.isArray(timeline.buckets) ||
+      timeline.buckets.length !== profile.bucketCount
+    ) {
+      return null
+    }
+
+    const samples = Array.isArray(data.samples)
+      ? data.samples.map(normalizeMetricsSample).filter((sample): sample is ProxyMetricsSample => {
+          return sample !== null
+        })
+      : []
+    const buckets = timeline.buckets.map(normalizeMetricsTimelineBucket)
+    const jitter = timeline.jitter === undefined ? null : normalizeTimelineDelay(timeline.jitter)
+
+    if (buckets.some((bucket) => bucket === null) || jitter === undefined) {
+      return null
+    }
+
+    const normalizedBuckets = buckets as ProxyMetricsTimelineBucket[]
+    const successCount = normalizedBuckets.reduce((total, bucket) => total + bucket.successCount, 0)
+
+    if (successCount < 2 && jitter !== null) {
+      return null
+    }
+
+    for (let index = 0; index < normalizedBuckets.length; index += 1) {
+      const bucket = normalizedBuckets[index]
+      const startMs = Date.parse(bucket.start)
+      const endMs = Date.parse(bucket.end)
+
+      if (
+        endMs - startMs !== profile.bucketSeconds * 1000 ||
+        (index > 0 && normalizedBuckets[index - 1].end !== bucket.start)
+      ) {
+        return null
+      }
+    }
+
+    if (
+      Date.parse(normalizedBuckets.at(-1)!.end) - Date.parse(normalizedBuckets[0].start) !==
+      profile.windowSeconds * 1000
+    ) {
+      return null
+    }
+
+    const normalizedGeneratedAt = new Date(generatedAtMs).toISOString()
+    const normalizedSnapshotAt = new Date(snapshotAtMs).toISOString()
+
+    return {
+      generatedAt: normalizedGeneratedAt,
+      snapshotAt: normalizedSnapshotAt,
+      nodeName,
+      samples,
+      timeline: {
+        windowSeconds: timeline.windowSeconds,
+        generatedAt: normalizedGeneratedAt,
+        snapshotAt: normalizedSnapshotAt,
+        nodeName,
+        bucketSeconds: timeline.bucketSeconds,
+        jitter,
+        buckets: normalizedBuckets,
+      },
     }
   } catch {
     return null

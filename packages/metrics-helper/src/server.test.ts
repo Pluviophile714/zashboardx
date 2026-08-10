@@ -269,6 +269,69 @@ test('serves recent samples for one node from the requested window', async () =>
   }
 })
 
+test('serves recent samples and timeline from one explicit snapshot cutoff', async () => {
+  const storage = createStorage()
+  const snapshotAt = at(25)
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/inside',
+    timestamp: at(20),
+    delay: 92,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/after',
+    timestamp: at(26),
+    delay: 180,
+    success: true,
+  })
+
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/details?node=HK-01&window=1h&limit=30&asOf=${encodeURIComponent(snapshotAt)}`,
+    )
+    const body = (await response.json()) as {
+      generatedAt: string
+      snapshotAt: string
+      samples: { timestamp: string }[]
+      timeline: { buckets: { sampleCount: number }[] }
+    }
+
+    assert.equal(response.status, 200)
+    assert.equal(body.generatedAt, snapshotAt)
+    assert.equal(body.snapshotAt, snapshotAt)
+    assert.deepEqual(
+      body.samples.map((sample) => sample.timestamp),
+      [at(0), at(20)],
+    )
+    assert.equal(
+      body.timeline.buckets.reduce((total, bucket) => total + bucket.sampleCount, 0),
+      2,
+    )
+  } finally {
+    server.close()
+    storage.close()
+  }
+})
+
 test('serves cached node metrics and refreshes cache after accepted frontend samples', async () => {
   const storage = createStorage()
   const metricsCache = new MetricsAggregationCache({

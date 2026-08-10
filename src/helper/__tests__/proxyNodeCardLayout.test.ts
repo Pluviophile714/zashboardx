@@ -687,17 +687,23 @@ test('keeps the node title from shrinking when a detail popover is height constr
 })
 
 test('uses the shared recent-30 R5S samples for the first-level latency stability bar', () => {
+  const sharedSamplesSourceStart = proxyNodeCardSource.indexOf('const getR5sLatencySamples =')
   const stabilitySourceStart = proxyNodeCardSource.indexOf('const getLatencyStabilityHistory =')
   const stabilitySourceEnd = proxyNodeCardSource.indexOf(
     'const latencyStabilityBar =',
     stabilitySourceStart,
   )
+  const sharedSamplesSource = proxyNodeCardSource.slice(
+    sharedSamplesSourceStart,
+    stabilitySourceStart,
+  )
   const stabilitySource = proxyNodeCardSource.slice(stabilitySourceStart, stabilitySourceEnd)
 
   assert.match(
-    stabilitySource,
+    sharedSamplesSource,
     /proxyMetricsSamplesMap\.value\[[\s\S]*getProxyMetricsSamplesCacheKey\(sourceName, '24h', LATENCY_DETAIL_SEGMENTS\)/,
   )
+  assert.match(stabilitySource, /const r5s = getR5sLatencySamples\(\)/)
   assert.doesNotMatch(stabilitySource, /metrics\.recentSamples/)
   assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
 })
@@ -712,11 +718,7 @@ test('uses the shared R5S latest sample for the first-level latency tag', () => 
   )
   const overrideSource = proxyNodeCardSource.slice(overrideSourceStart, overrideSourceEnd)
 
-  assert.match(overrideSource, /proxyMetricsSamplesMap\.value/)
-  assert.match(
-    overrideSource,
-    /getProxyMetricsSamplesCacheKey\(sourceName, '24h', LATENCY_DETAIL_SEGMENTS\)/,
-  )
+  assert.match(overrideSource, /getR5sLatencySamples\(\)\?\.samples\.at\(-1\)/)
   assert.match(overrideSource, /latest\.success && latest\.delay !== null/)
   assert.match(overrideSource, /metrics\.lastDelay/)
 })
@@ -739,17 +741,22 @@ test('uses a short desktop hover delay without changing the mobile long-press tr
   assert.match(proxyNodeCardSource, /touch: \['hold', 500\]/)
 })
 
-test('refreshes the open R5S detail list when the shared 24h metrics update', () => {
+test('refreshes the open R5S detail snapshot when the shared metrics update', () => {
   assert.match(proxyNodeCardSource, /watch\(\s*proxyMetricsUpdatedAt/)
-  assert.match(proxyNodeCardSource, /refreshProxyMetricsSamples\(sourceName, \{[\s\S]*force: true/)
+  assert.match(
+    proxyNodeCardSource,
+    /refreshR5sLatencyDetailsSnapshot\(sourceName, activeLatencyTimelineWindow, true\)/,
+  )
   assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
 })
 
-test('forces a fresh R5S sample request whenever node details open', () => {
+test('loads samples and timeline through one forced R5S detail request', () => {
   assert.match(
     proxyNodeCardSource,
-    /const getR5sLatencyDetailsSamplesRefresh = \(\) => \{[\s\S]*return refreshR5sLatencyDetailsSamples\(true\)/,
+    /const refreshR5sLatencyDetailsSnapshot = \([\s\S]*return refreshProxyMetricsDetails\(sourceName, \{[\s\S]*force,[\s\S]*limit: LATENCY_DETAIL_SEGMENTS,[\s\S]*window/,
   )
+  assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsSamples/)
+  assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline/)
 })
 
 test('opens and closes latency details with a fresh 24h range state', () => {
@@ -777,7 +784,7 @@ test('range changes exit drilldown and request the selected timeline', () => {
   assert.match(proxyNodeCardSource, /window: activeLatencyTimelineWindow/)
   assert.match(
     proxyNodeCardSource,
-    /getProxyMetricsTimelineCacheKey\(sourceName, window\)[\s\S]*refreshProxyMetricsTimeline\(sourceName, \{ window \}\)/,
+    /getProxyMetricsTimelineCacheKey\(sourceName, window\)[\s\S]*refreshR5sLatencyDetailsSnapshot\(sourceName, window, true\)/,
   )
 })
 

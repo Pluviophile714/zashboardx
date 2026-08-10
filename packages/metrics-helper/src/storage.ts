@@ -276,6 +276,31 @@ export class MetricsStorage {
       : null
   }
 
+  getNodeDetails(
+    nodeName: string,
+    windowSeconds: number,
+    bucketCount: number,
+    limit = 30,
+    nowMs = Date.now(),
+  ) {
+    this.#db.exec('BEGIN')
+
+    try {
+      const details = {
+        samples: this.getRecentProbeSamples(nodeName, 24 * 60 * 60, limit, nowMs),
+        jitter: this.getNodeJitter(nodeName, windowSeconds, nowMs),
+        buckets: this.getNodeTimeline(nodeName, windowSeconds, bucketCount, nowMs),
+      }
+
+      this.#db.exec('COMMIT')
+
+      return details
+    } catch (error) {
+      this.#db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   getNodeTimeline(
     nodeName: string,
     windowSeconds: number,

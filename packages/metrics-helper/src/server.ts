@@ -229,7 +229,18 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       url.searchParams.get('window'),
       options.defaultWindowSeconds,
     )
-    const nowMs = options.now?.() ?? Date.now()
+    const currentNowMs = options.now?.() ?? Date.now()
+    const requestedSnapshotAt = url.searchParams.get('asOf')
+    const requestedSnapshotMs =
+      requestedSnapshotAt === null ? null : parseCanonicalUtcTimestamp(requestedSnapshotAt)
+
+    if (requestedSnapshotAt !== null && !Number.isFinite(requestedSnapshotMs)) {
+      sendStatus(response, 400, { error: 'invalid_snapshot' })
+      return
+    }
+
+    const nowMs =
+      requestedSnapshotMs === null ? currentNowMs : Math.min(requestedSnapshotMs, currentNowMs)
 
     if (url.pathname === '/api/metrics/health') {
       sendJson(response, options.health)
@@ -253,6 +264,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       sendJson(response, {
         windowSeconds: profile.windowSeconds,
         generatedAt: new Date(nowMs).toISOString(),
+        snapshotAt: new Date(nowMs).toISOString(),
         nodeName,
         bucketSeconds: profile.windowSeconds / profile.bucketCount,
         jitter: options.storage.getNodeJitter(nodeName, profile.windowSeconds, nowMs),
@@ -262,6 +274,48 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
           profile.bucketCount,
           nowMs,
         ),
+      })
+      return
+    }
+
+    if (url.pathname === '/api/metrics/details') {
+      const nodeName = url.searchParams.get('node')?.trim() ?? ''
+      const requestedWindow = url.searchParams.get('window') ?? '24h'
+      const profile = TIMELINE_PROFILES[requestedWindow as keyof typeof TIMELINE_PROFILES]
+
+      if (!nodeName || nodeName.length > 512) {
+        sendStatus(response, 400, { error: 'invalid_node' })
+        return
+      }
+      if (!profile) {
+        sendStatus(response, 400, { error: 'unsupported_window' })
+        return
+      }
+
+      const snapshotAt = new Date(nowMs).toISOString()
+      const details = options.storage.getNodeDetails(
+        nodeName,
+        profile.windowSeconds,
+        profile.bucketCount,
+        parseLimit(url.searchParams.get('limit'), 30),
+        nowMs,
+      )
+      const timeline = {
+        windowSeconds: profile.windowSeconds,
+        generatedAt: snapshotAt,
+        snapshotAt,
+        nodeName,
+        bucketSeconds: profile.windowSeconds / profile.bucketCount,
+        jitter: details.jitter,
+        buckets: details.buckets,
+      }
+
+      sendJson(response, {
+        generatedAt: snapshotAt,
+        snapshotAt,
+        nodeName,
+        samples: details.samples,
+        timeline,
       })
       return
     }
@@ -297,6 +351,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         start: new Date(startMs).toISOString(),
         end: new Date(endMs).toISOString(),
         generatedAt: new Date(nowMs).toISOString(),
+        snapshotAt: new Date(nowMs).toISOString(),
         ...result,
       })
       return
@@ -313,6 +368,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       sendJson(response, {
         windowSeconds,
         generatedAt: new Date(nowMs).toISOString(),
+        snapshotAt: new Date(nowMs).toISOString(),
         nodeName,
         samples: options.storage.getRecentProbeSamples(
           nodeName,

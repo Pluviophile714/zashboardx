@@ -125,6 +125,7 @@ import {
 import {
   getProxyMetricsSamplesCacheKey,
   getProxyMetricsSamplesUpdateKind,
+  getProxyMetricsDetailsSnapshot,
   getProxyMetricsTimelineCacheKey,
   invalidateProxyMetricsTimeline,
   proxyMetricsMap,
@@ -132,8 +133,7 @@ import {
   proxyMetricsTimelineMap,
   proxyMetricsUpdatedAt,
   refreshProxyMetricsBucketSamples,
-  refreshProxyMetricsSamples,
-  refreshProxyMetricsTimeline,
+  refreshProxyMetricsDetails,
 } from '@/store/proxyMetrics'
 import type { ProxyMetricsTimelineBucket, ProxyMetricsTimelineWindow } from '@/api/metricsHelper'
 import { smartWeightsMap } from '@/store/smart'
@@ -497,15 +497,27 @@ const getMetricsCandidateNames = () => {
 const getR5sLatencySampleSourceName = () =>
   getSharedMetricsResolution()?.sourceName ?? getMetricsCandidateNames()[0] ?? props.name
 
-const getLatencyStabilityHistory = () => {
+const getR5sLatencySamples = () => {
   const sourceName = getR5sLatencySampleSourceName()
-  const r5sSamples =
-    proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-    ]
 
-  if (r5sSamples?.length) {
-    return r5sSamples.map((sample) => ({
+  if (!sourceName) {
+    return null
+  }
+
+  return {
+    samples:
+      proxyMetricsSamplesMap.value[
+        getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+      ] ?? [],
+    sourceName,
+  }
+}
+
+const getLatencyStabilityHistory = () => {
+  const r5s = getR5sLatencySamples()
+
+  if (r5s?.samples.length) {
+    return r5s.samples.map((sample) => ({
       delay: sample.success && sample.delay !== null ? sample.delay : NOT_CONNECTED,
       identity: getProxyMetricsSampleIdentity(sample),
     }))
@@ -653,12 +665,8 @@ const cardLatencyOverride = computed(() => {
     return undefined
   }
 
-  const { metrics, sourceName } = resolution
-  const samples =
-    proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-    ]
-  const latest = samples?.at(-1)
+  const { metrics } = resolution
+  const latest = getR5sLatencySamples()?.samples.at(-1)
 
   if (latest) {
     return latest.success && latest.delay !== null ? latest.delay : NOT_CONNECTED
@@ -672,7 +680,9 @@ const getLatencyTimelineChartState = (
   window: ProxyMetricsTimelineWindow,
 ): LatencyTimelineChartState => {
   const cacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
-  const timeline = proxyMetricsTimelineMap.value[cacheKey]
+  const timeline =
+    getProxyMetricsDetailsSnapshot(sourceName, window)?.timeline ??
+    proxyMetricsTimelineMap.value[cacheKey]
 
   if (timeline) {
     return timeline.buckets.some((bucket) => bucket.sampleCount > 0)
@@ -708,9 +718,11 @@ const getR5sLatencyHistory = () => {
   }
 
   const samples =
+    getProxyMetricsDetailsSnapshot(sourceName, activeLatencyTimelineWindow)?.samples ??
     proxyMetricsSamplesMap.value[
       getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-    ] ?? []
+    ] ??
+    []
 
   if (!samples.length && !metricsResolution?.metrics?.sampleCount) {
     return null
@@ -740,29 +752,20 @@ const getLatencyDetailsHistorySource = () => {
   }
 }
 
-const refreshR5sLatencyDetailsSamples = (force = false) => {
-  const sourceName = getR5sLatencySampleSourceName()
-
+const refreshR5sLatencyDetailsSnapshot = (
+  sourceName: string,
+  window: ProxyMetricsTimelineWindow,
+  force = false,
+) => {
   if (!sourceName) {
     return Promise.resolve(null)
   }
 
-  return refreshProxyMetricsSamples(sourceName, {
+  return refreshProxyMetricsDetails(sourceName, {
     force,
     limit: LATENCY_DETAIL_SEGMENTS,
-    window: '24h',
+    window,
   })
-}
-
-const getR5sLatencyDetailsSamplesRefresh = () => {
-  const sourceName = getR5sLatencySampleSourceName()
-  const metrics = getSharedMetricsResolution()?.metrics
-
-  if (!sourceName || !metrics?.sampleCount) {
-    return null
-  }
-
-  return refreshR5sLatencyDetailsSamples(true)
 }
 
 const refreshActiveR5sLatencyDetails = () => {
@@ -774,11 +777,7 @@ const refreshActiveR5sLatencyDetails = () => {
     return
   }
 
-  void refreshProxyMetricsSamples(sourceName, {
-    force: true,
-    limit: LATENCY_DETAIL_SEGMENTS,
-    window: '24h',
-  }).then(() => {
+  void refreshR5sLatencyDetailsSnapshot(sourceName, activeLatencyTimelineWindow, true).then(() => {
     if (
       activeLatencyDetailsTip !== instance ||
       activeLatencyDetailsSourceName !== sourceName ||
@@ -978,9 +977,9 @@ const restartLatencyBucketDrilldownResetTimer = () => {
 const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsTimelineWindow) => {
   const timelineCacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
   const requestGeneration = (latencyTimelineRequestGeneration += 1)
-  const request = refreshProxyMetricsTimeline(sourceName, { window })
+  const request = refreshR5sLatencyDetailsSnapshot(sourceName, window, true)
 
-  void request.then((timeline) => {
+  void request.then((details) => {
     if (
       requestGeneration !== latencyTimelineRequestGeneration ||
       activeLatencyTimelineWindow !== window ||
@@ -989,7 +988,7 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
       return
     }
 
-    if (timeline) {
+    if (details?.timeline) {
       unavailableLatencyTimelineKeys.delete(timelineCacheKey)
     } else {
       unavailableLatencyTimelineKeys.add(timelineCacheKey)
@@ -1453,10 +1452,9 @@ const handlerLatencyDetailsTip = async (e: Event) => {
     LATENCY_DETAILS_POPOVER_GAP,
   ).placement
   const placement = compact ? mobilePlacement : 'top'
-  const refresh = getR5sLatencyDetailsSamplesRefresh() ?? Promise.resolve(null)
   const timelineSourceName = getR5sLatencySampleSourceName()
 
-  void refreshLatencyDetailsTimeline(timelineSourceName, activeLatencyTimelineWindow)
+  const refresh = refreshLatencyDetailsTimeline(timelineSourceName, activeLatencyTimelineWindow)
 
   await openWithDeferredRefresh({
     refresh,
