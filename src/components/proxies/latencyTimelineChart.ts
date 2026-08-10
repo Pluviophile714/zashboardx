@@ -74,6 +74,39 @@ const formatBucketTime = (timestamp: string) => {
   }).format(date)
 }
 
+const formatBucketDateTime = (timestamp: string) => {
+  const date = new Date(timestamp)
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+const formatLatencyRange = (min: number | null, max: number | null) => {
+  if (min === null || max === null) {
+    return '--'
+  }
+
+  return min === max ? `${Math.round(min)}ms` : `${Math.round(min)}-${Math.round(max)}ms`
+}
+
+const appendWindowMetric = (grid: HTMLElement, label: string, value: string) => {
+  const item = document.createElement('div')
+  const name = document.createElement('div')
+  const content = document.createElement('div')
+
+  item.className = 'min-w-0 rounded-md border border-base-content/10 bg-base-200/30 p-2'
+  name.className = 'text-[10px] text-base-content/55'
+  name.textContent = label
+  content.className = 'mt-0.5 truncate text-sm font-semibold text-base-content'
+  content.textContent = value
+  item.append(name, content)
+  grid.append(item)
+}
+
 const appendEmptyState = (body: HTMLElement, message: string) => {
   const placeholder = document.createElement('div')
 
@@ -110,8 +143,9 @@ export const createLatencyTimelineChartSection = (
   const body = document.createElement('div')
   const height = getProxyMetricsTimelineHeight(options.compact)
   const isCoarseInput = options.inputMode === 'coarse'
-  const usesInformationCardActivation = options.compact || isCoarseInput
   const selectedWindow = options.window ?? '24h'
+  const showsBucketDetails = selectedWindow !== '1h'
+  const usesInformationCardActivation = options.compact || isCoarseInput
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
   header.className = 'mb-1.5 flex min-w-0 items-center justify-between gap-2 text-xs'
@@ -175,6 +209,66 @@ export const createLatencyTimelineChartSection = (
   const width = options.compact ? 360 : 420
   const timeline = state.timeline
   const tooltipMode = getProxyMetricsTimelineTooltipMode(options.compact)
+  const windowSummary = selectedWindow === '1h' ? document.createElement('div') : undefined
+  const samplePoint = windowSummary ? document.createElement('div') : undefined
+  const samplePointLabel = samplePoint ? document.createElement('span') : undefined
+  const samplePointValue = samplePoint ? document.createElement('span') : undefined
+  const metricsGrid = windowSummary ? document.createElement('div') : undefined
+
+  if (windowSummary && samplePoint && samplePointLabel && samplePointValue && metricsGrid) {
+    const successfulBuckets = timeline.buckets.filter(
+      (bucket) =>
+        bucket.successCount > 0 &&
+        bucket.avgDelay !== null &&
+        bucket.minDelay !== null &&
+        bucket.maxDelay !== null,
+    )
+    const sampleCount = timeline.buckets.reduce((total, bucket) => total + bucket.sampleCount, 0)
+    const successCount = timeline.buckets.reduce((total, bucket) => total + bucket.successCount, 0)
+    const weightedAverage = successfulBuckets.length
+      ? Math.round(
+          successfulBuckets.reduce(
+            (total, bucket) => total + (bucket.avgDelay ?? 0) * bucket.successCount,
+            0,
+          ) / Math.max(1, successCount),
+        )
+      : null
+    const minDelay = successfulBuckets.length
+      ? Math.min(...successfulBuckets.map((bucket) => bucket.minDelay as number))
+      : null
+    const maxDelay = successfulBuckets.length
+      ? Math.max(...successfulBuckets.map((bucket) => bucket.maxDelay as number))
+      : null
+
+    windowSummary.className = 'mt-2 grid gap-1.5'
+    samplePoint.className =
+      'flex min-h-9 items-center justify-between gap-2 rounded-md border border-base-content/15 bg-base-200/30 px-2.5 py-1.5 text-xs'
+    samplePoint.dataset.role = '1h-sample-point'
+    samplePointLabel.className = 'shrink-0 text-base-content/55'
+    samplePointLabel.textContent = '当前采样点'
+    samplePointValue.className = 'truncate font-semibold text-base-content'
+    metricsGrid.className = 'grid grid-cols-2 gap-1.5 sm:grid-cols-4'
+    metricsGrid.dataset.role = '1h-summary-metrics'
+    samplePointValue.textContent = '--'
+    appendWindowMetric(
+      metricsGrid,
+      '平均延迟',
+      weightedAverage === null ? '--' : `${weightedAverage}ms`,
+    )
+    appendWindowMetric(
+      metricsGrid,
+      '1h 抖动',
+      timeline.jitter === null ? '--' : `${Math.round(timeline.jitter)}ms`,
+    )
+    appendWindowMetric(metricsGrid, '延迟范围', formatLatencyRange(minDelay, maxDelay))
+    appendWindowMetric(
+      metricsGrid,
+      '可用率',
+      sampleCount ? `${((successCount / sampleCount) * 100).toFixed(1)}%` : '--',
+    )
+    samplePoint.append(samplePointLabel, samplePointValue)
+    windowSummary.append(samplePoint, metricsGrid)
+  }
   const model = buildProxyMetricsTimelineChartModel(timeline, {
     width,
     height,
@@ -324,7 +418,12 @@ export const createLatencyTimelineChartSection = (
     'mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
 
   body.append(svg)
-  section.append(tooltip)
+  if (windowSummary) {
+    section.append(windowSummary)
+  }
+  if (showsBucketDetails) {
+    section.append(tooltip)
+  }
 
   if (state.status === 'empty') {
     const empty = document.createElement('div')
@@ -357,53 +456,100 @@ export const createLatencyTimelineChartSection = (
       hoverPoint.setAttribute('visibility', 'hidden')
     }
 
-    tooltip.replaceChildren()
-    const time = document.createElement('div')
+    const canActivate = usesInformationCardActivation && bucket.sampleCount > 0
 
-    time.className = 'col-span-2 whitespace-nowrap font-semibold text-base-content'
-    time.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
-    tooltip.append(time)
+    if (showsBucketDetails) {
+      tooltip.replaceChildren()
+      const time = document.createElement('div')
 
-    if (bucket.successCount > 0) {
-      appendTooltipLine(tooltip, '平均', `${Math.round(bucket.avgDelay ?? 0)}ms`)
-      appendTooltipLine(tooltip, '范围', `${bucket.minDelay ?? 0}-${bucket.maxDelay ?? 0}ms`)
-      if (selectedWindow !== '1h') {
+      time.className = 'col-span-2 whitespace-nowrap font-semibold text-base-content'
+      time.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
+      tooltip.append(time)
+
+      if (bucket.successCount > 0) {
+        appendTooltipLine(tooltip, '平均', `${Math.round(bucket.avgDelay ?? 0)}ms`)
+        appendTooltipLine(
+          tooltip,
+          '范围',
+          bucket.minDelay === bucket.maxDelay
+            ? `${bucket.minDelay ?? 0}ms`
+            : `${bucket.minDelay ?? 0}-${bucket.maxDelay ?? 0}ms`,
+        )
         appendTooltipLine(
           tooltip,
           '波动',
           bucket.jitter === null ? '--' : `${Math.round(bucket.jitter)}ms`,
         )
+      } else {
+        appendTooltipLine(tooltip, '延迟', bucket.sampleCount ? '测速失败' : '无样本')
       }
-    } else {
-      appendTooltipLine(tooltip, '延迟', bucket.sampleCount ? '测速失败' : '无样本')
+      appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
+      appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
+
+      if (canActivate) {
+        tooltip.setAttribute('aria-disabled', 'false')
+        tooltip.setAttribute('aria-label', '查看此时间段的测速记录')
+        tooltip.setAttribute('role', 'button')
+        tooltip.tabIndex = 0
+        tooltip.classList.add(
+          'cursor-pointer',
+          'focus-visible:outline-2',
+          'focus-visible:outline-primary',
+        )
+      } else {
+        tooltip.removeAttribute('aria-disabled')
+        tooltip.removeAttribute('aria-label')
+        tooltip.removeAttribute('role')
+        tooltip.removeAttribute('tabindex')
+        tooltip.classList.remove(
+          'cursor-pointer',
+          'focus-visible:outline-2',
+          'focus-visible:outline-primary',
+        )
+      }
     }
-    appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
-    appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
+
+    if (!showsBucketDetails && samplePoint) {
+      if (canActivate) {
+        samplePoint.setAttribute('aria-disabled', 'false')
+        samplePoint.setAttribute('aria-label', '查看此时间段的测速记录')
+        samplePoint.setAttribute('role', 'button')
+        samplePoint.tabIndex = 0
+        samplePoint.classList.add(
+          'cursor-pointer',
+          'focus-visible:outline-2',
+          'focus-visible:outline-primary',
+        )
+      } else {
+        samplePoint.removeAttribute('aria-disabled')
+        samplePoint.removeAttribute('aria-label')
+        samplePoint.removeAttribute('role')
+        samplePoint.removeAttribute('tabindex')
+        samplePoint.classList.remove(
+          'cursor-pointer',
+          'focus-visible:outline-2',
+          'focus-visible:outline-primary',
+        )
+      }
+    }
 
     selectedBucket = bucket
     selectedBucketIndex = bucketIndex
-    const canActivate = usesInformationCardActivation && bucket.sampleCount > 0
+    if (samplePointValue) {
+      const status =
+        bucket.successCount > 0
+          ? bucket.failureCount > 0
+            ? '部分失败'
+            : '成功'
+          : bucket.sampleCount > 0
+            ? '失败'
+            : '无样本'
+      const delay =
+        bucket.successCount > 0 && bucket.avgDelay !== null
+          ? `${Math.round(bucket.avgDelay)}ms`
+          : '测速失败'
 
-    if (canActivate) {
-      tooltip.setAttribute('aria-disabled', 'false')
-      tooltip.setAttribute('aria-label', '查看此时间段的测速记录')
-      tooltip.setAttribute('role', 'button')
-      tooltip.tabIndex = 0
-      tooltip.classList.add(
-        'cursor-pointer',
-        'focus-visible:outline-2',
-        'focus-visible:outline-primary',
-      )
-    } else {
-      tooltip.removeAttribute('aria-disabled')
-      tooltip.removeAttribute('aria-label')
-      tooltip.removeAttribute('role')
-      tooltip.removeAttribute('tabindex')
-      tooltip.classList.remove(
-        'cursor-pointer',
-        'focus-visible:outline-2',
-        'focus-visible:outline-primary',
-      )
+      samplePointValue.textContent = `${formatBucketDateTime(bucket.start)} · ${delay} · ${status}`
     }
     options.onBucketChange?.(bucket)
   }
@@ -557,7 +703,13 @@ export const createLatencyTimelineChartSection = (
       activateSelectedBucket()
     })
   } else {
-    tooltip.addEventListener('click', () => {
+    const activationCard = showsBucketDetails ? tooltip : samplePoint
+
+    if (!activationCard) {
+      return section
+    }
+
+    activationCard.addEventListener('click', () => {
       if (suppressNextCardClick) {
         suppressNextCardClick = false
         return
@@ -565,19 +717,19 @@ export const createLatencyTimelineChartSection = (
 
       activateSelectedBucket()
     })
-    tooltip.addEventListener('pointerdown', (event) => {
+    activationCard.addEventListener('pointerdown', (event) => {
       beginCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
     })
-    tooltip.addEventListener('pointermove', (event) => {
+    activationCard.addEventListener('pointermove', (event) => {
       updateCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
     })
-    tooltip.addEventListener('pointerup', (event) => {
+    activationCard.addEventListener('pointerup', (event) => {
       endCardGesture('pointer', event.pointerId)
     })
-    tooltip.addEventListener('pointercancel', (event) => {
+    activationCard.addEventListener('pointercancel', (event) => {
       endCardGesture('pointer', event.pointerId, true)
     })
-    tooltip.addEventListener(
+    activationCard.addEventListener(
       'touchstart',
       (event) => {
         if (activeCardGesture?.source === 'pointer') {
@@ -591,7 +743,7 @@ export const createLatencyTimelineChartSection = (
       },
       { passive: true },
     )
-    tooltip.addEventListener(
+    activationCard.addEventListener(
       'touchmove',
       (event) => {
         if (activeCardGesture?.source !== 'touch') {
@@ -605,7 +757,7 @@ export const createLatencyTimelineChartSection = (
       },
       { passive: true },
     )
-    tooltip.addEventListener(
+    activationCard.addEventListener(
       'touchend',
       (event) => {
         if (activeCardGesture?.source !== 'touch') {
@@ -619,7 +771,7 @@ export const createLatencyTimelineChartSection = (
       },
       { passive: true },
     )
-    tooltip.addEventListener(
+    activationCard.addEventListener(
       'touchcancel',
       () => {
         if (activeCardGesture?.source === 'touch') {
@@ -628,7 +780,7 @@ export const createLatencyTimelineChartSection = (
       },
       { passive: true },
     )
-    tooltip.addEventListener('keydown', (event) => {
+    activationCard.addEventListener('keydown', (event) => {
       if (event.key === ' ') {
         event.preventDefault()
         if (!event.repeat) {
@@ -639,7 +791,7 @@ export const createLatencyTimelineChartSection = (
         activateSelectedBucket()
       }
     })
-    tooltip.addEventListener('keyup', (event) => {
+    activationCard.addEventListener('keyup', (event) => {
       if (event.key === ' ') {
         event.preventDefault()
         if (spacePressed) {
@@ -648,7 +800,7 @@ export const createLatencyTimelineChartSection = (
         }
       }
     })
-    tooltip.addEventListener('blur', () => {
+    activationCard.addEventListener('blur', () => {
       spacePressed = false
     })
   }

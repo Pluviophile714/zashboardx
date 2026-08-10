@@ -216,8 +216,12 @@ const renderTimelineChart = (
     (element) => element.getAttribute('data-selected-guide') === 'true',
   )[0]
   const tooltip = findElements(section, (element) => element.className.includes('min-h-12'))[0]
+  const samplePoint = findElements(
+    section,
+    (element) => element.dataset.role === '1h-sample-point',
+  )[0]
 
-  return { buttons, chartHitArea, section, selectedGuide, svg, tooltip }
+  return { buttons, chartHitArea, samplePoint, section, selectedGuide, svg, tooltip }
 }
 
 const proxyNodeCardSource = readFileSync(
@@ -278,7 +282,10 @@ test('wires input capability independently from compact layout', () => {
 
 test('keeps 24h bucket details outside the plot on desktop and mobile', () => {
   assert.match(timelineChartSource, /getProxyMetricsTimelineTooltipMode\(options\.compact\)/)
-  assert.match(timelineChartSource, /body\.append\(svg\)\r?\n\s*section\.append\(tooltip\)/)
+  assert.match(
+    timelineChartSource,
+    /if \(showsBucketDetails\) \{\r?\n\s*section\.append\(tooltip\)/,
+  )
   assert.doesNotMatch(timelineChartSource, /body\.append\(svg, tooltip\)/)
 })
 
@@ -592,15 +599,45 @@ test('activates the bucket represented by the current guide through the chart-wi
   assert.deepEqual(bucketActivations, [1])
 })
 
-test('shows 1h jitter in the header and removes jitter from its bucket details', () => {
-  const { section, svg, tooltip } = renderTimelineChart({ jitter: 23, window: '1h' })
+test('shows 1h jitter in the header and hides the bucket details card', () => {
+  const { section } = renderTimelineChart({ jitter: 23, window: '1h' })
 
   assert.equal(
     findElements(section, (element) => element.textContent === '1h 抖动: 23ms').length,
     1,
   )
+  assert.equal(findElements(section, (element) => element.textContent === '当前采样点').length, 1)
+  assert.equal(findElements(section, (element) => element.textContent === '平均延迟').length, 1)
+  assert.equal(findElements(section, (element) => element.textContent === '1h 抖动').length, 1)
+  assert.equal(findElements(section, (element) => element.textContent === '延迟范围').length, 1)
+  assert.equal(findElements(section, (element) => element.textContent === '可用率').length, 1)
+  assert.equal(findElements(section, (element) => element.className.includes('min-h-12')).length, 0)
+})
+
+test('keeps 1h desktop chart click bucket activation without the details card', () => {
+  const bucketActivations: number[] = []
+  const { chartHitArea, svg } = renderTimelineChart({
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+    window: '1h',
+  })
+
   svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
-  assert.equal(findElements(tooltip, (element) => element.textContent === '波动').length, 0)
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(bucketActivations, [1])
+})
+
+test('uses the 1h current sample row as the mobile bucket activation target', () => {
+  const bucketActivations: number[] = []
+  const { samplePoint } = renderTimelineChart({
+    compact: true,
+    inputMode: 'coarse',
+    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+    window: '1h',
+  })
+
+  assert.equal(samplePoint.getAttribute('role'), 'button')
+  samplePoint.dispatchEvent(createEvent('click'))
+  assert.deepEqual(bucketActivations, [1])
 })
 
 test('keeps bucket jitter details for longer timeline windows', () => {
