@@ -287,7 +287,7 @@ export class MetricsStorage {
 
     try {
       const details = {
-        samples: this.getRecentProbeSamples(nodeName, 24 * 60 * 60, limit, nowMs),
+        samples: this.getRecentProbeSamples(nodeName, windowSeconds, limit, nowMs),
         jitter: this.getNodeJitter(nodeName, windowSeconds, nowMs),
         buckets: this.getNodeTimeline(nodeName, windowSeconds, bucketCount, nowMs),
       }

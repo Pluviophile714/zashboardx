@@ -22,6 +22,7 @@ const PROXY_METRICS_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_SAMPLES_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_TIMELINE_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_BUCKET_SAMPLES_CACHE_TTL = 30 * 1000
+const SHARED_RECENT_SAMPLES_LIMIT = 30
 
 let lastFetchTime = 0
 let pendingRefresh: Promise<void> | undefined
@@ -276,9 +277,12 @@ export const refreshProxyMetricsDetails = async (
       return null
     }
 
-    const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', limit)
+    const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', SHARED_RECENT_SAMPLES_LIMIT)
     const previous = proxyMetricsSamplesMap.value[samplesKey]
-    const update = reconcileRecentSampleUpdate(previous, response.samples)
+    const update = reconcileRecentSampleUpdate(
+      previous,
+      response.samples.slice(-SHARED_RECENT_SAMPLES_LIMIT),
+    )
     const timelineKey = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
 
     proxyMetricsDetailsFetchTimeMap.set(detailsKey, Date.now())
@@ -304,7 +308,7 @@ export const refreshProxyMetricsDetails = async (
       ...proxyMetricsDetailsMap.value,
       [detailsKey]: {
         ...response,
-        samples: update.samples,
+        samples: response.samples,
       },
     }
 

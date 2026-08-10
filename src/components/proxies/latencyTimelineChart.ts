@@ -1,9 +1,11 @@
 import type {
+  ProxyMetricsSample,
   ProxyMetricsTimelineBucket,
   ProxyMetricsTimelineResponse,
   ProxyMetricsTimelineWindow,
 } from '@/api/metricsHelper'
 import {
+  buildProxyMetricsSampleChartModel,
   buildProxyMetricsTimelineChartModel,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
@@ -13,8 +15,16 @@ import {
 export type LatencyTimelineChartState =
   | { status: 'loading' }
   | { status: 'unavailable' }
-  | { status: 'empty'; timeline: ProxyMetricsTimelineResponse }
-  | { status: 'ready'; timeline: ProxyMetricsTimelineResponse }
+  | {
+      samples?: ProxyMetricsSample[]
+      status: 'empty'
+      timeline: ProxyMetricsTimelineResponse
+    }
+  | {
+      samples?: ProxyMetricsSample[]
+      status: 'ready'
+      timeline: ProxyMetricsTimelineResponse
+    }
 
 export type LatencyTimelineInputMode = 'coarse' | 'fine'
 
@@ -23,9 +33,11 @@ export type LatencyTimelineChartOptions = {
   inputMode: LatencyTimelineInputMode
   onBucketActivate?: (bucket: ProxyMetricsTimelineBucket) => void
   onBucketChange?: (bucket: ProxyMetricsTimelineBucket) => void
+  onSampleActivate?: (sample: ProxyMetricsSample) => void
   onInteraction?: () => void
   onWindowChange?: (window: ProxyMetricsTimelineWindow) => void
   selectedBucket?: ProxyMetricsTimelineBucket
+  selectedSample?: ProxyMetricsSample
   sourceLabel?: string
   window?: ProxyMetricsTimelineWindow
 }
@@ -208,6 +220,8 @@ export const createLatencyTimelineChartSection = (
   }
   const width = options.compact ? 360 : 420
   const timeline = state.timeline
+  const samples = selectedWindow === '1h' ? (state.samples ?? []) : []
+  const usesRawSamples = selectedWindow === '1h'
   const tooltipMode = getProxyMetricsTimelineTooltipMode(options.compact)
   const windowSummary = selectedWindow === '1h' ? document.createElement('div') : undefined
   const samplePoint = windowSummary ? document.createElement('div') : undefined
@@ -216,6 +230,9 @@ export const createLatencyTimelineChartSection = (
   const metricsGrid = windowSummary ? document.createElement('div') : undefined
 
   if (windowSummary && samplePoint && samplePointLabel && samplePointValue && metricsGrid) {
+    const successfulSamples = samples.filter(
+      (sample) => sample.success && sample.delay !== null && Number.isFinite(sample.delay),
+    )
     const successfulBuckets = timeline.buckets.filter(
       (bucket) =>
         bucket.successCount > 0 &&
@@ -223,22 +240,39 @@ export const createLatencyTimelineChartSection = (
         bucket.minDelay !== null &&
         bucket.maxDelay !== null,
     )
-    const sampleCount = timeline.buckets.reduce((total, bucket) => total + bucket.sampleCount, 0)
-    const successCount = timeline.buckets.reduce((total, bucket) => total + bucket.successCount, 0)
-    const weightedAverage = successfulBuckets.length
-      ? Math.round(
-          successfulBuckets.reduce(
-            (total, bucket) => total + (bucket.avgDelay ?? 0) * bucket.successCount,
-            0,
-          ) / Math.max(1, successCount),
-        )
-      : null
-    const minDelay = successfulBuckets.length
-      ? Math.min(...successfulBuckets.map((bucket) => bucket.minDelay as number))
-      : null
-    const maxDelay = successfulBuckets.length
-      ? Math.max(...successfulBuckets.map((bucket) => bucket.maxDelay as number))
-      : null
+    const sampleCount = usesRawSamples
+      ? samples.length
+      : timeline.buckets.reduce((total, bucket) => total + bucket.sampleCount, 0)
+    const successCount = usesRawSamples
+      ? successfulSamples.length
+      : timeline.buckets.reduce((total, bucket) => total + bucket.successCount, 0)
+    const weightedAverage = usesRawSamples
+      ? successfulSamples.length
+        ? Math.round(
+            successfulSamples.reduce((total, sample) => total + (sample.delay ?? 0), 0) /
+              successfulSamples.length,
+          )
+        : null
+      : successfulBuckets.length
+        ? Math.round(
+            successfulBuckets.reduce(
+              (total, bucket) => total + (bucket.avgDelay ?? 0) * bucket.successCount,
+              0,
+            ) / Math.max(1, successCount),
+          )
+        : null
+    const minDelay =
+      successfulSamples.length && usesRawSamples
+        ? Math.min(...successfulSamples.map((sample) => sample.delay as number))
+        : successfulBuckets.length
+          ? Math.min(...successfulBuckets.map((bucket) => bucket.minDelay as number))
+          : null
+    const maxDelay =
+      successfulSamples.length && usesRawSamples
+        ? Math.max(...successfulSamples.map((sample) => sample.delay as number))
+        : successfulBuckets.length
+          ? Math.max(...successfulBuckets.map((bucket) => bucket.maxDelay as number))
+          : null
 
     windowSummary.className = 'mt-2 grid gap-1.5'
     samplePoint.className =
@@ -269,7 +303,7 @@ export const createLatencyTimelineChartSection = (
     samplePoint.append(samplePointLabel, samplePointValue)
     windowSummary.append(samplePoint, metricsGrid)
   }
-  const model = buildProxyMetricsTimelineChartModel(timeline, {
+  const bucketModel = buildProxyMetricsTimelineChartModel(timeline, {
     width,
     height,
     padding: {
@@ -279,6 +313,21 @@ export const createLatencyTimelineChartSection = (
       left: 35,
     },
   })
+  const sampleModel = usesRawSamples
+    ? buildProxyMetricsSampleChartModel(samples, {
+        width,
+        height,
+        padding: {
+          top: 8,
+          right: 16,
+          bottom: 20,
+          left: 35,
+        },
+        windowEnd: timeline.buckets.at(-1)?.end ?? samples.at(-1)?.timestamp ?? '',
+        windowStart: timeline.buckets[0]?.start ?? samples[0]?.timestamp ?? '',
+      })
+    : undefined
+  const model = sampleModel ?? bucketModel
   const svg = createSvgElement('svg', {
     'aria-label': `${selectedWindow} 延迟趋势，${timeline.nodeName}`,
     role: 'img',
@@ -395,20 +444,37 @@ export const createLatencyTimelineChartSection = (
   plot.append(hoverLine, hoverPoint, chartHitArea)
   svg.append(plot)
 
-  for (const tick of model.axes.xTicks) {
-    const bucket = timeline.buckets[tick.bucketIndex]
-    const label = createSvgElement('text', {
-      x: tick.x,
-      y: height - 5,
-      fill: 'currentColor',
-      'fill-opacity': 0.45,
-      'font-size': 9,
-      'letter-spacing': 0,
-      'text-anchor': 'middle',
-    })
+  if (usesRawSamples && sampleModel) {
+    for (const tick of sampleModel.axes.xTicks) {
+      const label = createSvgElement('text', {
+        x: tick.x,
+        y: height - 5,
+        fill: 'currentColor',
+        'fill-opacity': 0.45,
+        'font-size': 9,
+        'letter-spacing': 0,
+        'text-anchor': 'middle',
+      })
 
-    label.textContent = formatBucketTime(bucket.start)
-    svg.append(label)
+      label.textContent = formatBucketTime(tick.timestamp)
+      svg.append(label)
+    }
+  } else {
+    for (const tick of bucketModel.axes.xTicks) {
+      const bucket = timeline.buckets[tick.bucketIndex]
+      const label = createSvgElement('text', {
+        x: tick.x,
+        y: height - 5,
+        fill: 'currentColor',
+        'fill-opacity': 0.45,
+        'font-size': 9,
+        'letter-spacing': 0,
+        'text-anchor': 'middle',
+      })
+
+      label.textContent = formatBucketTime(bucket.start)
+      svg.append(label)
+    }
   }
 
   const tooltip = document.createElement('div')
@@ -436,6 +502,8 @@ export const createLatencyTimelineChartSection = (
 
   let selectedBucket: ProxyMetricsTimelineBucket | undefined
   let selectedBucketIndex = -1
+  let selectedSample: ProxyMetricsSample | undefined
+  let selectedSampleIndex = -1
 
   const renderBucket = (bucketIndex: number, guideX?: number) => {
     const bucket = timeline.buckets[bucketIndex]
@@ -554,6 +622,70 @@ export const createLatencyTimelineChartSection = (
     options.onBucketChange?.(bucket)
   }
 
+  const getSampleGuideX = (sampleIndex: number) => {
+    const point = sampleModel?.points[sampleIndex]
+
+    if (point) {
+      return point.x
+    }
+
+    const failureSlice = sampleModel?.statusSlices.find(
+      (slice) => slice.sampleIndex === sampleIndex,
+    )
+
+    return failureSlice ? failureSlice.x + failureSlice.width / 2 : model.axes.plotLeft
+  }
+
+  const renderSample = (sampleIndex: number, guideX?: number) => {
+    const sample = samples[sampleIndex]
+
+    if (!sample || !sampleModel) {
+      return
+    }
+
+    const point = sampleModel.points[sampleIndex]
+    const sampleX = getSampleGuideX(sampleIndex)
+
+    hoverLine.setAttribute('x1', String(guideX ?? sampleX))
+    hoverLine.setAttribute('x2', String(guideX ?? sampleX))
+    hoverLine.setAttribute('visibility', 'visible')
+
+    if (point) {
+      hoverPoint.setAttribute('cx', String(point.x))
+      hoverPoint.setAttribute('cy', String(point.y))
+      hoverPoint.setAttribute(
+        'fill',
+        sample.success
+          ? 'var(--color-low-latency, oklch(0.648 0.15 160))'
+          : 'var(--color-high-latency, rgb(244, 96, 108))',
+      )
+      hoverPoint.setAttribute('visibility', 'visible')
+    } else {
+      hoverPoint.setAttribute('visibility', 'hidden')
+    }
+
+    if (samplePoint) {
+      samplePoint.setAttribute('aria-disabled', 'false')
+      samplePoint.setAttribute('aria-label', '查看当前采样记录')
+      samplePoint.setAttribute('role', 'button')
+      samplePoint.tabIndex = 0
+      samplePoint.classList.add(
+        'cursor-pointer',
+        'focus-visible:outline-2',
+        'focus-visible:outline-primary',
+      )
+    }
+
+    selectedSample = sample
+    selectedSampleIndex = sampleIndex
+    if (samplePointValue) {
+      const success = sample.success && sample.delay !== null
+      samplePointValue.textContent = `${formatBucketDateTime(sample.timestamp)} · ${
+        success ? `${Math.round(sample.delay as number)}ms` : '测速失败'
+      } · ${success ? '成功' : '失败'}`
+    }
+  }
+
   const getChartPosition = (clientX: number) => {
     const rect = svg.getBoundingClientRect()
 
@@ -564,6 +696,30 @@ export const createLatencyTimelineChartSection = (
     const svgX = ((clientX - rect.left) / rect.width) * width
     const guideX = Math.max(model.axes.plotLeft, Math.min(model.axes.plotRight, svgX))
     const relativeX = (guideX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
+
+    if (usesRawSamples && sampleModel) {
+      const windowStart = Date.parse(timeline.buckets[0]?.start ?? samples[0]?.timestamp ?? '')
+      const windowEnd = Date.parse(timeline.buckets.at(-1)?.end ?? samples.at(-1)?.timestamp ?? '')
+      const timestamp = windowStart + (windowEnd - windowStart) * relativeX
+      let sampleIndex = -1
+      let closestDistance = Number.POSITIVE_INFINITY
+
+      for (let index = 0; index < samples.length; index += 1) {
+        const sampleTimestamp = Date.parse(samples[index].timestamp)
+        const distance = Math.abs(sampleTimestamp - timestamp)
+
+        if (Number.isFinite(distance) && distance < closestDistance) {
+          closestDistance = distance
+          sampleIndex = index
+        }
+      }
+
+      return {
+        guideX: sampleIndex >= 0 ? getSampleGuideX(sampleIndex) : guideX,
+        sampleIndex,
+      }
+    }
+
     const bucketIndex = Math.max(
       0,
       Math.min(timeline.buckets.length - 1, Math.floor(relativeX * timeline.buckets.length)),
@@ -577,7 +733,19 @@ export const createLatencyTimelineChartSection = (
     const position = getChartPosition(event.clientX)
 
     if (position) {
-      renderBucket(position.bucketIndex, position.guideX)
+      if (usesRawSamples && 'sampleIndex' in position) {
+        const sampleIndex = position.sampleIndex
+
+        if (typeof sampleIndex === 'number' && sampleIndex >= 0) {
+          renderSample(sampleIndex, position.guideX)
+        }
+      } else if ('bucketIndex' in position) {
+        const bucketIndex = position.bucketIndex
+
+        if (typeof bucketIndex === 'number') {
+          renderBucket(bucketIndex, position.guideX)
+        }
+      }
     }
   }
 
@@ -586,7 +754,15 @@ export const createLatencyTimelineChartSection = (
     hoverPoint.setAttribute('visibility', 'hidden')
   }
 
-  const activateSelectedBucket = () => {
+  const activateSelectedPoint = () => {
+    if (usesRawSamples) {
+      if (selectedSample) {
+        options.onInteraction?.()
+        options.onSampleActivate?.(selectedSample)
+      }
+      return
+    }
+
     const bucket = selectedBucket
 
     if (bucket && bucket.sampleCount > 0) {
@@ -697,10 +873,24 @@ export const createLatencyTimelineChartSection = (
 
       const position = getChartPosition(event.clientX)
 
-      if (position && position.bucketIndex !== selectedBucketIndex) {
-        renderBucket(position.bucketIndex, position.guideX)
+      if (position && usesRawSamples && 'sampleIndex' in position) {
+        const sampleIndex = position.sampleIndex
+
+        if (
+          typeof sampleIndex === 'number' &&
+          sampleIndex >= 0 &&
+          sampleIndex !== selectedSampleIndex
+        ) {
+          renderSample(sampleIndex, position.guideX)
+        }
+      } else if (position && 'bucketIndex' in position) {
+        const bucketIndex = position.bucketIndex
+
+        if (typeof bucketIndex === 'number' && bucketIndex !== selectedBucketIndex) {
+          renderBucket(bucketIndex, position.guideX)
+        }
       }
-      activateSelectedBucket()
+      activateSelectedPoint()
     })
   } else {
     const activationCard = showsBucketDetails ? tooltip : samplePoint
@@ -715,7 +905,7 @@ export const createLatencyTimelineChartSection = (
         return
       }
 
-      activateSelectedBucket()
+      activateSelectedPoint()
     })
     activationCard.addEventListener('pointerdown', (event) => {
       beginCardGesture('pointer', event.pointerId, event.clientX, event.clientY)
@@ -788,7 +978,7 @@ export const createLatencyTimelineChartSection = (
         }
       } else if (event.key === 'Enter' && !event.repeat) {
         event.preventDefault()
-        activateSelectedBucket()
+        activateSelectedPoint()
       }
     })
     activationCard.addEventListener('keyup', (event) => {
@@ -796,7 +986,7 @@ export const createLatencyTimelineChartSection = (
         event.preventDefault()
         if (spacePressed) {
           spacePressed = false
-          activateSelectedBucket()
+          activateSelectedPoint()
         }
       }
     })
@@ -875,7 +1065,18 @@ export const createLatencyTimelineChartSection = (
     svg.addEventListener('pointerleave', clearHover)
   }
 
-  if (timeline.buckets.length) {
+  if (usesRawSamples && sampleModel && samples.length) {
+    const selectedSampleIndex = options.selectedSample
+      ? samples.findIndex(
+          (sample) =>
+            sample.timestamp === options.selectedSample?.timestamp &&
+            sample.success === options.selectedSample.success &&
+            sample.delay === options.selectedSample.delay,
+        )
+      : -1
+
+    renderSample(selectedSampleIndex >= 0 ? selectedSampleIndex : samples.length - 1)
+  } else if (!usesRawSamples && timeline.buckets.length) {
     let latestSampleIndex = timeline.buckets.length - 1
 
     for (let index = timeline.buckets.length - 1; index >= 0; index -= 1) {

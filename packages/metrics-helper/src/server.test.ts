@@ -275,6 +275,13 @@ test('serves recent samples and timeline from one explicit snapshot cutoff', asy
 
   storage.insertProbeSample({
     nodeName: 'HK-01',
+    testUrl: 'https://example.com/older-than-window',
+    timestamp: at(-61),
+    delay: 401,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
     testUrl: 'https://example.com/inside',
     timestamp: at(20),
     delay: 92,

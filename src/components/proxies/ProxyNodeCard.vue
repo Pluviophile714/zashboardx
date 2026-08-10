@@ -135,7 +135,11 @@ import {
   refreshProxyMetricsBucketSamples,
   refreshProxyMetricsDetails,
 } from '@/store/proxyMetrics'
-import type { ProxyMetricsTimelineBucket, ProxyMetricsTimelineWindow } from '@/api/metricsHelper'
+import type {
+  ProxyMetricsSample,
+  ProxyMetricsTimelineBucket,
+  ProxyMetricsTimelineWindow,
+} from '@/api/metricsHelper'
 import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
@@ -153,6 +157,7 @@ import { getSmartOutbound } from './smartOutbound'
 
 const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
+const LATENCY_ONE_HOUR_RAW_LIMIT = 200
 const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
 const LATENCY_AVAILABILITY_MIN_SAMPLES = 12
 const LATENCY_AVAILABILITY_MIN_COVERAGE = 60 * 60 * 1000
@@ -228,6 +233,7 @@ let latencyBucketRequestGeneration = 0
 let latencyBucketDrilldownResetTimer: ReturnType<typeof window.setTimeout> | undefined
 let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '24h'
 let activeLatencyTimelineBucket: ProxyMetricsTimelineBucket | null = null
+let activeLatencyTimelineSample: ProxyMetricsSample | null = null
 let latencyBucketHistory: LatencyStripHistoryItem[] = []
 const unavailableLatencyTimelineKeys = new Set<string>()
 const LATENCY_DETAILS_VIEWPORT_PADDING = 8
@@ -251,6 +257,7 @@ const resetLatencyBucketDrilldownState = () => {
   clearLatencyBucketDrilldownResetTimer()
   activeLatencyTimelineWindow = '24h'
   activeLatencyTimelineBucket = null
+  activeLatencyTimelineSample = null
   latencyBucketHistory = []
   latencyBucketRequestGeneration += 1
   latencyTimelineRequestGeneration += 1
@@ -680,14 +687,26 @@ const getLatencyTimelineChartState = (
   window: ProxyMetricsTimelineWindow,
 ): LatencyTimelineChartState => {
   const cacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
-  const timeline =
-    getProxyMetricsDetailsSnapshot(sourceName, window)?.timeline ??
-    proxyMetricsTimelineMap.value[cacheKey]
+  const snapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
+  const timeline = snapshot?.timeline ?? proxyMetricsTimelineMap.value[cacheKey]
+  const samples =
+    window === '1h'
+      ? (snapshot?.samples ??
+        proxyMetricsSamplesMap.value[
+          getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+        ] ??
+        [])
+      : undefined
 
   if (timeline) {
-    return timeline.buckets.some((bucket) => bucket.sampleCount > 0)
-      ? { status: 'ready', timeline }
-      : { status: 'empty', timeline }
+    const hasSamples =
+      window === '1h'
+        ? Boolean(samples?.length)
+        : timeline.buckets.some((bucket) => bucket.sampleCount > 0)
+
+    return hasSamples
+      ? { samples, status: 'ready', timeline }
+      : { samples, status: 'empty', timeline }
   }
 
   return unavailableLatencyTimelineKeys.has(cacheKey)
@@ -763,7 +782,7 @@ const refreshR5sLatencyDetailsSnapshot = (
 
   return refreshProxyMetricsDetails(sourceName, {
     force,
-    limit: LATENCY_DETAIL_SEGMENTS,
+    limit: window === '1h' ? LATENCY_ONE_HOUR_RAW_LIMIT : LATENCY_DETAIL_SEGMENTS,
     window,
   })
 }
@@ -953,6 +972,7 @@ const renderActiveLatencyDetailsTip = () => {
 const exitLatencyBucketDrilldown = (updateContent = false) => {
   clearLatencyBucketDrilldownResetTimer()
   activeLatencyTimelineBucket = null
+  activeLatencyTimelineSample = null
   latencyBucketHistory = []
   latencyBucketRequestGeneration += 1
 
@@ -964,7 +984,7 @@ const exitLatencyBucketDrilldown = (updateContent = false) => {
 const restartLatencyBucketDrilldownResetTimer = () => {
   clearLatencyBucketDrilldownResetTimer()
 
-  if (!activeLatencyTimelineBucket || !activeLatencyDetailsTip) {
+  if ((!activeLatencyTimelineBucket && !activeLatencyTimelineSample) || !activeLatencyDetailsTip) {
     return
   }
 
@@ -1049,6 +1069,25 @@ const activateLatencyTimelineBucket = async (bucket: ProxyMetricsTimelineBucket)
 
   activeLatencyTimelineBucket = bucket
   latencyBucketHistory = mapLatencyBucketSamplesToHistory(response.samples, NOT_CONNECTED)
+  restartLatencyBucketDrilldownResetTimer()
+  renderActiveLatencyDetailsTip()
+}
+
+const activateLatencyTimelineSample = (sample: ProxyMetricsSample) => {
+  if (activeLatencyTimelineSample?.timestamp === sample.timestamp) {
+    exitLatencyBucketDrilldown(true)
+    return
+  }
+
+  clearLatencyBucketDrilldownResetTimer()
+  activeLatencyTimelineBucket = null
+  activeLatencyTimelineSample = sample
+  latencyBucketHistory = [
+    {
+      delay: sample.success && sample.delay !== null ? sample.delay : NOT_CONNECTED,
+      time: sample.timestamp,
+    },
+  ]
   restartLatencyBucketDrilldownResetTimer()
   renderActiveLatencyDetailsTip()
 }
@@ -1301,15 +1340,14 @@ const createLatencyDetailsTip = () => {
   const compact = isCompactLatencyDetails()
   const detailHistorySource = getLatencyDetailsHistorySource()
   const recentHistory = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
+  const isSampleDrilldown = Boolean(activeLatencyTimelineSample)
+  const isDrilldown = Boolean(activeLatencyTimelineBucket || activeLatencyTimelineSample)
   const history = resolveLatencyStripHistory({
-    mode: activeLatencyTimelineBucket ? 'bucket' : 'recent',
+    mode: isDrilldown ? 'bucket' : 'recent',
     recent: recentHistory,
     bucket: latencyBucketHistory,
   })
-  const stats = getLatencyStats(
-    history,
-    activeLatencyTimelineBucket ? history.length : LATENCY_DETAIL_SEGMENTS,
-  )
+  const stats = getLatencyStats(history, isDrilldown ? history.length : LATENCY_DETAIL_SEGMENTS)
   const sharedMetricsResolution = getSharedMetricsResolution()
   const sharedMetrics = sharedMetricsResolution?.metrics
   const timelineSourceName = getR5sLatencySampleSourceName()
@@ -1368,9 +1406,11 @@ const createLatencyDetailsTip = () => {
           compact,
           inputMode: getLatencyTimelineInputMode(),
           onBucketActivate: activateLatencyTimelineBucket,
+          onSampleActivate: activateLatencyTimelineSample,
           onInteraction: restartLatencyBucketDrilldownResetTimer,
           onWindowChange: changeLatencyTimelineWindow,
           selectedBucket: activeLatencyTimelineBucket ?? undefined,
+          selectedSample: activeLatencyTimelineSample ?? undefined,
           sourceLabel: timelineSourceName !== props.name ? timelineSourceName : undefined,
           window: activeLatencyTimelineWindow,
         },
@@ -1391,11 +1431,15 @@ const createLatencyDetailsTip = () => {
     } else {
       summaryLine.className = 'mt-1 text-center text-xs text-base-content/55'
       summaryLine.textContent = history.length
-        ? activeLatencyTimelineBucket
-          ? '该时段暂无成功测速'
+        ? isDrilldown
+          ? isSampleDrilldown
+            ? '该记录暂无成功测速'
+            : '该时段暂无成功测速'
           : '近30次暂无成功测速'
-        : activeLatencyTimelineBucket
-          ? '该时段暂无记录'
+        : isDrilldown
+          ? isSampleDrilldown
+            ? '该记录暂无记录'
+            : '该时段暂无记录'
           : 'R5S近30次等待样本'
     }
 
@@ -1405,15 +1449,15 @@ const createLatencyDetailsTip = () => {
         compact,
         activeLatencyTimelineBucket
           ? formatLatencyBucketTitle(activeLatencyTimelineBucket, latencyBucketHistory.length)
-          : detailHistorySource.label,
+          : activeLatencyTimelineSample
+            ? `1h采样 ${dayjs(activeLatencyTimelineSample.timestamp).format('MM-DD HH:mm:ss')}`
+            : detailHistorySource.label,
         summaryLine,
         {
-          centerStableTracks: Boolean(activeLatencyTimelineBucket),
+          centerStableTracks: isDrilldown,
           onInteraction: restartLatencyBucketDrilldownResetTimer,
-          onRestoreRecent: activeLatencyTimelineBucket
-            ? () => exitLatencyBucketDrilldown(true)
-            : undefined,
-          preserveAll: Boolean(activeLatencyTimelineBucket),
+          onRestoreRecent: isDrilldown ? () => exitLatencyBucketDrilldown(true) : undefined,
+          preserveAll: isDrilldown,
         },
       ),
       summaryLine,

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type {
+  ProxyMetricsSample,
   ProxyMetricsTimelineBucket,
   ProxyMetricsTimelineResponse,
 } from '../../api/metricsHelper.ts'
 import {
+  buildProxyMetricsSampleChartModel,
   buildProxyMetricsTimelineChartModel,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
@@ -44,6 +46,41 @@ const options = {
   height: 150,
   padding: { top: 10, right: 8, bottom: 22, left: 34 },
 }
+
+const sample = (
+  timestamp: string,
+  delay: number | null,
+  success = delay !== null,
+): ProxyMetricsSample => ({
+  delay,
+  nodeName: 'HK-01',
+  success,
+  testUrl: 'https://example.com/generate_204',
+  timestamp,
+})
+
+test('plots 1h raw samples on their real timestamps and aligns failures with the same sample', () => {
+  const samples = [
+    sample('2026-07-04T00:05:00.000Z', 100),
+    sample('2026-07-04T00:25:00.000Z', null, false),
+    sample('2026-07-04T00:55:00.000Z', 140),
+  ]
+  const model = buildProxyMetricsSampleChartModel(samples, {
+    ...options,
+    windowEnd: '2026-07-04T01:00:00.000Z',
+    windowStart: '2026-07-04T00:00:00.000Z',
+  })
+
+  assert.equal(model.points.length, samples.length)
+  assert.ok(model.points[0]!.x < model.points[2]!.x)
+  assert.equal(model.points[1], null)
+  assert.equal(model.statusSlices.length, 1)
+  assert.equal(model.statusSlices[0].sampleIndex, 1)
+  assert.ok(model.statusSlices[0].x > model.points[0]!.x)
+  assert.ok(model.statusSlices[0].x < model.points[2]!.x)
+  assert.equal(model.axes.xTicks[0].timestamp, '2026-07-04T00:00:00.000Z')
+  assert.equal(model.axes.xTicks.at(-1)?.timestamp, '2026-07-04T01:00:00.000Z')
+})
 
 test('splits average and range paths at failed and empty buckets', () => {
   const response = timeline([

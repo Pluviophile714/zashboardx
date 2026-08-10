@@ -159,16 +159,31 @@ const createTimelineBucket = (index: number, sampleCount: number) => {
   }
 }
 
+const createTimelineSample = (
+  timestamp: string,
+  delay: number | null,
+  success = delay !== null,
+) => ({
+  delay,
+  nodeName: 'HK-01',
+  success,
+  testUrl: 'https://example.com/generate_204',
+  timestamp,
+})
+
 const renderTimelineChart = (
   callbacks: {
     onBucketActivate?: (bucket: { sampleCount: number }) => void
     onBucketChange?: (bucket: { sampleCount: number }) => void
+    onSampleActivate?: (sample: { timestamp: string }) => void
     onInteraction?: () => void
     onWindowChange?: (window: '1h' | '6h' | '24h') => void
     compact?: boolean
     inputMode?: 'coarse' | 'fine'
     jitter?: number | null
     selectedBucketIndex?: number
+    selectedSampleIndex?: number
+    samples?: ReturnType<typeof createTimelineSample>[]
     window?: '1h' | '6h' | '24h'
   } = {},
 ) => {
@@ -181,6 +196,7 @@ const renderTimelineChart = (
   const section = createLatencyTimelineChartSection(
     {
       status: 'ready',
+      samples: callbacks.samples,
       timeline: {
         bucketSeconds: 900,
         buckets,
@@ -195,12 +211,17 @@ const renderTimelineChart = (
       inputMode: callbacks.inputMode ?? 'fine',
       onBucketActivate: callbacks.onBucketActivate,
       onBucketChange: callbacks.onBucketChange,
+      onSampleActivate: callbacks.onSampleActivate,
       onInteraction: callbacks.onInteraction,
       onWindowChange: callbacks.onWindowChange,
       selectedBucket:
         callbacks.selectedBucketIndex === undefined
           ? undefined
           : buckets[callbacks.selectedBucketIndex],
+      selectedSample:
+        callbacks.selectedSampleIndex === undefined
+          ? undefined
+          : callbacks.samples?.[callbacks.selectedSampleIndex],
       window: callbacks.window ?? '6h',
     },
   ) as unknown as TestElement
@@ -614,7 +635,37 @@ test('shows 1h jitter in the header and hides the bucket details card', () => {
   assert.equal(findElements(section, (element) => element.className.includes('min-h-12')).length, 0)
 })
 
-test('keeps 1h desktop chart click bucket activation without the details card', () => {
+test('uses exact raw samples for 1h selection and activation', () => {
+  const samples = [
+    createTimelineSample('2026-07-04T00:05:11.000Z', 101),
+    createTimelineSample('2026-07-04T00:25:14.000Z', 331),
+  ]
+  const activations: string[] = []
+  const { chartHitArea, samplePoint, section, svg } = renderTimelineChart({
+    onSampleActivate: (sample) => activations.push(sample.timestamp),
+    samples,
+    selectedSampleIndex: 0,
+    window: '1h',
+  })
+
+  assert.equal(
+    findElements(samplePoint, (element) => element.textContent.includes('101ms')).length,
+    1,
+  )
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  assert.equal(
+    findElements(samplePoint, (element) => element.textContent.includes('331ms')).length,
+    1,
+  )
+  assert.equal(
+    findElements(section, (element) => element.dataset.role === '1h-summary-metrics').length,
+    1,
+  )
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.deepEqual(activations, ['2026-07-04T00:25:14.000Z'])
+})
+
+test('does not fall back to minute buckets when 1h raw samples are unavailable', () => {
   const bucketActivations: number[] = []
   const { chartHitArea, svg } = renderTimelineChart({
     onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
@@ -623,21 +674,23 @@ test('keeps 1h desktop chart click bucket activation without the details card', 
 
   svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
   chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
-  assert.deepEqual(bucketActivations, [1])
+  assert.deepEqual(bucketActivations, [])
 })
 
-test('uses the 1h current sample row as the mobile bucket activation target', () => {
-  const bucketActivations: number[] = []
+test('uses the 1h current sample row as the mobile raw-sample activation target', () => {
+  const activations: string[] = []
+  const samples = [createTimelineSample('2026-07-04T00:25:14.000Z', 331)]
   const { samplePoint } = renderTimelineChart({
     compact: true,
     inputMode: 'coarse',
-    onBucketActivate: (bucket) => bucketActivations.push(bucket.sampleCount),
+    onSampleActivate: (sample) => activations.push(sample.timestamp),
+    samples,
     window: '1h',
   })
 
   assert.equal(samplePoint.getAttribute('role'), 'button')
   samplePoint.dispatchEvent(createEvent('click'))
-  assert.deepEqual(bucketActivations, [1])
+  assert.deepEqual(activations, ['2026-07-04T00:25:14.000Z'])
 })
 
 test('keeps bucket jitter details for longer timeline windows', () => {
@@ -750,11 +803,12 @@ test('refreshes the open R5S detail snapshot when the shared metrics update', ()
   assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
 })
 
-test('loads samples and timeline through one forced R5S detail request', () => {
+test('loads the full 1h raw sample window through one forced R5S detail request', () => {
   assert.match(
     proxyNodeCardSource,
-    /const refreshR5sLatencyDetailsSnapshot = \([\s\S]*return refreshProxyMetricsDetails\(sourceName, \{[\s\S]*force,[\s\S]*limit: LATENCY_DETAIL_SEGMENTS,[\s\S]*window/,
+    /const refreshR5sLatencyDetailsSnapshot = \([\s\S]*return refreshProxyMetricsDetails\(sourceName, \{[\s\S]*force,[\s\S]*limit: window === '1h' \? LATENCY_ONE_HOUR_RAW_LIMIT : LATENCY_DETAIL_SEGMENTS,[\s\S]*window/,
   )
+  assert.match(proxyNodeCardSource, /const LATENCY_ONE_HOUR_RAW_LIMIT = 200/)
   assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsSamples/)
   assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline/)
 })
@@ -815,7 +869,7 @@ test('enters bucket drilldown only after a successful exact-interval response', 
   )
   assert.match(
     proxyNodeCardSource,
-    /resolveLatencyStripHistory\(\{[\s\S]*mode: activeLatencyTimelineBucket \? 'bucket' : 'recent'/,
+    /resolveLatencyStripHistory\(\{[\s\S]*mode: isDrilldown \? 'bucket' : 'recent'/,
   )
 })
 
@@ -824,7 +878,7 @@ test('renders every raw bucket record and uses its exact interval title', () => 
     proxyNodeCardSource,
     /formatLatencyBucketTitle\(activeLatencyTimelineBucket, latencyBucketHistory\.length\)/,
   )
-  assert.match(proxyNodeCardSource, /preserveAll: Boolean\(activeLatencyTimelineBucket\)/)
+  assert.match(proxyNodeCardSource, /preserveAll: isDrilldown/)
   assert.match(
     proxyNodeCardSource,
     /const displayedHistory = options\.preserveAll\s*\? history\s*:\s*history\.slice\(-LATENCY_DETAIL_SEGMENTS\)/,
@@ -848,7 +902,7 @@ test('centers small bucket histories with the same tracks and spacing as recent 
     proxyNodeCardSource,
     /item\.delay === undefined && options\.centerStableTracks[\s\S]*segment\.style\.visibility = 'hidden'/,
   )
-  assert.match(proxyNodeCardSource, /centerStableTracks: Boolean\(activeLatencyTimelineBucket\)/)
+  assert.match(proxyNodeCardSource, /centerStableTracks: isDrilldown/)
 })
 
 test('shows a manual recent-30 restore control only during bucket drilldown', () => {
@@ -858,7 +912,7 @@ test('shows a manual recent-30 restore control only during bucket drilldown', ()
   )
   assert.match(
     proxyNodeCardSource,
-    /onRestoreRecent: activeLatencyTimelineBucket[\s\S]*\? \(\) => exitLatencyBucketDrilldown\(true\)[\s\S]*: undefined/,
+    /onRestoreRecent: isDrilldown[\s\S]*\? \(\) => exitLatencyBucketDrilldown\(true\)[\s\S]*: undefined/,
   )
 })
 
