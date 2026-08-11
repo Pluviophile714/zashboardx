@@ -329,3 +329,40 @@ test('keeps an older complete detail snapshot for the chart without rolling back
     })
   }
 })
+
+test('does not let an older detail response replace a newer cached detail snapshot', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-STALE-03'
+  const detailsKey = `24h\n${nodeName}`
+  const newerDetails = detailsResponse(nodeName, '2026-08-11T09:04:00.000Z', 64)
+
+  proxyMetricsDetailsMap.value = {
+    ...proxyMetricsDetailsMap.value,
+    [detailsKey]: newerDetails,
+  }
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(JSON.stringify(detailsResponse(nodeName, '2026-08-11T09:03:00.000Z', 63)), {
+        status: 200,
+      }),
+    window: globalThis,
+  })
+
+  try {
+    const details = await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      snapshotAt: '2026-08-11T09:05:00.000Z',
+      window: '24h',
+    })
+
+    assert.equal(details?.snapshotAt, '2026-08-11T09:04:00.000Z')
+    assert.equal(details?.samples.at(-1)?.delay, 64)
+  } finally {
+    delete proxyMetricsDetailsMap.value[detailsKey]
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
+})

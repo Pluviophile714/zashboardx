@@ -125,7 +125,6 @@ import {
 } from '@/store/settings'
 import {
   getProxyMetricsSamplesCacheKey,
-  getProxyMetricsSamplesSnapshotAt,
   getProxyMetricsSamplesUpdateKind,
   getProxyMetricsDetailsSnapshot,
   getProxyMetricsTimelineCacheKey,
@@ -709,23 +708,12 @@ const getLatencyTimelineChartState = (
   const cacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
   const snapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
   const timeline = snapshot?.timeline ?? proxyMetricsTimelineMap.value[cacheKey]
-  const sharedSamplesSnapshotAt = getProxyMetricsSamplesSnapshotAt(
-    sourceName,
-    '24h',
-    LATENCY_DETAIL_SEGMENTS,
-  )
   const sharedSamples =
     proxyMetricsSamplesMap.value[
       getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
     ] ?? []
-  const sharedSnapshotMatchesDetails =
-    Boolean(sharedSamplesSnapshotAt) && sharedSamplesSnapshotAt === snapshot?.snapshotAt
   const samples =
-    window === '1h'
-      ? sharedSnapshotMatchesDetails
-        ? (snapshot?.samples ?? [])
-        : sharedSamples
-      : undefined
+    window === '1h' ? (snapshot?.samples?.length ? snapshot.samples : sharedSamples) : undefined
 
   if (timeline) {
     const hasSamples =

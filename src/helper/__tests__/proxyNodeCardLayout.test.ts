@@ -799,15 +799,14 @@ test('does not fall back to local or detail history while the shared R5S snapsho
   )
 })
 
-test('lets the 1h chart use the same shared snapshot when its detail response is stale', () => {
+test('keeps the full 1h detail samples when the shared recent snapshot differs', () => {
   const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
   const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
   const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
 
   assert.match(chartSource, /const sharedSamples =/)
-  assert.match(chartSource, /sharedSamplesSnapshotAt === snapshot\?\.snapshotAt/)
-  assert.match(chartSource, /sharedSnapshotMatchesDetails/)
-  assert.match(chartSource, /sharedSnapshotMatchesDetails[\s\S]*snapshot\?\.samples/)
+  assert.match(chartSource, /window === '1h'[\s\S]*snapshot\?\.samples\?\.length/)
+  assert.doesNotMatch(chartSource, /sharedSnapshotMatchesDetails\s*\?/)
 })
 
 test('animates first-level latency samples by translating one fixed track', () => {

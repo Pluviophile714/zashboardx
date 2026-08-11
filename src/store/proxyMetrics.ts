@@ -324,6 +324,13 @@ export const refreshProxyMetricsDetails = async (
     }
 
     const responseSnapshotAtMs = Date.parse(response.snapshotAt)
+    const previousDetails = proxyMetricsDetailsMap.value[detailsKey]
+    const previousDetailsSnapshotAtMs = Date.parse(previousDetails?.snapshotAt ?? '')
+    const detailsIsCurrent =
+      !previousDetails ||
+      !Number.isFinite(previousDetailsSnapshotAtMs) ||
+      !Number.isFinite(responseSnapshotAtMs) ||
+      responseSnapshotAtMs >= previousDetailsSnapshotAtMs
 
     const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', SHARED_RECENT_SAMPLES_LIMIT)
     const previousSamples = proxyMetricsSamplesMap.value[samplesKey]
@@ -357,6 +364,10 @@ export const refreshProxyMetricsDetails = async (
         ...proxyMetricsSamplesUpdateMap.value,
         [samplesKey]: update.kind,
       }
+    }
+
+    if (!detailsIsCurrent) {
+      return previousDetails
     }
 
     const timelineKey = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
