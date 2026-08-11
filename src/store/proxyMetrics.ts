@@ -323,28 +323,53 @@ export const refreshProxyMetricsDetails = async (
       return null
     }
 
+    const responseSnapshotAtMs = Date.parse(response.snapshotAt)
+
+    if (
+      proxyMetricsUpdatedAt.value > 0 &&
+      Number.isFinite(responseSnapshotAtMs) &&
+      responseSnapshotAtMs < proxyMetricsUpdatedAt.value
+    ) {
+      return null
+    }
+
     const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', SHARED_RECENT_SAMPLES_LIMIT)
-    const previous = proxyMetricsSamplesMap.value[samplesKey]
-    const update = reconcileRecentSampleUpdate(
-      previous,
-      response.samples.slice(-SHARED_RECENT_SAMPLES_LIMIT),
-    )
+    const previousSamples = proxyMetricsSamplesMap.value[samplesKey]
+    const previousLastTimestamp = Date.parse(previousSamples?.at(-1)?.timestamp ?? '')
+    const responseSamples = response.samples.slice(-SHARED_RECENT_SAMPLES_LIMIT)
+    const responseLastTimestamp = Date.parse(responseSamples.at(-1)?.timestamp ?? '')
+    const sharedSnapshotAtMs = Date.parse(proxyMetricsSamplesSnapshotMap.value[samplesKey] ?? '')
+    const snapshotIsCurrent =
+      !Number.isFinite(sharedSnapshotAtMs) ||
+      !Number.isFinite(responseSnapshotAtMs) ||
+      responseSnapshotAtMs >= sharedSnapshotAtMs
+    const samplesAreCurrent =
+      !previousSamples?.length ||
+      !Number.isFinite(previousLastTimestamp) ||
+      !Number.isFinite(responseLastTimestamp) ||
+      responseLastTimestamp >= previousLastTimestamp
+
+    if (responseSamples.length && snapshotIsCurrent && samplesAreCurrent) {
+      const update = reconcileRecentSampleUpdate(previousSamples, responseSamples)
+
+      proxyMetricsSamplesFetchTimeMap.set(samplesKey, Date.now())
+      proxyMetricsSamplesMap.value = {
+        ...proxyMetricsSamplesMap.value,
+        [samplesKey]: update.samples,
+      }
+      proxyMetricsSamplesSnapshotMap.value = {
+        ...proxyMetricsSamplesSnapshotMap.value,
+        [samplesKey]: response.snapshotAt,
+      }
+      proxyMetricsSamplesUpdateMap.value = {
+        ...proxyMetricsSamplesUpdateMap.value,
+        [samplesKey]: update.kind,
+      }
+    }
+
     const timelineKey = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
 
     proxyMetricsDetailsFetchTimeMap.set(detailsKey, Date.now())
-    proxyMetricsSamplesFetchTimeMap.set(samplesKey, Date.now())
-    proxyMetricsSamplesMap.value = {
-      ...proxyMetricsSamplesMap.value,
-      [samplesKey]: update.samples,
-    }
-    proxyMetricsSamplesSnapshotMap.value = {
-      ...proxyMetricsSamplesSnapshotMap.value,
-      [samplesKey]: response.snapshotAt,
-    }
-    proxyMetricsSamplesUpdateMap.value = {
-      ...proxyMetricsSamplesUpdateMap.value,
-      [samplesKey]: update.kind,
-    }
     proxyMetricsTimelineFetchTimeMap.set(timelineKey, Date.now())
     proxyMetricsTimelineMap.value = {
       ...proxyMetricsTimelineMap.value,
@@ -356,6 +381,9 @@ export const refreshProxyMetricsDetails = async (
         ...response,
         samples: response.samples,
       },
+    }
+    if (Number.isFinite(responseSnapshotAtMs)) {
+      proxyMetricsUpdatedAt.value = Math.max(proxyMetricsUpdatedAt.value, responseSnapshotAtMs)
     }
 
     return proxyMetricsDetailsMap.value[detailsKey]

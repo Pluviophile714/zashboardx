@@ -6,8 +6,11 @@ import {
   type ProxyMetricsSnapshotReadyEvent,
 } from '../../api/metricsHelper.ts'
 import {
+  proxyMetricsDetailsMap,
   proxyMetricsLiveConnected,
+  proxyMetricsSamplesMap,
   proxyMetricsUpdatedAt,
+  refreshProxyMetricsDetails,
   startProxyMetricsLiveUpdates,
 } from '../../store/proxyMetrics.ts'
 
@@ -45,6 +48,57 @@ const proxiesPageSource = readFileSync(
   new URL('../../views/ProxiesPage.vue', import.meta.url),
   'utf8',
 )
+
+const detailsResponse = (
+  nodeName: string,
+  snapshotAt: string,
+  delay: number,
+  sampleTimestamp = '2026-08-11T08:55:34.000Z',
+) => {
+  const endMs = Date.parse(snapshotAt)
+  const bucketSeconds = 15 * 60
+  const buckets = Array.from({ length: 96 }, (_, index) => {
+    const start = new Date(endMs - (96 - index) * bucketSeconds * 1000).toISOString()
+    const end = new Date(endMs - (95 - index) * bucketSeconds * 1000).toISOString()
+    const hasSample = index === 95
+
+    return {
+      avgDelay: hasSample ? delay : null,
+      end,
+      failureCount: 0,
+      jitter: null,
+      maxDelay: hasSample ? delay : null,
+      minDelay: hasSample ? delay : null,
+      sampleCount: hasSample ? 1 : 0,
+      start,
+      successCount: hasSample ? 1 : 0,
+    }
+  })
+
+  return {
+    generatedAt: snapshotAt,
+    nodeName,
+    samples: [
+      {
+        delay,
+        nodeName,
+        success: true,
+        testUrl: 'https://example.com',
+        timestamp: sampleTimestamp,
+      },
+    ],
+    snapshotAt,
+    timeline: {
+      bucketSeconds,
+      buckets,
+      generatedAt: snapshotAt,
+      jitter: null,
+      nodeName,
+      snapshotAt,
+      windowSeconds: 86_400,
+    },
+  }
+}
 
 test('opens the metrics event stream and validates snapshot events', () => {
   const received: ProxyMetricsSnapshotReadyEvent[] = []
@@ -137,4 +191,127 @@ test('starts live metrics with the proxy page and keeps polling as fallback', ()
   assert.match(proxiesPageSource, /stopMetricsLiveUpdates = startProxyMetricsLiveUpdates\(\)/)
   assert.match(proxiesPageSource, /metricsRefreshTimer = setInterval\([\s\S]*refreshProxyMetrics/)
   assert.match(proxiesPageSource, /stopMetricsLiveUpdates\?\.\(\)/)
+})
+
+test('does not let a detail refresh replace the shared recent samples', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-STALE-01'
+  const key = `24h\n30\n${nodeName}`
+  const currentSample = {
+    delay: 57,
+    nodeName,
+    success: true,
+    testUrl: 'https://example.com',
+    timestamp: '2026-08-11T09:02:00.000Z',
+  }
+
+  proxyMetricsSamplesMap.value = {
+    ...proxyMetricsSamplesMap.value,
+    [key]: [currentSample],
+  }
+
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(JSON.stringify(detailsResponse(nodeName, '2026-08-11T09:03:00.000Z', 63)), {
+        status: 200,
+      }),
+    window: globalThis,
+  })
+
+  try {
+    await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      snapshotAt: '2026-08-11T09:03:00.000Z',
+      window: '24h',
+    })
+
+    assert.equal(proxyMetricsSamplesMap.value[key]?.at(-1)?.delay, 57)
+  } finally {
+    delete proxyMetricsSamplesMap.value[key]
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
+})
+
+test('promotes a newer detail snapshot into the shared recent samples', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-LIVE-01'
+  const key = `24h\n30\n${nodeName}`
+  const currentSample = {
+    delay: 57,
+    nodeName,
+    success: true,
+    testUrl: 'https://example.com',
+    timestamp: '2026-08-11T09:02:00.000Z',
+  }
+
+  proxyMetricsSamplesMap.value = {
+    ...proxyMetricsSamplesMap.value,
+    [key]: [currentSample],
+  }
+
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(
+        JSON.stringify(
+          detailsResponse(nodeName, '2026-08-11T09:04:00.000Z', 63, '2026-08-11T09:04:00.000Z'),
+        ),
+        { status: 200 },
+      ),
+    window: globalThis,
+  })
+
+  try {
+    await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      snapshotAt: '2026-08-11T09:04:00.000Z',
+      window: '24h',
+    })
+
+    assert.equal(proxyMetricsSamplesMap.value[key]?.at(-1)?.delay, 63)
+  } finally {
+    delete proxyMetricsSamplesMap.value[key]
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
+})
+
+test('does not accept a detail snapshot older than the shared metrics snapshot', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-STALE-02'
+  const detailsKey = `24h\n${nodeName}`
+
+  proxyMetricsUpdatedAt.value = Date.parse('2026-08-11T09:02:00.000Z')
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(JSON.stringify(detailsResponse(nodeName, '2026-08-11T09:01:00.000Z', 63)), {
+        status: 200,
+      }),
+    window: globalThis,
+  })
+
+  try {
+    const details = await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      snapshotAt: '2026-08-11T09:02:00.000Z',
+      window: '24h',
+    })
+
+    assert.equal(details, null)
+    assert.equal(proxyMetricsDetailsMap.value[detailsKey], undefined)
+  } finally {
+    delete proxyMetricsDetailsMap.value[detailsKey]
+    proxyMetricsUpdatedAt.value = 0
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
 })

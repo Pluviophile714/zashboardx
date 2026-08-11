@@ -773,7 +773,41 @@ test('uses the shared R5S latest sample for the first-level latency tag', () => 
 
   assert.match(overrideSource, /getR5sLatencySamples\(\)\?\.samples\.at\(-1\)/)
   assert.match(overrideSource, /latest\.success && latest\.delay !== null/)
-  assert.match(overrideSource, /metrics\.lastDelay/)
+  assert.doesNotMatch(overrideSource, /metrics\.lastDelay/)
+  assert.match(overrideSource, /return NOT_CONNECTED/)
+})
+
+test('does not fall back to local or detail history while the shared R5S snapshot is warming up', () => {
+  const stabilityStart = proxyNodeCardSource.indexOf('const getLatencyStabilityHistory =')
+  const stabilityEnd = proxyNodeCardSource.indexOf('const latencyStabilityBar =', stabilityStart)
+  const stabilitySource = proxyNodeCardSource.slice(stabilityStart, stabilityEnd)
+  const detailsStart = proxyNodeCardSource.indexOf('const getR5sLatencyHistory =')
+  const detailsEnd = proxyNodeCardSource.indexOf(
+    'const getLatencyDetailsHistorySource =',
+    detailsStart,
+  )
+  const detailsSource = proxyNodeCardSource.slice(detailsStart, detailsEnd)
+
+  assert.match(stabilitySource, /if \(r5s\?\.samples\.length\)/)
+  assert.match(stabilitySource, /return \[\]/)
+  assert.match(stabilitySource, /if \(getSharedMetricsResolution\(\)\) \{[\s\S]*return \[\]/)
+  assert.match(detailsSource, /history: sharedSamples\.map/)
+  assert.doesNotMatch(detailsSource, /detailsSamples/)
+  assert.match(
+    detailsSource,
+    /if \(!sharedSamples\.length && !metricsResolution\) \{\s*return null/s,
+  )
+})
+
+test('lets the 1h chart use the same shared snapshot when its detail response is stale', () => {
+  const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
+  const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
+  const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
+
+  assert.match(chartSource, /const sharedSamples =/)
+  assert.match(chartSource, /sharedSamplesSnapshotAt === snapshot\?\.snapshotAt/)
+  assert.match(chartSource, /sharedSnapshotMatchesDetails/)
+  assert.match(chartSource, /sharedSnapshotMatchesDetails[\s\S]*snapshot\?\.samples/)
 })
 
 test('animates first-level latency samples by translating one fixed track', () => {

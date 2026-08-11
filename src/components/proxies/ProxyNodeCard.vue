@@ -125,6 +125,7 @@ import {
 } from '@/store/settings'
 import {
   getProxyMetricsSamplesCacheKey,
+  getProxyMetricsSamplesSnapshotAt,
   getProxyMetricsSamplesUpdateKind,
   getProxyMetricsDetailsSnapshot,
   getProxyMetricsTimelineCacheKey,
@@ -546,6 +547,10 @@ const getLatencyStabilityHistory = () => {
     }))
   }
 
+  if (getSharedMetricsResolution()) {
+    return []
+  }
+
   return (getHistoryByName(props.name, props.groupName) ?? []).map((item, index) => ({
     delay: item.delay,
     identity: `local:${item.time}:${item.delay}:${index}`,
@@ -684,18 +689,17 @@ watch(
 const cardLatencyOverride = computed(() => {
   const resolution = getSharedMetricsResolution()
 
-  if (!resolution?.metrics.sampleCount) {
-    return undefined
-  }
-
-  const { metrics } = resolution
   const latest = getR5sLatencySamples()?.samples.at(-1)
 
   if (latest) {
     return latest.success && latest.delay !== null ? latest.delay : NOT_CONNECTED
   }
 
-  return metrics.lastDelay ?? NOT_CONNECTED
+  if (resolution) {
+    return NOT_CONNECTED
+  }
+
+  return getHistoryByName(props.name, props.groupName)?.at(-1)?.delay
 })
 
 const getLatencyTimelineChartState = (
@@ -705,13 +709,22 @@ const getLatencyTimelineChartState = (
   const cacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
   const snapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
   const timeline = snapshot?.timeline ?? proxyMetricsTimelineMap.value[cacheKey]
+  const sharedSamplesSnapshotAt = getProxyMetricsSamplesSnapshotAt(
+    sourceName,
+    '24h',
+    LATENCY_DETAIL_SEGMENTS,
+  )
+  const sharedSamples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ] ?? []
+  const sharedSnapshotMatchesDetails =
+    Boolean(sharedSamplesSnapshotAt) && sharedSamplesSnapshotAt === snapshot?.snapshotAt
   const samples =
     window === '1h'
-      ? (snapshot?.samples ??
-        proxyMetricsSamplesMap.value[
-          getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-        ] ??
-        [])
+      ? sharedSnapshotMatchesDetails
+        ? (snapshot?.samples ?? [])
+        : sharedSamples
       : undefined
 
   if (timeline) {
@@ -752,19 +765,17 @@ const getR5sLatencyHistory = () => {
     return null
   }
 
-  const samples =
-    getProxyMetricsDetailsSnapshot(sourceName, activeLatencyTimelineWindow)?.samples ??
+  const sharedSamples =
     proxyMetricsSamplesMap.value[
       getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
-    ] ??
-    []
+    ] ?? []
 
-  if (!samples.length && !metricsResolution?.metrics?.sampleCount) {
+  if (!sharedSamples.length && !metricsResolution) {
     return null
   }
 
   return {
-    history: samples.map((sample) => ({
+    history: sharedSamples.map((sample) => ({
       delay: sample.success && sample.delay ? sample.delay : NOT_CONNECTED,
       time: sample.timestamp,
     })),
