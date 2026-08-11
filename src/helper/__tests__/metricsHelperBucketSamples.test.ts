@@ -85,6 +85,7 @@ test('normalizes bucket samples with their requested interval identity', async (
           timestamp: '2026-07-04T00:02:00.000Z',
         },
       ],
+      snapshotAt: '2026-07-04T00:15:01.000Z',
       start,
       truncated: true,
     })

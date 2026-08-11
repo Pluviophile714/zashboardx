@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads'
+import type { MetricsSnapshotReadyEvent } from './metricsEvents.js'
 import type { MetricsStorage } from './storage.js'
 import type { NodeMetrics } from './types.js'
 
@@ -18,6 +19,7 @@ type MetricsAggregationCacheOptions = {
   ttlMs: number
   refreshDebounceMs: number
   now?: () => number
+  onSnapshotReady?: (event: MetricsSnapshotReadyEvent) => void
 }
 
 type MetricsWorkerMessage =
@@ -37,6 +39,7 @@ export class MetricsAggregationCache {
   readonly #ttlMs: number
   readonly #refreshDebounceMs: number
   readonly #now: () => number
+  readonly #onSnapshotReady?: (event: MetricsSnapshotReadyEvent) => void
   readonly #snapshots = new Map<number, MetricsSnapshot>()
   readonly #dirtyWindows = new Set<number>()
   readonly #refreshWindows = new Set<number>()
@@ -51,6 +54,7 @@ export class MetricsAggregationCache {
     this.#ttlMs = options.ttlMs
     this.#refreshDebounceMs = options.refreshDebounceMs
     this.#now = options.now ?? Date.now
+    this.#onSnapshotReady = options.onSnapshotReady
   }
 
   get(windowSeconds = this.#defaultWindowSeconds, nowMs = this.#now()) {
@@ -87,6 +91,7 @@ export class MetricsAggregationCache {
 
     this.#snapshots.set(windowSeconds, snapshot)
     this.#dirtyWindows.delete(windowSeconds)
+    this.#notifySnapshotReady(snapshot)
 
     return snapshot
   }
@@ -158,6 +163,7 @@ export class MetricsAggregationCache {
       if (message.ok) {
         this.#snapshots.set(windowSeconds, message.snapshot)
         this.#dirtyWindows.delete(windowSeconds)
+        this.#notifySnapshotReady(message.snapshot)
       }
     })
     worker.once('exit', () => {
@@ -167,6 +173,14 @@ export class MetricsAggregationCache {
     worker.once('error', () => {
       this.#refreshWorkers.delete(worker)
       this.#refreshingWindows.delete(windowSeconds)
+    })
+  }
+
+  #notifySnapshotReady(snapshot: MetricsSnapshot) {
+    this.#onSnapshotReady?.({
+      type: 'snapshot_ready',
+      snapshotAt: snapshot.generatedAt,
+      windowSeconds: snapshot.windowSeconds,
     })
   }
 }

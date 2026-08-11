@@ -106,6 +106,67 @@ export type ProxyMetricsDetailsResponse = {
   timeline: ProxyMetricsTimelineResponse
 }
 
+export type ProxyMetricsSnapshotReadyEvent = {
+  type: 'snapshot_ready'
+  snapshotAt: string
+  windowSeconds: number
+}
+
+type ProxyMetricsEventSource = {
+  onerror: (() => void) | null
+  onopen: (() => void) | null
+  addEventListener: (type: string, listener: (event: { data: string }) => void) => void
+  close: () => void
+}
+
+export type ProxyMetricsEventSourceConstructor = new (url: string) => ProxyMetricsEventSource
+
+export const openProxyMetricsEvents = (
+  onSnapshotReady: (event: ProxyMetricsSnapshotReadyEvent) => void,
+  onConnectionChange: (connected: boolean) => void = () => undefined,
+  EventSourceConstructor?: ProxyMetricsEventSourceConstructor,
+) => {
+  const EventSourceClass =
+    EventSourceConstructor ??
+    (typeof EventSource === 'undefined'
+      ? undefined
+      : (EventSource as unknown as ProxyMetricsEventSourceConstructor))
+
+  if (!EventSourceClass) {
+    return () => undefined
+  }
+
+  const source = new EventSourceClass('/api/metrics/events')
+
+  source.onopen = () => onConnectionChange(true)
+  source.onerror = () => onConnectionChange(false)
+  source.addEventListener('snapshot_ready', (event) => {
+    try {
+      const data = JSON.parse(event.data) as Partial<ProxyMetricsSnapshotReadyEvent>
+      const snapshotAtMs = typeof data.snapshotAt === 'string' ? Date.parse(data.snapshotAt) : NaN
+
+      if (
+        data.type !== 'snapshot_ready' ||
+        !Number.isFinite(snapshotAtMs) ||
+        typeof data.windowSeconds !== 'number' ||
+        data.windowSeconds <= 0
+      ) {
+        return
+      }
+
+      onSnapshotReady({
+        type: 'snapshot_ready',
+        snapshotAt: new Date(snapshotAtMs).toISOString(),
+        windowSeconds: data.windowSeconds,
+      })
+    } catch {
+      // Ignore malformed live events and let the polling fallback recover.
+    }
+  })
+
+  return () => source.close()
+}
+
 const proxyMetricsSampleQueue: ProxyMetricsSample[] = []
 let proxyMetricsSampleFlushTimer: ReturnType<typeof window.setTimeout> | undefined
 

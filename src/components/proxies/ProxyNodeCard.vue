@@ -102,6 +102,7 @@ import {
   getLatencyDetailsViewportSize,
 } from '@/helper/latencyDetailsViewport'
 import { getLatencySampleIndexAtPointer } from '@/helper/latencySampleSelection'
+import { getProxyMetricsFreshness } from '@/helper/proxyMetricsFreshness'
 import { getProxyMetricsSampleIdentity } from '@/helper/proxyMetricsRecentSamples'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
@@ -129,6 +130,7 @@ import {
   getProxyMetricsTimelineCacheKey,
   invalidateProxyMetricsTimeline,
   proxyMetricsMap,
+  proxyMetricsLiveConnected,
   proxyMetricsSamplesMap,
   proxyMetricsTimelineMap,
   proxyMetricsUpdatedAt,
@@ -1364,6 +1366,32 @@ const createLatencyDetailsTip = () => {
   title.textContent = node.value?.name ?? props.name
   root.append(title)
 
+  const freshness = getProxyMetricsFreshness(
+    sharedMetrics?.lastSampleAt,
+    proxyMetricsLiveConnected.value,
+  )
+  const freshnessLine = document.createElement('div')
+  const freshnessLabel =
+    freshness.state === 'live'
+      ? t('metricsLive')
+      : freshness.state === 'polling'
+        ? t('metricsPolling')
+        : freshness.state === 'stale'
+          ? t('metricsStale')
+          : t('metricsWaiting')
+  const ageLabel =
+    freshness.ageSeconds === null
+      ? t('metricsNoSample')
+      : freshness.ageSeconds < 5
+        ? t('metricsJustNow')
+        : t('metricsLastProbe', { time: formatMetricsAge(freshness.ageSeconds) })
+
+  freshnessLine.className = compact
+    ? 'mb-1 text-center text-[10px] text-base-content/50'
+    : 'mb-1.5 text-center text-[11px] text-base-content/50'
+  freshnessLine.textContent = `${freshnessLabel} · ${ageLabel}`
+  root.append(freshnessLine)
+
   if (stats || history.length || sharedMetrics) {
     const chart = document.createElement('div')
     chart.className = compact
@@ -1467,6 +1495,18 @@ const createLatencyDetailsTip = () => {
   }
 
   return root
+}
+
+const formatMetricsAge = (ageSeconds: number) => {
+  if (ageSeconds < 60) {
+    return `${ageSeconds}${t('metricsSeconds')}`
+  }
+
+  if (ageSeconds < 3600) {
+    return `${Math.floor(ageSeconds / 60)}${t('metricsMinutes')}`
+  }
+
+  return `${Math.floor(ageSeconds / 3600)}${t('metricsHours')}`
 }
 
 const handlerLatencyDetailsTip = async (e: Event) => {

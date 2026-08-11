@@ -63,7 +63,7 @@ import { PROXY_TAB_TYPE } from '@/constant'
 import { isMiddleScreen } from '@/helper/utils'
 import { fetchProxies } from '@/assembly/proxies'
 import { proxiesTabShow } from '@/assembly/proxies'
-import { refreshProxyMetrics } from '@/store/proxyMetrics'
+import { refreshProxyMetrics, startProxyMetricsLiveUpdates } from '@/store/proxyMetrics'
 import { disableProxiesPageTextSelect, twoColumnProxyGroup } from '@/store/settings'
 import { folderManagerOpen, isProxyFolderModeActive } from '@/store/proxyFolders'
 import { useSessionStorage } from '@vueuse/core'
@@ -113,8 +113,10 @@ watch(proxiesTabShow, () =>
 
 isProxiesPageMounted.value = false
 let metricsRefreshTimer: ReturnType<typeof setInterval> | undefined
+let stopMetricsLiveUpdates: (() => void) | undefined
 
 onMounted(() => {
+  stopMetricsLiveUpdates = startProxyMetricsLiveUpdates()
   setTimeout(() => {
     isProxiesPageMounted.value = true
     nextTick(() => {
@@ -130,6 +132,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopMetricsLiveUpdates?.()
+  stopMetricsLiveUpdates = undefined
+
   if (metricsRefreshTimer) {
     clearInterval(metricsRefreshTimer)
   }

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { MetricsAggregationCache } from './metricsCache.js'
+import { MetricsUpdateHub } from './metricsEvents.js'
 import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
@@ -123,6 +124,48 @@ test('serves health and node metrics as JSON', async () => {
     assert.equal(nodeBody.metrics?.firstSampleAt, at(0))
     assert.equal(nodeBody.metrics?.lastSampleAt, at(0))
   } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('streams ready and snapshot events to live metrics clients', async () => {
+  const storage = createStorage()
+  const updates = new MetricsUpdateHub()
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 1,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    updates,
+  })
+  const baseUrl = await listen(server)
+  const response = await fetch(`${baseUrl}/api/metrics/events`)
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+
+  try {
+    assert.equal(response.status, 200)
+    assert.match(decoder.decode((await reader.read()).value), /event: ready/)
+
+    updates.publish({
+      type: 'snapshot_ready',
+      snapshotAt: at(2),
+      windowSeconds: 24 * 60 * 60,
+    })
+
+    const eventChunk = decoder.decode((await reader.read()).value)
+    assert.match(eventChunk, /event: snapshot_ready/)
+    assert.match(eventChunk, /"snapshotAt":"2026-07-04T00:02:00.000Z"/)
+  } finally {
+    await reader.cancel()
     server.close()
     storage.close()
   }

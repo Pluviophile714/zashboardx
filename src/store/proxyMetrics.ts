@@ -5,8 +5,10 @@ import {
   fetchProxyMetricsHelperAPI,
   fetchProxyMetricsSamplesAPI,
   fetchProxyMetricsTimelineAPI,
+  openProxyMetricsEvents,
   type ProxyMetricsBucketSamplesResponse,
   type ProxyMetricsDetailsResponse,
+  type ProxyMetricsEventSourceConstructor,
   type ProxyMetricsNode,
   type ProxyMetricsSample,
   type ProxyMetricsTimelineResponse,
@@ -54,6 +56,10 @@ export const proxyMetricsUpdatedAt = ref(0)
 export const proxyMetricsRequestDurationMs = ref<number | null>(null)
 export const proxyMetricsRequestFailed = ref(false)
 export const proxyMetricsLastRequestAt = ref(0)
+export const proxyMetricsLiveConnected = ref(false)
+export const proxyMetricsLastEventAt = ref(0)
+
+let stopLiveUpdates: (() => void) | undefined
 
 export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => {
   const now = Date.now()
@@ -115,6 +121,46 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
   })
 
   return pendingRefresh
+}
+
+export const startProxyMetricsLiveUpdates = (
+  options: {
+    EventSourceConstructor?: ProxyMetricsEventSourceConstructor
+  } = {},
+) => {
+  if (stopLiveUpdates) {
+    return stopLiveUpdates
+  }
+
+  const close = openProxyMetricsEvents(
+    (event) => {
+      const eventAt = Date.parse(event.snapshotAt)
+
+      if (!Number.isFinite(eventAt)) {
+        return
+      }
+
+      proxyMetricsLastEventAt.value = eventAt
+
+      if (eventAt <= proxyMetricsUpdatedAt.value) {
+        return
+      }
+
+      void refreshProxyMetrics({ force: true })
+    },
+    (connected) => {
+      proxyMetricsLiveConnected.value = connected
+    },
+    options.EventSourceConstructor,
+  )
+
+  stopLiveUpdates = () => {
+    close()
+    proxyMetricsLiveConnected.value = false
+    stopLiveUpdates = undefined
+  }
+
+  return stopLiveUpdates
 }
 
 export const refreshProxyMetricsSamples = async (

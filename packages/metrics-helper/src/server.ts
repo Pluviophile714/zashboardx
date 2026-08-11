@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import type { MetricsAggregationCache } from './metricsCache.js'
+import type { MetricsUpdateHub } from './metricsEvents.js'
 import type { MetricsStorage } from './storage.js'
 import type { HelperHealth, ProbeSample } from './types.js'
 
@@ -9,6 +10,7 @@ type MetricsServerOptions = {
   health: HelperHealth
   defaultWindowSeconds: number
   metricsCache?: MetricsAggregationCache
+  updates?: MetricsUpdateHub
   now?: () => number
 }
 
@@ -244,6 +246,23 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
 
     if (url.pathname === '/api/metrics/health') {
       sendJson(response, options.health)
+      return
+    }
+
+    if (url.pathname === '/api/metrics/events') {
+      if (!options.updates) {
+        sendStatus(response, 503, { error: 'metrics_events_unavailable' })
+        return
+      }
+
+      response.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'X-Accel-Buffering': 'no',
+      })
+      options.updates.subscribe(response)
       return
     }
 

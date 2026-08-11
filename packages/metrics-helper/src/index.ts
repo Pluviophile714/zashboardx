@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js'
 import { MetricsAggregationCache } from './metricsCache.js'
+import { MetricsUpdateHub } from './metricsEvents.js'
 import { MihomoClient } from './mihomoClient.js'
 import { ProbeRunner } from './prober.js'
 import { createMetricsServer } from './server.js'
@@ -18,6 +19,7 @@ const health: HelperHealth = {
   version,
 }
 const storage = new MetricsStorage(config.databasePath)
+const updates = new MetricsUpdateHub()
 
 storage.init()
 
@@ -27,6 +29,7 @@ const metricsCache = new MetricsAggregationCache({
   defaultWindowSeconds: config.probeWindowHours * 60 * 60,
   refreshDebounceMs: config.metricsCacheRefreshDebounceMs,
   ttlMs: config.metricsCacheTtlSeconds * 1000,
+  onSnapshotReady: (event) => updates.publish(event),
 })
 
 const client = new MihomoClient({
@@ -45,6 +48,7 @@ const server = createMetricsServer({
   health,
   defaultWindowSeconds: config.probeWindowHours * 60 * 60,
   metricsCache,
+  updates,
 })
 
 server.listen(config.port, config.bindHost, () => {
@@ -58,6 +62,7 @@ runner.start()
 const shutdown = () => {
   runner.stop()
   metricsCache.stop()
+  updates.close()
   server.close(() => {
     storage.close()
     process.exit(0)
