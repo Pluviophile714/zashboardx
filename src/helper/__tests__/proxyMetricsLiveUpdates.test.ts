@@ -131,10 +131,9 @@ test('refreshes the shared metrics snapshot only for newer live events', async (
 })
 
 test('starts live metrics with the proxy page and keeps polling as fallback', () => {
-  assert.match(
-    proxiesPageSource,
-    /import \{[\s\S]*refreshProxyMetrics,[\s\S]*startProxyMetricsLiveUpdates,[\s\S]*\} from '@\/store\/proxyMetrics'/,
-  )
+  assert.match(proxiesPageSource, /refreshProxyMetrics/)
+  assert.match(proxiesPageSource, /startProxyMetricsLiveUpdates/)
+  assert.match(proxiesPageSource, /from '@\/store\/proxyMetrics'/)
   assert.match(proxiesPageSource, /stopMetricsLiveUpdates = startProxyMetricsLiveUpdates\(\)/)
   assert.match(proxiesPageSource, /metricsRefreshTimer = setInterval\([\s\S]*refreshProxyMetrics/)
   assert.match(proxiesPageSource, /stopMetricsLiveUpdates\?\.\(\)/)

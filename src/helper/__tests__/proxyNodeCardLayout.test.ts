@@ -798,7 +798,7 @@ test('refreshes the open R5S detail snapshot when the shared metrics update', ()
   assert.match(proxyNodeCardSource, /watch\(\s*proxyMetricsUpdatedAt/)
   assert.match(
     proxyNodeCardSource,
-    /refreshR5sLatencyDetailsSnapshot\(sourceName, activeLatencyTimelineWindow, true\)/,
+    /refreshLatencyDetailsTimeline\(sourceName, activeLatencyTimelineWindow\)/,
   )
   assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
 })
@@ -856,6 +856,27 @@ test('guards stale timeline responses before mutating unavailable state', () => 
   assert.ok(guardIndex >= 0)
   assert.ok(deleteIndex > guardIndex)
   assert.ok(addIndex > guardIndex)
+})
+
+test('keeps the last chart and retries an active detail request after a transient failure', () => {
+  assert.match(proxyNodeCardSource, /let latencyTimelineRetryTimer:/)
+  assert.match(proxyNodeCardSource, /const scheduleLatencyTimelineRetry =/)
+  assert.match(
+    proxyNodeCardSource,
+    /getProxyMetricsDetailsSnapshot\(sourceName, window\)[\s\S]*unavailableLatencyTimelineKeys\.add/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /window\.setTimeout\([\s\S]*refreshLatencyDetailsTimeline\(sourceName, window\)/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /if \(details\?\.timeline\) \{[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*unavailableLatencyTimelineKeys\.delete/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /onDestroy:[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*resetLatencyBucketDrilldownState/,
+  )
 })
 
 test('enters bucket drilldown only after a successful exact-interval response', () => {

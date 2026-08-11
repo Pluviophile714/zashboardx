@@ -169,6 +169,8 @@ const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
 const LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000
 const LATENCY_BUCKET_DRILLDOWN_RESET_DELAY = 8000
 const LATENCY_STRIP_ANIMATION_FALLBACK_DELAY = 650
+const LATENCY_TIMELINE_RETRY_BASE_DELAY = 750
+const LATENCY_TIMELINE_RETRY_MAX_DELAY = 5000
 const { t } = useI18n()
 const { hideTip, showTip } = useTooltip()
 const props = defineProps<{
@@ -233,6 +235,8 @@ let stopLatencyDetailsMetricsWatch: (() => void) | undefined
 let latencyTimelineRequestGeneration = 0
 let latencyBucketRequestGeneration = 0
 let latencyBucketDrilldownResetTimer: ReturnType<typeof window.setTimeout> | undefined
+let latencyTimelineRetryTimer: ReturnType<typeof window.setTimeout> | undefined
+let latencyTimelineRetryAttempt = 0
 let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '24h'
 let activeLatencyTimelineBucket: ProxyMetricsTimelineBucket | null = null
 let activeLatencyTimelineSample: ProxyMetricsSample | null = null
@@ -255,8 +259,18 @@ const clearLatencyBucketDrilldownResetTimer = () => {
   latencyBucketDrilldownResetTimer = undefined
 }
 
+const clearLatencyTimelineRetry = () => {
+  if (latencyTimelineRetryTimer) {
+    window.clearTimeout(latencyTimelineRetryTimer)
+    latencyTimelineRetryTimer = undefined
+  }
+
+  latencyTimelineRetryAttempt = 0
+}
+
 const resetLatencyBucketDrilldownState = () => {
   clearLatencyBucketDrilldownResetTimer()
+  clearLatencyTimelineRetry()
   activeLatencyTimelineWindow = '24h'
   activeLatencyTimelineBucket = null
   activeLatencyTimelineSample = null
@@ -798,7 +812,7 @@ const refreshActiveR5sLatencyDetails = () => {
     return
   }
 
-  void refreshR5sLatencyDetailsSnapshot(sourceName, activeLatencyTimelineWindow, true).then(() => {
+  void refreshLatencyDetailsTimeline(sourceName, activeLatencyTimelineWindow).then(() => {
     if (
       activeLatencyDetailsTip !== instance ||
       activeLatencyDetailsSourceName !== sourceName ||
@@ -1011,9 +1025,18 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
     }
 
     if (details?.timeline) {
+      clearLatencyTimelineRetry()
       unavailableLatencyTimelineKeys.delete(timelineCacheKey)
     } else {
-      unavailableLatencyTimelineKeys.add(timelineCacheKey)
+      const previousSnapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
+
+      if (previousSnapshot?.timeline) {
+        unavailableLatencyTimelineKeys.delete(timelineCacheKey)
+      } else if (latencyTimelineRetryAttempt >= 2) {
+        unavailableLatencyTimelineKeys.add(timelineCacheKey)
+      }
+
+      scheduleLatencyTimelineRetry(sourceName, window)
     }
 
     renderActiveLatencyDetailsTip()
@@ -1022,12 +1045,41 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
   return request
 }
 
+const scheduleLatencyTimelineRetry = (
+  sourceName: string,
+  metricsWindow: ProxyMetricsTimelineWindow,
+) => {
+  if (latencyTimelineRetryTimer) return
+
+  const delay = Math.min(
+    LATENCY_TIMELINE_RETRY_BASE_DELAY * 2 ** latencyTimelineRetryAttempt,
+    LATENCY_TIMELINE_RETRY_MAX_DELAY,
+  )
+
+  latencyTimelineRetryAttempt += 1
+  latencyTimelineRetryTimer = window.setTimeout(() => {
+    latencyTimelineRetryTimer = undefined
+
+    if (
+      !activeLatencyDetailsTip ||
+      activeLatencyDetailsTip.state.isDestroyed ||
+      activeLatencyDetailsSourceName !== sourceName ||
+      activeLatencyTimelineWindow !== metricsWindow
+    ) {
+      return
+    }
+
+    void refreshLatencyDetailsTimeline(sourceName, metricsWindow)
+  }, delay)
+}
+
 const changeLatencyTimelineWindow = (window: ProxyMetricsTimelineWindow) => {
   if (window === activeLatencyTimelineWindow) {
     return
   }
 
   exitLatencyBucketDrilldown()
+  clearLatencyTimelineRetry()
   activeLatencyTimelineWindow = window
   renderActiveLatencyDetailsTip()
 
@@ -1568,6 +1620,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             activeLatencyDetailsSourceName = ''
             activeLatencyDetailsAnchor = null
             stopActiveLatencyDetailsRefresh()
+            clearLatencyTimelineRetry()
             resetLatencyBucketDrilldownState()
           }
           cleanupLatencyDetailsTip()
@@ -1677,6 +1730,7 @@ onUnmounted(() => {
   latencyStripVisibilityObserver?.disconnect()
   latencyStripVisibilityObserver = undefined
   stopActiveLatencyDetailsRefresh()
+  clearLatencyTimelineRetry()
   resetLatencyBucketDrilldownState()
   cleanupLatencyDetailsTip()
 })

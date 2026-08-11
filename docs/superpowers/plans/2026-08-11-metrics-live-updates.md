@@ -82,3 +82,45 @@
 - [ ] Run `pnpm run build`.
 - [ ] Run `git diff --check`.
 - [ ] Reuse port `5175`, open desktop and mobile proxy previews, and confirm live updates do not alter the existing charts.
+
+### Task 5: Move probe persistence off the HTTP event loop
+
+**Files:**
+- Create: `packages/metrics-helper/src/probeStorageWorker.ts`
+- Create: `packages/metrics-helper/src/probeStorageWorkerClient.ts`
+- Modify: `packages/metrics-helper/src/prober.ts`
+- Modify: `packages/metrics-helper/src/storage.ts`
+- Modify: `packages/metrics-helper/src/index.ts`
+- Test: `packages/metrics-helper/src/probeStorageWorkerClient.test.ts`
+- Test: `packages/metrics-helper/src/prober.test.ts`
+
+- [ ] Add a failing test proving a persistent-database probe round is submitted through an asynchronous worker boundary.
+- [ ] Add a failing test proving fallback selection and persisted samples retain the existing behavior through the worker-backed path.
+- [ ] Implement a persistent worker client, transactional history ingestion, fallback selection, fallback sample persistence, and retention pruning.
+- [ ] Keep the direct storage path for `:memory:` tests and explicit injected storage users.
+
+### Task 6: Serve shared detail snapshots without synchronous database scans
+
+**Files:**
+- Create: `packages/metrics-helper/src/metricsDetailsCache.ts`
+- Create: `packages/metrics-helper/src/metricsDetailsWorker.ts`
+- Modify: `packages/metrics-helper/src/server.ts`
+- Modify: `packages/metrics-helper/src/index.ts`
+- Test: `packages/metrics-helper/src/metricsDetailsCache.test.ts`
+- Test: `packages/metrics-helper/src/server.test.ts`
+
+- [ ] Add a failing test that an expired cached detail snapshot is returned immediately while its replacement is pending.
+- [ ] Add a failing server test that `/api/metrics/details` reads the detail cache instead of synchronously calling storage.
+- [ ] Implement read-only worker aggregation keyed by node, window, bucket count, and sample limit.
+- [ ] Mark cached detail keys dirty immediately after each completed probe round.
+
+### Task 7: Recover active charts automatically after transient failures
+
+**Files:**
+- Modify: `src/components/proxies/ProxyNodeCard.vue`
+- Test: `src/helper/__tests__/proxyNodeCardLayout.test.ts`
+
+- [ ] Add a failing source regression test for bounded active-card retry and preservation of an existing detail snapshot.
+- [ ] Retry the active source/window without requiring hover re-entry.
+- [ ] Show unavailable only when no successful snapshot exists, while continuing background recovery attempts.
+- [ ] Clear retry state on success, window change, tooltip destruction, and component unmount.

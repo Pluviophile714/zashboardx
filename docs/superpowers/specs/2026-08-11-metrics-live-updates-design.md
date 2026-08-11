@@ -31,3 +31,11 @@
 - No second metrics database or frontend cache.
 - No change to the 1h/6h/24h chart geometry.
 - No deployment or R5S configuration change in this feature itself.
+
+## Detail Loading Performance Follow-up
+
+- Probe-round SQLite writes run in a dedicated worker so the HTTP event loop remains responsive while hundreds of Mihomo nodes are persisted.
+- The worker uses the existing `MetricsStorage` methods and one transaction per phase; deduplication, fallback collapsing, retention, and timestamps keep their current semantics.
+- Detail responses use a shared cache keyed by node, window, and sample limit. The first request is computed in a read-only worker; later requests return the last complete snapshot immediately while a dirty snapshot refreshes in the background.
+- Cached detail keys are refreshed as soon as a probe round finishes. The existing aggregate snapshot SSE remains the frontend freshness signal, so an open card normally receives a ready detail snapshot by the time it reacts to the event.
+- A failed frontend refresh never removes the last successful chart. When no chart exists yet, the active card retries with bounded backoff instead of requiring the user to leave and hover again.

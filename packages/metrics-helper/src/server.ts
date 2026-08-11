@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import type { MetricsAggregationCache } from './metricsCache.js'
+import type { MetricsDetailsCache } from './metricsDetailsCache.js'
 import type { MetricsUpdateHub } from './metricsEvents.js'
 import type { MetricsStorage } from './storage.js'
 import type { HelperHealth, ProbeSample } from './types.js'
@@ -9,6 +10,7 @@ type MetricsServerOptions = {
   storage: MetricsStorage
   health: HelperHealth
   defaultWindowSeconds: number
+  detailsCache?: MetricsDetailsCache
   metricsCache?: MetricsAggregationCache
   updates?: MetricsUpdateHub
   now?: () => number
@@ -311,30 +313,52 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         return
       }
 
+      const limit = parseLimit(url.searchParams.get('limit'), 30)
+
+      if (options.detailsCache) {
+        try {
+          const details = await options.detailsCache.get({
+            bucketCount: profile.bucketCount,
+            limit,
+            nodeName,
+            nowMs,
+            windowSeconds: profile.windowSeconds,
+          })
+
+          sendJson(response, details)
+        } catch (error) {
+          response.setHeader('Retry-After', '1')
+          sendStatus(response, 503, {
+            error: error instanceof Error ? error.message : 'metrics_details_unavailable',
+            retryAfterMs: 1000,
+          })
+        }
+        return
+      }
+
       const snapshotAt = new Date(nowMs).toISOString()
       const details = options.storage.getNodeDetails(
         nodeName,
         profile.windowSeconds,
         profile.bucketCount,
-        parseLimit(url.searchParams.get('limit'), 30),
+        limit,
         nowMs,
       )
-      const timeline = {
-        windowSeconds: profile.windowSeconds,
-        generatedAt: snapshotAt,
-        snapshotAt,
-        nodeName,
-        bucketSeconds: profile.windowSeconds / profile.bucketCount,
-        jitter: details.jitter,
-        buckets: details.buckets,
-      }
 
       sendJson(response, {
         generatedAt: snapshotAt,
         snapshotAt,
         nodeName,
         samples: details.samples,
-        timeline,
+        timeline: {
+          windowSeconds: profile.windowSeconds,
+          generatedAt: snapshotAt,
+          snapshotAt,
+          nodeName,
+          bucketSeconds: profile.windowSeconds / profile.bucketCount,
+          jitter: details.jitter,
+          buckets: details.buckets,
+        },
       })
       return
     }

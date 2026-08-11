@@ -1,14 +1,16 @@
 import type { MetricsHelperConfig } from './config.js'
 import type { MihomoClient } from './mihomoClient.js'
+import type { ProbeStorageWorkerClient } from './probeStorageWorkerClient.js'
 import type { MetricsStorage } from './storage.js'
-import type { HelperHealth } from './types.js'
+import type { HelperHealth, ProbeSample } from './types.js'
 
 type ProbeRunnerOptions = {
   client: MihomoClient
   storage: MetricsStorage
   config: MetricsHelperConfig
   health: HelperHealth
-  onAfterRun?: () => void
+  onAfterRun?: () => Promise<void> | void
+  storageWorker?: ProbeStorageWorkerClient
 }
 
 const runBounded = async <T>(
@@ -34,7 +36,8 @@ export class ProbeRunner {
   readonly #storage: MetricsStorage
   readonly #config: MetricsHelperConfig
   readonly #health: HelperHealth
-  readonly #onAfterRun?: () => void
+  readonly #onAfterRun?: () => Promise<void> | void
+  readonly #storageWorker?: ProbeStorageWorkerClient
   #timer?: NodeJS.Timeout
   #running = false
 
@@ -44,6 +47,7 @@ export class ProbeRunner {
     this.#config = options.config
     this.#health = options.health
     this.#onAfterRun = options.onAfterRun
+    this.#storageWorker = options.storageWorker
   }
 
   async runOnce() {
@@ -56,17 +60,23 @@ export class ProbeRunner {
 
     try {
       const nodes = await this.#client.discoverProxyNodes(this.#config.probeTestUrl)
-      const fallbackNodes = []
       const nowMs = Date.now()
       const staleMs = this.#config.fallbackProbeStaleSeconds * 1000
+      const fallbackNodeNames = this.#storageWorker
+        ? new Set(await this.#storageWorker.prepareRound(nodes, nowMs, staleMs))
+        : null
+      const fallbackNodes = []
 
       for (const node of nodes) {
+        if (fallbackNodeNames) {
+          if (fallbackNodeNames.has(node.name)) fallbackNodes.push(node)
+          continue
+        }
+
         this.#storage.recordNode(node.name, node.type)
 
-        if (node.historySamples?.length) {
-          node.historySamples.forEach((sample) =>
-            this.#storage.insertProbeSample(sample, { collapseFallbackRound: true }),
-          )
+        for (const sample of node.historySamples ?? []) {
+          this.#storage.insertProbeSample(sample, { collapseFallbackRound: true })
         }
 
         const latestSampleAt = this.#storage.getLatestSampleTimestamp(node.name)
@@ -79,6 +89,7 @@ export class ProbeRunner {
         }
       }
 
+      const fallbackSamples: ProbeSample[] = []
       await runBounded(fallbackNodes, this.#config.probeConcurrency, async (node) => {
         const sample = await this.#client.probeNode(
           node.name,
@@ -86,16 +97,24 @@ export class ProbeRunner {
           this.#config.probeTimeoutMs,
         )
 
-        this.#storage.insertProbeSample(sample)
+        if (this.#storageWorker) {
+          fallbackSamples.push(sample)
+        } else {
+          this.#storage.insertProbeSample(sample)
+        }
       })
 
-      this.#storage.prune(this.#config.retentionDays)
+      if (this.#storageWorker) {
+        await this.#storageWorker.finishRound(fallbackSamples, this.#config.retentionDays, nowMs)
+      } else {
+        this.#storage.prune(this.#config.retentionDays, nowMs)
+      }
       this.#health.ok = true
       this.#health.mihomoReachable = true
       this.#health.lastProbeAt = new Date().toISOString()
       this.#health.lastProbeError = null
       this.#health.lastProbeNodeCount = nodes.length
-      this.#onAfterRun?.()
+      await this.#onAfterRun?.()
     } catch (error) {
       this.#health.ok = false
       this.#health.mihomoReachable = false

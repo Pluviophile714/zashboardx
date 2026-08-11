@@ -1,8 +1,10 @@
 import { loadConfig } from './config.js'
 import { MetricsAggregationCache } from './metricsCache.js'
+import { MetricsDetailsCache } from './metricsDetailsCache.js'
 import { MetricsUpdateHub } from './metricsEvents.js'
 import { MihomoClient } from './mihomoClient.js'
 import { ProbeRunner } from './prober.js'
+import { ProbeStorageWorkerClient } from './probeStorageWorkerClient.js'
 import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
@@ -31,6 +33,13 @@ const metricsCache = new MetricsAggregationCache({
   ttlMs: config.metricsCacheTtlSeconds * 1000,
   onSnapshotReady: (event) => updates.publish(event),
 })
+const detailsCache = new MetricsDetailsCache({
+  databasePath: config.databasePath,
+  refreshDebounceMs: config.metricsCacheRefreshDebounceMs,
+  ttlMs: config.metricsCacheTtlSeconds * 1000,
+})
+const storageWorker =
+  config.databasePath === ':memory:' ? undefined : new ProbeStorageWorkerClient(config.databasePath)
 
 const client = new MihomoClient({
   baseUrl: config.mihomoBaseUrl,
@@ -41,10 +50,15 @@ const runner = new ProbeRunner({
   storage,
   config,
   health,
-  onAfterRun: () => metricsCache.markDirty(),
+  onAfterRun: async () => {
+    await detailsCache.markDirty()
+    metricsCache.markDirty()
+  },
+  storageWorker,
 })
 const server = createMetricsServer({
   storage,
+  detailsCache,
   health,
   defaultWindowSeconds: config.probeWindowHours * 60 * 60,
   metricsCache,
@@ -61,9 +75,11 @@ runner.start()
 
 const shutdown = () => {
   runner.stop()
+  detailsCache.stop()
   metricsCache.stop()
   updates.close()
-  server.close(() => {
+  server.close(async () => {
+    await storageWorker?.stop()
     storage.close()
     process.exit(0)
   })

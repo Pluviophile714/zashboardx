@@ -542,6 +542,20 @@ export class MetricsStorage {
     return Number(result.changes ?? 0)
   }
 
+  transaction<T>(work: () => T) {
+    this.#db.exec('BEGIN IMMEDIATE')
+
+    try {
+      const result = work()
+
+      this.#db.exec('COMMIT')
+      return result
+    } catch (error) {
+      this.#db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   close() {
     this.#database?.close()
     this.#database = undefined

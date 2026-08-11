@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { MetricsAggregationCache } from './metricsCache.js'
+import { MetricsDetailsCache } from './metricsDetailsCache.js'
 import { MetricsUpdateHub } from './metricsEvents.js'
 import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
@@ -377,6 +378,76 @@ test('serves recent samples and timeline from one explicit snapshot cutoff', asy
       2,
     )
   } finally {
+    server.close()
+    storage.close()
+  }
+})
+
+test('serves detail snapshots from the asynchronous detail cache', async () => {
+  const storage = createStorage()
+  const snapshotAt = at(25)
+  const detailsCache = new MetricsDetailsCache({
+    loader: async (request) => ({
+      generatedAt: snapshotAt,
+      nodeName: request.nodeName,
+      samples: storage.getRecentProbeSamples(
+        request.nodeName,
+        request.windowSeconds,
+        request.limit,
+        request.nowMs,
+      ),
+      snapshotAt,
+      timeline: {
+        bucketSeconds: request.windowSeconds / request.bucketCount,
+        buckets: storage.getNodeTimeline(
+          request.nodeName,
+          request.windowSeconds,
+          request.bucketCount,
+          request.nowMs,
+        ),
+        generatedAt: snapshotAt,
+        jitter: storage.getNodeJitter(request.nodeName, request.windowSeconds, request.nowMs),
+        nodeName: request.nodeName,
+        snapshotAt,
+        windowSeconds: request.windowSeconds,
+      },
+    }),
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+  const originalGetNodeDetails = storage.getNodeDetails.bind(storage)
+
+  storage.getNodeDetails = () => {
+    throw new Error('synchronous details read should not run')
+  }
+
+  const server = createMetricsServer({
+    storage,
+    detailsCache,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(snapshotAt),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(`${baseUrl}/api/metrics/details?node=HK-01&window=1h&limit=30`)
+    const body = (await response.json()) as { snapshotAt: string; samples: unknown[] }
+
+    assert.equal(response.status, 200)
+    assert.equal(body.snapshotAt, snapshotAt)
+    assert.equal(body.samples.length, 1)
+  } finally {
+    storage.getNodeDetails = originalGetNodeDetails
+    detailsCache.stop()
     server.close()
     storage.close()
   }
