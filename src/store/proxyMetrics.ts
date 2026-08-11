@@ -325,14 +325,6 @@ export const refreshProxyMetricsDetails = async (
 
     const responseSnapshotAtMs = Date.parse(response.snapshotAt)
 
-    if (
-      proxyMetricsUpdatedAt.value > 0 &&
-      Number.isFinite(responseSnapshotAtMs) &&
-      responseSnapshotAtMs < proxyMetricsUpdatedAt.value
-    ) {
-      return null
-    }
-
     const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', SHARED_RECENT_SAMPLES_LIMIT)
     const previousSamples = proxyMetricsSamplesMap.value[samplesKey]
     const previousLastTimestamp = Date.parse(previousSamples?.at(-1)?.timestamp ?? '')

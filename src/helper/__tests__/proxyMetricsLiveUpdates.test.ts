@@ -282,13 +282,25 @@ test('promotes a newer detail snapshot into the shared recent samples', async ()
   }
 })
 
-test('does not accept a detail snapshot older than the shared metrics snapshot', async () => {
+test('keeps an older complete detail snapshot for the chart without rolling back shared samples', async () => {
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const nodeName = 'KUMA-STALE-02'
   const detailsKey = `24h\n${nodeName}`
+  const samplesKey = `24h\n30\n${nodeName}`
+  const currentSample = {
+    delay: 57,
+    nodeName,
+    success: true,
+    testUrl: 'https://example.com',
+    timestamp: '2026-08-11T09:02:00.000Z',
+  }
 
   proxyMetricsUpdatedAt.value = Date.parse('2026-08-11T09:02:00.000Z')
+  proxyMetricsSamplesMap.value = {
+    ...proxyMetricsSamplesMap.value,
+    [samplesKey]: [currentSample],
+  }
   Object.assign(globalThis, {
     fetch: async () =>
       new Response(JSON.stringify(detailsResponse(nodeName, '2026-08-11T09:01:00.000Z', 63)), {
@@ -304,10 +316,12 @@ test('does not accept a detail snapshot older than the shared metrics snapshot',
       window: '24h',
     })
 
-    assert.equal(details, null)
-    assert.equal(proxyMetricsDetailsMap.value[detailsKey], undefined)
+    assert.equal(details?.snapshotAt, '2026-08-11T09:01:00.000Z')
+    assert.equal(proxyMetricsDetailsMap.value[detailsKey]?.timeline.buckets.length, 96)
+    assert.equal(proxyMetricsSamplesMap.value[samplesKey]?.at(-1)?.delay, 57)
   } finally {
     delete proxyMetricsDetailsMap.value[detailsKey]
+    delete proxyMetricsSamplesMap.value[samplesKey]
     proxyMetricsUpdatedAt.value = 0
     Object.assign(globalThis, {
       fetch: originalFetch,
