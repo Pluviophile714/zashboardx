@@ -138,6 +138,7 @@ import {
   refreshProxyMetricsDetails,
 } from '@/store/proxyMetrics'
 import type {
+  ProxyMetricsDetailsResponse,
   ProxyMetricsSample,
   ProxyMetricsTimelineBucket,
   ProxyMetricsTimelineWindow,
@@ -701,6 +702,25 @@ const cardLatencyOverride = computed(() => {
   return getHistoryByName(props.name, props.groupName)?.at(-1)?.delay
 })
 
+const isLatencyTimelineSnapshotCurrent = (
+  sourceName: string,
+  details: ProxyMetricsDetailsResponse,
+) => {
+  const sharedSamples =
+    proxyMetricsSamplesMap.value[
+      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+    ] ?? []
+  const sharedLatestTimestamp = Date.parse(sharedSamples.at(-1)?.timestamp ?? '')
+
+  if (!Number.isFinite(sharedLatestTimestamp)) {
+    return true
+  }
+
+  const detailsLatestTimestamp = Date.parse(details.samples.at(-1)?.timestamp ?? '')
+
+  return Number.isFinite(detailsLatestTimestamp) && detailsLatestTimestamp >= sharedLatestTimestamp
+}
+
 const getLatencyTimelineChartState = (
   sourceName: string,
   window: ProxyMetricsTimelineWindow,
@@ -1024,8 +1044,13 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
     }
 
     if (details?.timeline) {
-      clearLatencyTimelineRetry()
       unavailableLatencyTimelineKeys.delete(timelineCacheKey)
+
+      if (isLatencyTimelineSnapshotCurrent(sourceName, details)) {
+        clearLatencyTimelineRetry()
+      } else {
+        scheduleLatencyTimelineRetry(sourceName, window)
+      }
     } else {
       const previousSnapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
 

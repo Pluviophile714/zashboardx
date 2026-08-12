@@ -904,11 +904,36 @@ test('keeps the last chart and retries an active detail request after a transien
   )
   assert.match(
     proxyNodeCardSource,
-    /if \(details\?\.timeline\) \{[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*unavailableLatencyTimelineKeys\.delete/,
+    /if \(details\?\.timeline\) \{[\s\S]*unavailableLatencyTimelineKeys\.delete/,
   )
   assert.match(
     proxyNodeCardSource,
     /onDestroy:[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*resetLatencyBucketDrilldownState/,
+  )
+})
+
+test('keeps showing a stale detail snapshot while retrying until it catches up', () => {
+  const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
+  const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
+  const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
+  const refreshStart = proxyNodeCardSource.indexOf('const refreshLatencyDetailsTimeline =')
+  const refreshEnd = proxyNodeCardSource.indexOf(
+    'const changeLatencyTimelineWindow =',
+    refreshStart,
+  )
+  const refreshSource = proxyNodeCardSource.slice(refreshStart, refreshEnd)
+
+  assert.match(chartSource, /snapshot\?\.samples\?\.length \? snapshot\.samples : sharedSamples/)
+  assert.match(chartSource, /status: 'ready'/)
+  assert.doesNotMatch(chartSource, /isLatencyTimelineSnapshotCurrent[\s\S]*status: 'loading'/)
+  assert.match(proxyNodeCardSource, /const isLatencyTimelineSnapshotCurrent =/)
+  assert.match(
+    refreshSource,
+    /if \(details\?\.timeline\) \{[\s\S]*isLatencyTimelineSnapshotCurrent\(sourceName, details\)[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*else \{[\s\S]*scheduleLatencyTimelineRetry\(sourceName, window\)/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /sharedLatestTimestamp[\s\S]*detailsLatestTimestamp[\s\S]*detailsLatestTimestamp >= sharedLatestTimestamp/,
   )
 })
 
