@@ -98,8 +98,10 @@ import {
   type LatencyStripHistoryItem,
 } from '@/helper/latencyBucketDrilldown'
 import {
+  getDesktopLatencyDetailsPlacement,
   getCompactLatencyDetailsPlacement,
   getLatencyDetailsViewportSize,
+  type DesktopLatencyDetailsPlacement,
 } from '@/helper/latencyDetailsViewport'
 import { getLatencySampleIndexAtPointer } from '@/helper/latencySampleSelection'
 import { getProxyMetricsFreshness } from '@/helper/proxyMetricsFreshness'
@@ -228,10 +230,12 @@ const checkNodeTextTruncation = (e: Event) => {
 
 let latencyDetailsCloseTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyDetailsTipCleanup: (() => void) | undefined
+let latencyDetailsViewportCleanup: (() => void) | undefined
 let activeLatencyDetailsTip: Instance | null = null
 let activeLatencyDetailsSourceName = ''
 let activeLatencyDetailsAnchor: HTMLElement | null = null
 let activeLatencyDetailsCompact = false
+let activeLatencyDetailsPlacement: DesktopLatencyDetailsPlacement | undefined
 let stopLatencyDetailsMetricsWatch: (() => void) | undefined
 let latencyTimelineRequestGeneration = 0
 let latencyBucketRequestGeneration = 0
@@ -294,6 +298,8 @@ const cleanupLatencyDetailsTip = () => {
   clearLatencyDetailsCloseTimer()
   latencyDetailsTipCleanup?.()
   latencyDetailsTipCleanup = undefined
+  latencyDetailsViewportCleanup?.()
+  latencyDetailsViewportCleanup = undefined
 }
 
 const scheduleLatencyDetailsTipHide = (
@@ -962,46 +968,53 @@ const repositionLatencyDetailsTip = (instance: Instance, anchor: HTMLElement, co
 
       instance.setProps({ placement })
     } else {
-      const availableAbove = Math.max(0, anchorRect.top - LATENCY_DETAILS_VIEWPORT_PADDING)
-      const availableBelow = Math.max(
-        0,
-        viewport.height - anchorRect.bottom - LATENCY_DETAILS_VIEWPORT_PADDING,
-      )
-      const availableLeft = Math.max(0, anchorRect.left - LATENCY_DETAILS_VIEWPORT_PADDING)
-      const availableRight = Math.max(
-        0,
-        viewport.width - anchorRect.right - LATENCY_DETAILS_VIEWPORT_PADDING,
-      )
-
       if (root) {
         root.style.maxHeight = `${viewport.height - LATENCY_DETAILS_VIEWPORT_PADDING * 2}px`
       }
 
       const contentWidth = root?.getBoundingClientRect().width ?? 0
-      const placement: 'top' | 'bottom' | 'right' | 'left' =
-        availableRight >= contentWidth
-          ? 'right'
-          : availableLeft >= contentWidth
-            ? 'left'
-            : availableAbove >= availableBelow
-              ? 'top'
-              : 'bottom'
-      const maxHeight =
-        placement === 'top'
-          ? availableAbove
-          : placement === 'bottom'
-            ? availableBelow
-            : viewport.height - LATENCY_DETAILS_VIEWPORT_PADDING * 2
+      const { placement, maxHeight } = getDesktopLatencyDetailsPlacement(
+        anchorRect,
+        viewport,
+        contentWidth,
+        LATENCY_DETAILS_VIEWPORT_PADDING,
+        activeLatencyDetailsPlacement,
+      )
 
       if (root) {
-        root.style.maxHeight = `${Math.floor(maxHeight)}px`
+        root.style.maxHeight = `${maxHeight}px`
       }
 
-      instance.setProps({ placement })
+      if (activeLatencyDetailsPlacement !== placement || instance.props.placement !== placement) {
+        activeLatencyDetailsPlacement = placement
+        instance.setProps({ placement })
+      }
     }
 
     void instance.popperInstance?.update()
   })
+}
+
+const handleLatencyDetailsViewportChange = () => {
+  const instance = activeLatencyDetailsTip
+  const anchor = activeLatencyDetailsAnchor
+
+  if (!instance || instance.state.isDestroyed || !anchor) {
+    return
+  }
+
+  activeLatencyDetailsPlacement = undefined
+  repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
+}
+
+const bindLatencyDetailsViewportChange = () => {
+  latencyDetailsViewportCleanup?.()
+  window.addEventListener('resize', handleLatencyDetailsViewportChange)
+  window.visualViewport?.addEventListener('resize', handleLatencyDetailsViewportChange)
+  latencyDetailsViewportCleanup = () => {
+    window.removeEventListener('resize', handleLatencyDetailsViewportChange)
+    window.visualViewport?.removeEventListener('resize', handleLatencyDetailsViewportChange)
+  }
 }
 
 const renderActiveLatencyDetailsTip = () => {
@@ -1606,6 +1619,13 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   if (!anchor) return
 
   resetLatencyBucketDrilldownState()
+  if (
+    !activeLatencyDetailsTip ||
+    activeLatencyDetailsTip.state.isDestroyed ||
+    activeLatencyDetailsAnchor !== anchor
+  ) {
+    activeLatencyDetailsPlacement = undefined
+  }
 
   const tipEvent = Object.create(e, {
     currentTarget: {
@@ -1648,6 +1668,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         offset: [0, LATENCY_DETAILS_POPOVER_GAP],
         onShown: (instance) => {
           bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
+          bindLatencyDetailsViewportChange()
           repositionLatencyDetailsTip(instance, anchor, compact)
         },
         onDestroy: (destroyedInstance) => {
@@ -1655,6 +1676,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             activeLatencyDetailsTip = null
             activeLatencyDetailsSourceName = ''
             activeLatencyDetailsAnchor = null
+            activeLatencyDetailsPlacement = undefined
             stopActiveLatencyDetailsRefresh()
             clearLatencyTimelineRetry()
             resetLatencyBucketDrilldownState()
@@ -1676,6 +1698,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             },
             {
               name: 'flip',
+              enabled: compact,
               options: {
                 boundary: 'viewport',
                 fallbackPlacements:

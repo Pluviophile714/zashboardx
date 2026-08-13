@@ -754,6 +754,28 @@ test('repositions an expanded desktop detail popover within the available viewpo
   assert.match(proxyNodeCardSource, /altAxis: true/)
 })
 
+test('locks the desktop detail direction across range changes and recalculates it on resize', () => {
+  const rangeChangeStart = proxyNodeCardSource.indexOf('const changeLatencyTimelineWindow =')
+  const rangeChangeEnd = proxyNodeCardSource.indexOf(
+    'const activateLatencyTimelineBucket =',
+    rangeChangeStart,
+  )
+  const rangeChangeSource = proxyNodeCardSource.slice(rangeChangeStart, rangeChangeEnd)
+
+  assert.match(proxyNodeCardSource, /activeLatencyDetailsPlacement/)
+  assert.match(proxyNodeCardSource, /enabled: compact/)
+  assert.match(
+    proxyNodeCardSource,
+    /const handleLatencyDetailsViewportChange = \(\) => \{[\s\S]*activeLatencyDetailsPlacement = undefined[\s\S]*repositionLatencyDetailsTip/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /const bindLatencyDetailsViewportChange = \(\) => \{[\s\S]*addEventListener\('resize',[\s\S]*latencyDetailsViewportCleanup/,
+  )
+  assert.match(proxyNodeCardSource, /onShown:[\s\S]*bindLatencyDetailsViewportChange\(\)/)
+  assert.doesNotMatch(rangeChangeSource, /activeLatencyDetailsPlacement = undefined/)
+})
+
 test('keeps the node title from shrinking when a detail popover is height constrained', () => {
   assert.match(
     proxyNodeCardSource,
