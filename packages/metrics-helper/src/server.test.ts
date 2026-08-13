@@ -43,6 +43,15 @@ const listen = async (server: ReturnType<typeof createMetricsServer>) =>
     })
   })
 
+const waitFor = async (predicate: () => boolean) => {
+  for (let index = 0; index < 40; index += 1) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+
+  assert.fail('condition was not met')
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true })
@@ -524,6 +533,89 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
     assert.equal(refreshedBody.nodes['JP-01'].sampleCount, 1)
   } finally {
     metricsCache.stop()
+    server.close()
+    storage.close()
+  }
+})
+
+test('marks active detail snapshots dirty after accepted frontend samples', async () => {
+  const storage = createStorage()
+  let detailLoadCount = 0
+  const snapshotAt = at(30)
+  const detailsCache = new MetricsDetailsCache({
+    loader: async (request) => {
+      detailLoadCount += 1
+      const details = storage.getNodeDetails(
+        request.nodeName,
+        request.windowSeconds,
+        request.bucketCount,
+        request.limit,
+        request.nowMs,
+      )
+
+      return {
+        generatedAt: new Date(request.nowMs).toISOString(),
+        nodeName: request.nodeName,
+        samples: details.samples,
+        snapshotAt: new Date(request.nowMs).toISOString(),
+        timeline: {
+          bucketSeconds: request.windowSeconds / request.bucketCount,
+          buckets: details.buckets,
+          generatedAt: new Date(request.nowMs).toISOString(),
+          jitter: details.jitter,
+          nodeName: request.nodeName,
+          snapshotAt: new Date(request.nowMs).toISOString(),
+          windowSeconds: request.windowSeconds,
+        },
+      }
+    },
+    now: () => Date.parse(snapshotAt),
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+  const server = createMetricsServer({
+    storage,
+    detailsCache,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(snapshotAt),
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    await fetch(`${baseUrl}/api/metrics/details?node=HK-01&window=24h&limit=30`)
+    assert.equal(detailLoadCount, 1)
+
+    await fetch(`${baseUrl}/api/metrics/samples`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        samples: [
+          {
+            nodeName: 'HK-01',
+            testUrl: 'https://www.gstatic.com/generate_204',
+            timestamp: at(5),
+            delay: 88,
+            success: true,
+          },
+        ],
+      }),
+    })
+    await waitFor(() => detailLoadCount === 2)
+
+    assert.equal(detailLoadCount, 2)
+  } finally {
+    detailsCache.stop()
     server.close()
     storage.close()
   }

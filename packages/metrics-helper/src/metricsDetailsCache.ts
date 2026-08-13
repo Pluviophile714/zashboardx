@@ -52,6 +52,7 @@ export class MetricsDetailsCache {
   readonly #refreshTimers = new Map<string, NodeJS.Timeout>()
   readonly #workers = new Set<Worker>()
   readonly #dirty = new Set<string>()
+  readonly #dirtyVersions = new Map<string, number>()
 
   constructor(options: MetricsDetailsCacheOptions) {
     if (!options.loader && !options.databasePath) {
@@ -59,7 +60,7 @@ export class MetricsDetailsCache {
     }
 
     this.#now = options.now ?? Date.now
-    this.#activeRefreshMs = options.activeRefreshMs ?? 45_000
+    this.#activeRefreshMs = options.activeRefreshMs ?? 5 * 60_000
     this.#refreshDebounceMs = options.refreshDebounceMs
     this.#ttlMs = options.ttlMs
     this.#loader =
@@ -99,6 +100,7 @@ export class MetricsDetailsCache {
       }
 
       this.#dirty.add(key)
+      this.#dirtyVersions.set(key, (this.#dirtyVersions.get(key) ?? 0) + 1)
       const timer = this.#refreshTimers.get(key)
 
       if (timer) {
@@ -141,15 +143,22 @@ export class MetricsDetailsCache {
 
     if (existing) return existing
 
+    const dirtyVersion = this.#dirtyVersions.get(key) ?? 0
     this.#requests.set(key, request)
     const pending = this.#loader(request)
       .then((snapshot) => {
         this.#snapshots.set(key, snapshot)
-        this.#dirty.delete(key)
+        if ((this.#dirtyVersions.get(key) ?? 0) === dirtyVersion) {
+          this.#dirty.delete(key)
+        }
         return snapshot
       })
       .finally(() => {
         this.#pending.delete(key)
+
+        if (this.#dirty.has(key) && (this.#dirtyVersions.get(key) ?? 0) !== dirtyVersion) {
+          this.#scheduleRefresh(key, { ...request, nowMs: this.#now() }, 0)
+        }
       })
 
     this.#pending.set(key, pending)

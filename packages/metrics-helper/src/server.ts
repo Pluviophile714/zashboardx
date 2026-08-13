@@ -209,6 +209,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         }
 
         if (accepted > 0) {
+          void options.detailsCache?.markDirty()
           options.metricsCache?.markDirty()
         }
 

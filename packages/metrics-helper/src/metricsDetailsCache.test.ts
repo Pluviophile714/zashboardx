@@ -127,3 +127,89 @@ test('starts refreshing an expired detail snapshot immediately after returning i
   assert.equal(loadCount, 2)
   cache.stop()
 })
+
+test('does not lose a dirty mark while a detail refresh is already running', async () => {
+  let loadCount = 0
+  let resolveSecond: ((value: MetricsDetailsSnapshot) => void) | undefined
+  const first = snapshot(new Date(request.nowMs).toISOString(), 80)
+  const second = snapshot(new Date(request.nowMs + 30_000).toISOString(), 90)
+  const third = snapshot(new Date(request.nowMs + 60_000).toISOString(), 70)
+  const cache = new MetricsDetailsCache({
+    loader: async () => {
+      loadCount += 1
+
+      if (loadCount === 1) return first
+      if (loadCount === 2) {
+        return new Promise<MetricsDetailsSnapshot>((resolve) => {
+          resolveSecond = resolve
+        })
+      }
+
+      return third
+    },
+    now: () => request.nowMs + 60_000,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+
+  assert.equal(await cache.get(request), first)
+
+  const firstDirtyRefresh = cache.markDirty()
+  await waitFor(() => loadCount === 2)
+
+  const newerDirtyRefresh = cache.markDirty()
+
+  resolveSecond?.(second)
+  await Promise.all([firstDirtyRefresh, newerDirtyRefresh])
+  await waitFor(() => loadCount === 3)
+  await waitFor(() => cache.peek(request)?.snapshotAt === third.snapshotAt)
+
+  assert.equal(cache.peek(request), third)
+  cache.stop()
+})
+
+test('does not immediately retry a failed dirty refresh without newer data', async () => {
+  let loadCount = 0
+  const first = snapshot(new Date(request.nowMs).toISOString(), 80)
+  const cache = new MetricsDetailsCache({
+    loader: async () => {
+      loadCount += 1
+
+      if (loadCount === 1) return first
+      if (loadCount === 2) throw new Error('detail refresh failed')
+
+      return snapshot(new Date(request.nowMs + 60_000).toISOString(), 70)
+    },
+    now: () => request.nowMs + 60_000,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+
+  assert.equal(await cache.get(request), first)
+  await cache.markDirty()
+  await new Promise((resolve) => setTimeout(resolve, 25))
+
+  assert.equal(loadCount, 2)
+  cache.stop()
+})
+
+test('keeps recently viewed detail snapshots warm for five minutes', async () => {
+  let loadCount = 0
+  let nowMs = request.nowMs
+  const cache = new MetricsDetailsCache({
+    loader: async (currentRequest) => {
+      loadCount += 1
+      return snapshot(new Date(currentRequest.nowMs).toISOString(), 80 + loadCount)
+    },
+    now: () => nowMs,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+
+  await cache.get(request)
+  nowMs += 4 * 60 * 1000
+  await cache.markDirty()
+
+  assert.equal(loadCount, 2)
+  cache.stop()
+})
