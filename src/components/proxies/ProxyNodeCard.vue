@@ -242,7 +242,7 @@ let latencyBucketRequestGeneration = 0
 let latencyBucketDrilldownResetTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyTimelineRetryTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyTimelineRetryAttempt = 0
-let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '24h'
+let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '1h'
 let activeLatencyTimelineBucket: ProxyMetricsTimelineBucket | null = null
 let activeLatencyTimelineSample: ProxyMetricsSample | null = null
 let latencyBucketHistory: LatencyStripHistoryItem[] = []
@@ -276,7 +276,7 @@ const clearLatencyTimelineRetry = () => {
 const resetLatencyBucketDrilldownState = () => {
   clearLatencyBucketDrilldownResetTimer()
   clearLatencyTimelineRetry()
-  activeLatencyTimelineWindow = '24h'
+  activeLatencyTimelineWindow = '1h'
   activeLatencyTimelineBucket = null
   activeLatencyTimelineSample = null
   latencyBucketHistory = []
@@ -1025,7 +1025,15 @@ const renderActiveLatencyDetailsTip = () => {
     return
   }
 
-  instance.setContent(createLatencyDetailsTip())
+  const currentRoot = instance.popper.querySelector('.tippy-content > div') as HTMLElement | null
+  const currentMaxHeight = currentRoot?.style.maxHeight
+  const nextRoot = createLatencyDetailsTip()
+
+  if (currentMaxHeight) {
+    nextRoot.style.maxHeight = currentMaxHeight
+  }
+
+  instance.setContent(nextRoot)
   repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
 }
 

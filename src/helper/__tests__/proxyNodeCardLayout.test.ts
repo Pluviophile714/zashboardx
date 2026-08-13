@@ -184,6 +184,7 @@ const renderTimelineChart = (
     selectedBucketIndex?: number
     selectedSampleIndex?: number
     samples?: ReturnType<typeof createTimelineSample>[]
+    status?: 'empty' | 'loading' | 'ready' | 'syncing' | 'unavailable'
     syncing?: boolean
     window?: '1h' | '6h' | '24h'
   } = {},
@@ -194,38 +195,41 @@ const renderTimelineChart = (
   })
 
   const buckets = [createTimelineBucket(0, 0), createTimelineBucket(1, 1)]
-  const section = createLatencyTimelineChartSection(
-    {
-      status: callbacks.syncing ? 'syncing' : 'ready',
-      samples: callbacks.samples,
-      timeline: {
-        bucketSeconds: 900,
-        buckets,
-        generatedAt: '2026-07-04T00:30:00.000Z',
-        jitter: callbacks.jitter ?? null,
-        nodeName: 'HK-01',
-        windowSeconds: 86_400,
-      },
-    },
-    {
-      compact: callbacks.compact ?? false,
-      inputMode: callbacks.inputMode ?? 'fine',
-      onBucketActivate: callbacks.onBucketActivate,
-      onBucketChange: callbacks.onBucketChange,
-      onSampleActivate: callbacks.onSampleActivate,
-      onInteraction: callbacks.onInteraction,
-      onWindowChange: callbacks.onWindowChange,
-      selectedBucket:
-        callbacks.selectedBucketIndex === undefined
-          ? undefined
-          : buckets[callbacks.selectedBucketIndex],
-      selectedSample:
-        callbacks.selectedSampleIndex === undefined
-          ? undefined
-          : callbacks.samples?.[callbacks.selectedSampleIndex],
-      window: callbacks.window ?? '6h',
-    },
-  ) as unknown as TestElement
+  const status = callbacks.status ?? (callbacks.syncing ? 'syncing' : 'ready')
+  const timeline = {
+    bucketSeconds: 900,
+    buckets,
+    generatedAt: '2026-07-04T00:30:00.000Z',
+    jitter: callbacks.jitter ?? null,
+    nodeName: 'HK-01',
+    windowSeconds: 86_400,
+  }
+  const state =
+    status === 'loading' || status === 'unavailable'
+      ? { status }
+      : {
+          status,
+          samples: callbacks.samples,
+          timeline,
+        }
+  const section = createLatencyTimelineChartSection(state, {
+    compact: callbacks.compact ?? false,
+    inputMode: callbacks.inputMode ?? 'fine',
+    onBucketActivate: callbacks.onBucketActivate,
+    onBucketChange: callbacks.onBucketChange,
+    onSampleActivate: callbacks.onSampleActivate,
+    onInteraction: callbacks.onInteraction,
+    onWindowChange: callbacks.onWindowChange,
+    selectedBucket:
+      callbacks.selectedBucketIndex === undefined
+        ? undefined
+        : buckets[callbacks.selectedBucketIndex],
+    selectedSample:
+      callbacks.selectedSampleIndex === undefined
+        ? undefined
+        : callbacks.samples?.[callbacks.selectedSampleIndex],
+    window: callbacks.window ?? '6h',
+  }) as unknown as TestElement
 
   const buttons = findElements(section, (element) => element.tagName === 'button')
   const svg = findElements(section, (element) => element.tagName === 'svg')[0]
@@ -776,6 +780,13 @@ test('locks the desktop detail direction across range changes and recalculates i
   assert.doesNotMatch(rangeChangeSource, /activeLatencyDetailsPlacement = undefined/)
 })
 
+test('preserves the visible popover height while replacing latency detail content', () => {
+  assert.match(
+    proxyNodeCardSource,
+    /const renderActiveLatencyDetailsTip = \(\) => \{[\s\S]*currentRoot\?\.style\.maxHeight[\s\S]*nextRoot\.style\.maxHeight = currentMaxHeight[\s\S]*instance\.setContent\(nextRoot\)/,
+  )
+})
+
 test('keeps the node title from shrinking when a detail popover is height constrained', () => {
   assert.match(
     proxyNodeCardSource,
@@ -908,17 +919,42 @@ test('loads the full 1h raw sample window through one forced R5S detail request'
   assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline/)
 })
 
-test('opens and closes latency details with a fresh 24h range state', () => {
-  assert.match(proxyNodeCardSource, /let activeLatencyTimelineWindow[^\n]*= '24h'/)
+test('opens and closes latency details with a fresh 1h range state', () => {
+  assert.match(proxyNodeCardSource, /let activeLatencyTimelineWindow[^\n]*= '1h'/)
   assert.match(
     proxyNodeCardSource,
-    /const resetLatencyBucketDrilldownState = \([\s\S]*activeLatencyTimelineWindow = '24h'/,
+    /const resetLatencyBucketDrilldownState = \([\s\S]*activeLatencyTimelineWindow = '1h'/,
   )
   assert.match(
     proxyNodeCardSource,
     /const handlerLatencyDetailsTip = async[\s\S]*resetLatencyBucketDrilldownState\(\)/,
   )
   assert.match(proxyNodeCardSource, /onDestroy:[\s\S]*resetLatencyBucketDrilldownState\(\)/)
+})
+
+test('keeps the latency chart section at one fixed height across ranges and loading states', () => {
+  const desktopSections = [
+    renderTimelineChart({ status: 'loading', window: '1h' }).section,
+    renderTimelineChart({ window: '1h' }).section,
+    renderTimelineChart({ syncing: true, window: '1h' }).section,
+    renderTimelineChart({ window: '6h' }).section,
+    renderTimelineChart({ window: '24h' }).section,
+  ]
+  const compactSections = [
+    renderTimelineChart({ compact: true, status: 'loading', window: '1h' }).section,
+    renderTimelineChart({ compact: true, window: '1h' }).section,
+    renderTimelineChart({ compact: true, syncing: true, window: '24h' }).section,
+    renderTimelineChart({ compact: true, window: '6h' }).section,
+  ]
+
+  assert.deepEqual(
+    new Set(desktopSections.map((section) => section.style.height)),
+    new Set(['360px']),
+  )
+  assert.deepEqual(
+    new Set(compactSections.map((section) => section.style.height)),
+    new Set(['320px']),
+  )
 })
 
 test('range changes exit drilldown and request the selected timeline', () => {

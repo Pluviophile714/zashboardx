@@ -51,6 +51,10 @@ export type LatencyTimelineChartOptions = {
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const ACTIVATION_DRAG_THRESHOLD = 8
+const LATENCY_TIMELINE_SECTION_HEIGHT = {
+  compact: 320,
+  desktop: 360,
+} as const
 let chartId = 0
 
 export const getLatencyTimelineInputMode = (): LatencyTimelineInputMode => {
@@ -162,12 +166,17 @@ export const createLatencyTimelineChartSection = (
   const body = document.createElement('div')
   const height = getProxyMetricsTimelineHeight(options.compact)
   const isCoarseInput = options.inputMode === 'coarse'
-  const selectedWindow = options.window ?? '24h'
+  const selectedWindow = options.window ?? '1h'
   const showsBucketDetails = selectedWindow !== '1h'
   const usesInformationCardActivation = options.compact || isCoarseInput
   const isSyncing = state.status === 'syncing'
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
+  section.style.height = `${
+    options.compact
+      ? LATENCY_TIMELINE_SECTION_HEIGHT.compact
+      : LATENCY_TIMELINE_SECTION_HEIGHT.desktop
+  }px`
   header.className = 'mb-1.5 flex min-w-0 items-center justify-between gap-2 text-xs'
   headerInfo.className = 'flex min-w-0 flex-1 items-center gap-2'
   title.className = 'shrink-0 font-semibold text-base-content/80'

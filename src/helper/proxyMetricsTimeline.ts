@@ -134,7 +134,7 @@ export const getProxyMetricsTimelineTooltipMode = (compact: boolean) => {
   return 'outside' as const
 }
 
-export const getProxyMetricsTimelineHeight = (compact: boolean) => (compact ? 96 : 180)
+export const getProxyMetricsTimelineHeight = (compact: boolean) => (compact ? 108 : 192)
 
 const coordinate = (value: number) => Number(value.toFixed(2))
 
