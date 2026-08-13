@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   classifyRecentSampleUpdate,
   getProxyMetricsSampleIdentity,
+  mergeRollingMetricSamples,
   reconcileMetricsNodeRecentSamples,
   reconcileRecentSampleUpdate,
 } from '../proxyMetricsRecentSamples.ts'
@@ -79,4 +80,40 @@ test('reconciles recent samples embedded in the metrics nodes response', () => {
 
   assert.equal(updates[cacheKey]?.kind, 'appended')
   assert.deepEqual(updates[cacheKey]?.samples, next['HK-01'].recentSamples)
+})
+
+test('merges a recent response into the existing one-hour sample list', () => {
+  const previous = Array.from({ length: 45 }, (_, index) =>
+    sample(`2026-08-13T10:${String(index).padStart(2, '0')}:00.000Z`, 100 + index),
+  )
+  const recent = [...previous.slice(-29), sample('2026-08-13T10:45:00.000Z', 145)]
+
+  const merged = mergeRollingMetricSamples(previous, recent, {
+    limit: 200,
+    snapshotAt: '2026-08-13T10:45:00.000Z',
+    windowSeconds: 3_600,
+  })
+
+  assert.equal(merged.length, 46)
+  assert.equal(merged[0].timestamp, '2026-08-13T10:00:00.000Z')
+  assert.equal(merged.at(-1)?.timestamp, '2026-08-13T10:45:00.000Z')
+})
+
+test('prunes the shared raw list by one-hour age and hard limit', () => {
+  const previous = Array.from({ length: 205 }, (_, index) =>
+    sample(new Date(Date.parse('2026-08-13T10:00:00.000Z') + index * 20_000).toISOString()),
+  )
+  const recent = [sample('2026-08-13T11:10:00.000Z', 120)]
+
+  const merged = mergeRollingMetricSamples(previous, recent, {
+    limit: 200,
+    snapshotAt: '2026-08-13T11:10:00.000Z',
+    windowSeconds: 3_600,
+  })
+
+  assert.ok(merged.length <= 200)
+  assert.ok(
+    merged.every((item) => Date.parse(item.timestamp) >= Date.parse('2026-08-13T10:10:00.000Z')),
+  )
+  assert.equal(merged.at(-1)?.timestamp, '2026-08-13T11:10:00.000Z')
 })

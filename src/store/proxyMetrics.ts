@@ -15,6 +15,7 @@ import {
   type ProxyMetricsTimelineWindow,
 } from '../api/metricsHelper.ts'
 import {
+  mergeRollingMetricSamples,
   reconcileMetricsNodeRecentSamples,
   reconcileRecentSampleUpdate,
   type ProxyMetricsSampleUpdateKind,
@@ -24,7 +25,9 @@ const PROXY_METRICS_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_SAMPLES_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_TIMELINE_CACHE_TTL = 30 * 1000
 const PROXY_METRICS_BUCKET_SAMPLES_CACHE_TTL = 30 * 1000
-const SHARED_RECENT_SAMPLES_LIMIT = 30
+const SHARED_RAW_SAMPLES_LIMIT = 200
+const SHARED_RAW_SAMPLES_WINDOW = '1h'
+const SHARED_RAW_SAMPLES_WINDOW_SECONDS = 60 * 60
 
 let lastFetchTime = 0
 let pendingRefresh: Promise<void> | undefined
@@ -89,7 +92,17 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
     const recentSampleUpdates = reconcileMetricsNodeRecentSamples(
       proxyMetricsSamplesMap.value,
       response.nodes,
-      (nodeName) => getProxyMetricsSamplesCacheKey(nodeName, '24h', 30),
+      (nodeName) =>
+        getProxyMetricsSamplesCacheKey(
+          nodeName,
+          SHARED_RAW_SAMPLES_WINDOW,
+          SHARED_RAW_SAMPLES_LIMIT,
+        ),
+      {
+        limit: SHARED_RAW_SAMPLES_LIMIT,
+        snapshotAt: response.generatedAt,
+        windowSeconds: SHARED_RAW_SAMPLES_WINDOW_SECONDS,
+      },
     )
 
     if (Object.keys(recentSampleUpdates).length) {
@@ -332,10 +345,18 @@ export const refreshProxyMetricsDetails = async (
       !Number.isFinite(responseSnapshotAtMs) ||
       responseSnapshotAtMs >= previousDetailsSnapshotAtMs
 
-    const samplesKey = getProxyMetricsSamplesCacheKey(nodeName, '24h', SHARED_RECENT_SAMPLES_LIMIT)
+    const samplesKey = getProxyMetricsSamplesCacheKey(
+      nodeName,
+      SHARED_RAW_SAMPLES_WINDOW,
+      SHARED_RAW_SAMPLES_LIMIT,
+    )
     const previousSamples = proxyMetricsSamplesMap.value[samplesKey]
     const previousLastTimestamp = Date.parse(previousSamples?.at(-1)?.timestamp ?? '')
-    const responseSamples = response.samples.slice(-SHARED_RECENT_SAMPLES_LIMIT)
+    const responseSamples = mergeRollingMetricSamples(previousSamples, response.samples, {
+      limit: SHARED_RAW_SAMPLES_LIMIT,
+      snapshotAt: response.snapshotAt,
+      windowSeconds: SHARED_RAW_SAMPLES_WINDOW_SECONDS,
+    })
     const responseLastTimestamp = Date.parse(responseSamples.at(-1)?.timestamp ?? '')
     const sharedSnapshotAtMs = Date.parse(proxyMetricsSamplesSnapshotMap.value[samplesKey] ?? '')
     const snapshotIsCurrent =

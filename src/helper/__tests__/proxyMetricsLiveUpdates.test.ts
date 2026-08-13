@@ -197,7 +197,7 @@ test('does not let a detail refresh replace the shared recent samples', async ()
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const nodeName = 'KUMA-STALE-01'
-  const key = `24h\n30\n${nodeName}`
+  const key = `1h\n200\n${nodeName}`
   const currentSample = {
     delay: 57,
     nodeName,
@@ -240,7 +240,7 @@ test('promotes a newer detail snapshot into the shared recent samples', async ()
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const nodeName = 'KUMA-LIVE-01'
-  const key = `24h\n30\n${nodeName}`
+  const key = `1h\n200\n${nodeName}`
   const currentSample = {
     delay: 57,
     nodeName,
@@ -287,7 +287,7 @@ test('keeps an older complete detail snapshot for the chart without rolling back
   const originalWindow = globalThis.window
   const nodeName = 'KUMA-STALE-02'
   const detailsKey = `24h\n${nodeName}`
-  const samplesKey = `24h\n30\n${nodeName}`
+  const samplesKey = `1h\n200\n${nodeName}`
   const currentSample = {
     delay: 57,
     nodeName,

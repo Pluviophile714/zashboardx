@@ -75,10 +75,60 @@ export const reconcileRecentSampleUpdate = (
   }
 }
 
+export const mergeRollingMetricSamples = (
+  previous: ProxyMetricsSample[] | undefined,
+  incoming: ProxyMetricsSample[],
+  options: {
+    limit: number
+    snapshotAt: string
+    windowSeconds: number
+  },
+) => {
+  const combined = [...(previous ?? []), ...incoming]
+  const indexed = combined.flatMap((sample, index) => {
+    const timestamp = Date.parse(sample.timestamp)
+
+    return Number.isFinite(timestamp) ? [{ index, sample, timestamp }] : []
+  })
+  const snapshotAt = Date.parse(options.snapshotAt)
+  const latestSampleAt = indexed.reduce(
+    (latest, item) => Math.max(latest, item.timestamp),
+    Number.NEGATIVE_INFINITY,
+  )
+  const windowEnd = Number.isFinite(snapshotAt)
+    ? Math.max(snapshotAt, latestSampleAt)
+    : latestSampleAt
+
+  if (!Number.isFinite(windowEnd)) {
+    return []
+  }
+
+  const windowStart = windowEnd - options.windowSeconds * 1000
+  const unique = new Map<string, (typeof indexed)[number]>()
+
+  for (const item of indexed) {
+    if (item.timestamp < windowStart || item.timestamp > windowEnd) {
+      continue
+    }
+
+    unique.set(getProxyMetricsSampleIdentity(item.sample), item)
+  }
+
+  return [...unique.values()]
+    .sort((first, second) => first.timestamp - second.timestamp || first.index - second.index)
+    .slice(-Math.max(0, options.limit))
+    .map((item) => item.sample)
+}
+
 export const reconcileMetricsNodeRecentSamples = (
   previousSamplesByKey: Record<string, ProxyMetricsSample[]>,
   nodes: Record<string, { recentSamples?: ProxyMetricsSample[] }>,
   getCacheKey: (nodeName: string) => string,
+  rollingOptions?: {
+    limit: number
+    snapshotAt: string
+    windowSeconds: number
+  },
 ) => {
   const updates: Record<
     string,
@@ -105,7 +155,11 @@ export const reconcileMetricsNodeRecentSamples = (
       continue
     }
 
-    updates[key] = reconcileRecentSampleUpdate(previous, node.recentSamples)
+    const samples = rollingOptions
+      ? mergeRollingMetricSamples(previous, node.recentSamples, rollingOptions)
+      : node.recentSamples
+
+    updates[key] = reconcileRecentSampleUpdate(previous, samples)
   }
 
   return updates

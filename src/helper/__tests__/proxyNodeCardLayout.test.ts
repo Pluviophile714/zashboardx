@@ -184,6 +184,7 @@ const renderTimelineChart = (
     selectedBucketIndex?: number
     selectedSampleIndex?: number
     samples?: ReturnType<typeof createTimelineSample>[]
+    syncing?: boolean
     window?: '1h' | '6h' | '24h'
   } = {},
 ) => {
@@ -195,7 +196,7 @@ const renderTimelineChart = (
   const buckets = [createTimelineBucket(0, 0), createTimelineBucket(1, 1)]
   const section = createLatencyTimelineChartSection(
     {
-      status: 'ready',
+      status: callbacks.syncing ? 'syncing' : 'ready',
       samples: callbacks.samples,
       timeline: {
         bucketSeconds: 900,
@@ -276,6 +277,27 @@ test('keeps the final timeline time label inside the mobile detail popover', () 
   assert.match(timelineChartSource, /right: 16/)
 })
 
+test('keeps a stale chart visible but disables inspection while it is syncing', () => {
+  let activations = 0
+  const { chartHitArea, section } = renderTimelineChart({
+    onBucketActivate: () => {
+      activations += 1
+    },
+    syncing: true,
+  })
+  const syncStatus = findElements(
+    section,
+    (element) => element.dataset.role === 'timeline-sync-status',
+  )[0]
+
+  assert.ok(chartHitArea)
+  assert.equal(chartHitArea.getAttribute('pointer-events'), 'none')
+  assert.match(syncStatus.textContent, /图表同步中/)
+  assert.match(syncStatus.textContent, /数据截至/)
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  assert.equal(activations, 0)
+})
+
 test('keeps node details accessible without a raw sample list', () => {
   assert.match(
     proxyNodeCardSource,
@@ -337,8 +359,8 @@ test('dispatches renderer callbacks through the range control and selected chart
   buttons[0].dispatchEvent(createEvent('click'))
   svg.dispatchEvent(createEvent('pointermove', { clientX: 40 }))
   chartHitArea.dispatchEvent(createEvent('click', { clientX: 40 }))
-  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
-  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 350 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 350 }))
 
   assert.deepEqual(windowChanges, ['1h'])
   assert.deepEqual(bucketChanges, [1, 0, 1])
@@ -652,7 +674,7 @@ test('uses exact raw samples for 1h selection and activation', () => {
     findElements(samplePoint, (element) => element.textContent.includes('101ms')).length,
     1,
   )
-  svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
+  svg.dispatchEvent(createEvent('pointermove', { clientX: 350 }))
   assert.equal(
     findElements(samplePoint, (element) => element.textContent.includes('331ms')).length,
     1,
@@ -661,7 +683,7 @@ test('uses exact raw samples for 1h selection and activation', () => {
     findElements(section, (element) => element.dataset.role === '1h-summary-metrics').length,
     1,
   )
-  chartHitArea.dispatchEvent(createEvent('click', { clientX: 300 }))
+  chartHitArea.dispatchEvent(createEvent('click', { clientX: 350 }))
   assert.deepEqual(activations, ['2026-07-04T00:25:14.000Z'])
 })
 
@@ -739,7 +761,7 @@ test('keeps the node title from shrinking when a detail popover is height constr
   )
 })
 
-test('uses the shared recent-30 R5S samples for the first-level latency stability bar', () => {
+test('derives latest latency, recent 10, recent 30, and the 1h chart from one shared raw list', () => {
   const sharedSamplesSourceStart = proxyNodeCardSource.indexOf('const getR5sLatencySamples =')
   const stabilitySourceStart = proxyNodeCardSource.indexOf('const getLatencyStabilityHistory =')
   const stabilitySourceEnd = proxyNodeCardSource.indexOf(
@@ -754,11 +776,29 @@ test('uses the shared recent-30 R5S samples for the first-level latency stabilit
 
   assert.match(
     sharedSamplesSource,
-    /proxyMetricsSamplesMap\.value\[[\s\S]*getProxyMetricsSamplesCacheKey\(sourceName, '24h', LATENCY_DETAIL_SEGMENTS\)/,
+    /proxyMetricsSamplesMap\.value\[[\s\S]*getProxyMetricsSamplesCacheKey\(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT\)/,
   )
   assert.match(stabilitySource, /const r5s = getR5sLatencySamples\(\)/)
   assert.doesNotMatch(stabilitySource, /metrics\.recentSamples/)
   assert.match(proxyNodeCardSource, /const history = getLatencyStabilityHistory\(\)/)
+  assert.match(proxyNodeCardSource, /const recentHistory = history\.slice\(-LATENCY_BAR_SEGMENTS\)/)
+
+  const detailsStart = proxyNodeCardSource.indexOf('const getR5sLatencyHistory =')
+  const detailsEnd = proxyNodeCardSource.indexOf(
+    'const getLatencyDetailsHistorySource =',
+    detailsStart,
+  )
+  const detailsSource = proxyNodeCardSource.slice(detailsStart, detailsEnd)
+  const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
+  const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
+  const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
+
+  assert.match(detailsSource, /sharedSamples\.slice\(-LATENCY_DETAIL_SEGMENTS\)/)
+  assert.match(chartSource, /window === '1h' \? sharedSamples : undefined/)
+  assert.doesNotMatch(
+    chartSource,
+    /snapshot\?\.samples\?\.length \? snapshot\.samples : sharedSamples/,
+  )
 })
 
 test('uses the shared R5S latest sample for the first-level latency tag', () => {
@@ -791,7 +831,7 @@ test('does not fall back to local or detail history while the shared R5S snapsho
   assert.match(stabilitySource, /if \(r5s\?\.samples\.length\)/)
   assert.match(stabilitySource, /return \[\]/)
   assert.match(stabilitySource, /if \(getSharedMetricsResolution\(\)\) \{[\s\S]*return \[\]/)
-  assert.match(detailsSource, /history: sharedSamples\.map/)
+  assert.match(detailsSource, /history: sharedSamples\.slice\(-LATENCY_DETAIL_SEGMENTS\)\.map/)
   assert.doesNotMatch(detailsSource, /detailsSamples/)
   assert.match(
     detailsSource,
@@ -799,14 +839,14 @@ test('does not fall back to local or detail history while the shared R5S snapsho
   )
 })
 
-test('keeps the full 1h detail samples when the shared recent snapshot differs', () => {
+test('uses only the shared rolling raw list for the 1h chart', () => {
   const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
   const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
   const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
 
   assert.match(chartSource, /const sharedSamples =/)
-  assert.match(chartSource, /window === '1h'[\s\S]*snapshot\?\.samples\?\.length/)
-  assert.doesNotMatch(chartSource, /sharedSnapshotMatchesDetails\s*\?/)
+  assert.match(chartSource, /const samples = window === '1h' \? sharedSamples : undefined/)
+  assert.doesNotMatch(chartSource, /snapshot\?\.samples/)
 })
 
 test('animates first-level latency samples by translating one fixed track', () => {
@@ -923,9 +963,16 @@ test('keeps showing a stale detail snapshot while retrying until it catches up',
   )
   const refreshSource = proxyNodeCardSource.slice(refreshStart, refreshEnd)
 
-  assert.match(chartSource, /snapshot\?\.samples\?\.length \? snapshot\.samples : sharedSamples/)
-  assert.match(chartSource, /status: 'ready'/)
-  assert.doesNotMatch(chartSource, /isLatencyTimelineSnapshotCurrent[\s\S]*status: 'loading'/)
+  assert.match(chartSource, /const samples = window === '1h' \? sharedSamples : undefined/)
+  assert.match(chartSource, /\? 'syncing'[\s\S]*: 'ready'/)
+  assert.match(
+    chartSource,
+    /if \(timeline\) \{[\s\S]*window !== '1h' && snapshot && !isLatencyTimelineSnapshotCurrent\(sourceName, snapshot\)[\s\S]*\? 'syncing'[\s\S]*: 'ready'/,
+  )
+  assert.match(
+    chartSource,
+    /if \(timeline\) \{[\s\S]*\}[\s\S]*return unavailableLatencyTimelineKeys\.has\(cacheKey\)[\s\S]*\? \{ status: 'unavailable' \}[\s\S]*: \{ status: 'loading' \}/,
+  )
   assert.match(proxyNodeCardSource, /const isLatencyTimelineSnapshotCurrent =/)
   assert.match(
     refreshSource,

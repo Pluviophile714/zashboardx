@@ -86,6 +86,44 @@ type SampleChartOptions = TimelineChartOptions & {
   windowStart: string
 }
 
+export const getProxyMetricsSampleWindow = (
+  samples: ProxyMetricsSample[],
+  windowSeconds: number,
+) => {
+  const endMs = samples.reduce((latest, sample) => {
+    const timestamp = Date.parse(sample.timestamp)
+
+    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest
+  }, Number.NEGATIVE_INFINITY)
+
+  if (!Number.isFinite(endMs)) {
+    return undefined
+  }
+
+  return {
+    end: new Date(endMs).toISOString(),
+    start: new Date(endMs - windowSeconds * 1000).toISOString(),
+  }
+}
+
+export const getProxyMetricsSampleJitter = (samples: ProxyMetricsSample[]) => {
+  const delays = samples.flatMap((sample) =>
+    sample.success && sample.delay !== null && Number.isFinite(sample.delay) ? [sample.delay] : [],
+  )
+
+  if (delays.length < 2) {
+    return null
+  }
+
+  let total = 0
+
+  for (let index = 1; index < delays.length; index += 1) {
+    total += Math.abs(delays[index] - delays[index - 1])
+  }
+
+  return total / (delays.length - 1)
+}
+
 type RangePoint = ProxyMetricsTimelineChartPoint & {
   maxY: number
   minY: number

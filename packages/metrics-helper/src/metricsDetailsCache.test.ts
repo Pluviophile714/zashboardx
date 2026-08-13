@@ -106,3 +106,24 @@ test('coalesces concurrent cold detail loads for the same key', async () => {
   assert.equal(loadCount, 1)
   cache.stop()
 })
+
+test('starts refreshing an expired detail snapshot immediately after returning it', async () => {
+  let loadCount = 0
+  const first = snapshot(new Date(request.nowMs).toISOString(), 80)
+  const cache = new MetricsDetailsCache({
+    loader: async () => {
+      loadCount += 1
+      return first
+    },
+    now: () => request.nowMs + 30_000,
+    refreshDebounceMs: 1_500,
+    ttlMs: 10_000,
+  })
+
+  assert.equal(await cache.get(request), first)
+  assert.equal(await cache.get({ ...request, nowMs: request.nowMs + 30_000 }), first)
+  await new Promise((resolve) => setTimeout(resolve, 25))
+
+  assert.equal(loadCount, 2)
+  cache.stop()
+})

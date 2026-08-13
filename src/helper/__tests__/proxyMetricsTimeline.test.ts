@@ -8,6 +8,8 @@ import type {
 import {
   buildProxyMetricsSampleChartModel,
   buildProxyMetricsTimelineChartModel,
+  getProxyMetricsSampleJitter,
+  getProxyMetricsSampleWindow,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
   LATENCY_TIMELINE_WINDOWS,
@@ -80,6 +82,21 @@ test('plots 1h raw samples on their real timestamps and aligns failures with the
   assert.ok(model.statusSlices[0].x < model.points[2]!.x)
   assert.equal(model.axes.xTicks[0].timestamp, '2026-07-04T00:00:00.000Z')
   assert.equal(model.axes.xTicks.at(-1)?.timestamp, '2026-07-04T01:00:00.000Z')
+})
+
+test('derives the live one-hour axis and jitter from the shared raw samples', () => {
+  const samples = [
+    sample('2026-07-04T00:10:00.000Z', 100),
+    sample('2026-07-04T00:20:00.000Z', null, false),
+    sample('2026-07-04T00:40:00.000Z', 120),
+    sample('2026-07-04T01:10:00.000Z', 90),
+  ]
+
+  assert.deepEqual(getProxyMetricsSampleWindow(samples, 3_600), {
+    end: '2026-07-04T01:10:00.000Z',
+    start: '2026-07-04T00:10:00.000Z',
+  })
+  assert.equal(getProxyMetricsSampleJitter(samples), 25)
 })
 
 test('splits average and range paths at failed and empty buckets', () => {

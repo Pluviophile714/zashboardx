@@ -76,7 +76,7 @@ export class MetricsDetailsCache {
 
     if (snapshot && Number.isFinite(snapshotMs) && snapshotMs <= request.nowMs) {
       if (this.#dirty.has(key) || request.nowMs - snapshotMs > this.#ttlMs) {
-        this.#scheduleRefresh(key, { ...request, nowMs: this.#now() })
+        this.#scheduleRefresh(key, { ...request, nowMs: this.#now() }, 0)
       }
 
       return snapshot

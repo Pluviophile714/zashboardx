@@ -7,6 +7,8 @@ import type {
 import {
   buildProxyMetricsSampleChartModel,
   buildProxyMetricsTimelineChartModel,
+  getProxyMetricsSampleJitter,
+  getProxyMetricsSampleWindow,
   getProxyMetricsTimelineHeight,
   getProxyMetricsTimelineTooltipMode,
   LATENCY_TIMELINE_WINDOWS,
@@ -23,6 +25,11 @@ export type LatencyTimelineChartState =
   | {
       samples?: ProxyMetricsSample[]
       status: 'ready'
+      timeline: ProxyMetricsTimelineResponse
+    }
+  | {
+      samples?: ProxyMetricsSample[]
+      status: 'syncing'
       timeline: ProxyMetricsTimelineResponse
     }
 
@@ -158,6 +165,7 @@ export const createLatencyTimelineChartSection = (
   const selectedWindow = options.window ?? '24h'
   const showsBucketDetails = selectedWindow !== '1h'
   const usesInformationCardActivation = options.compact || isCoarseInput
+  const isSyncing = state.status === 'syncing'
 
   section.className = 'mt-2 border-t border-base-content/10 pt-2'
   header.className = 'mb-1.5 flex min-w-0 items-center justify-between gap-2 text-xs'
@@ -170,7 +178,11 @@ export const createLatencyTimelineChartSection = (
   if (selectedWindow === '1h') {
     const jitter = document.createElement('span')
     const windowJitter =
-      state.status === 'ready' || state.status === 'empty' ? state.timeline.jitter : null
+      state.status === 'ready' || state.status === 'empty' || state.status === 'syncing'
+        ? state.samples?.length
+          ? getProxyMetricsSampleJitter(state.samples)
+          : state.timeline.jitter
+        : null
 
     jitter.className = 'shrink-0 text-[10px] text-base-content/55'
     jitter.textContent = `1h 抖动: ${windowJitter === null ? '--' : `${Math.round(windowJitter)}ms`}`
@@ -208,13 +220,15 @@ export const createLatencyTimelineChartSection = (
 
   body.className = 'relative'
   body.style.height = `${height}px`
-  section.append(header, body)
+  section.append(header)
 
   if (state.status === 'loading') {
+    section.append(body)
     appendEmptyState(body, `正在读取 R5S ${selectedWindow} 延迟趋势`)
     return section
   }
   if (state.status === 'unavailable') {
+    section.append(body)
     appendEmptyState(body, `R5S ${selectedWindow} 延迟趋势暂不可用`)
     return section
   }
@@ -222,6 +236,27 @@ export const createLatencyTimelineChartSection = (
   const timeline = state.timeline
   const samples = selectedWindow === '1h' ? (state.samples ?? []) : []
   const usesRawSamples = selectedWindow === '1h'
+  const sampleWindow = usesRawSamples
+    ? getProxyMetricsSampleWindow(samples, timeline.windowSeconds)
+    : undefined
+  const sampleJitter = usesRawSamples ? getProxyMetricsSampleJitter(samples) : timeline.jitter
+  if (isSyncing) {
+    const syncStatus = document.createElement('div')
+    const dataTimestamp = usesRawSamples
+      ? samples.at(-1)?.timestamp
+      : timeline.snapshotAt || timeline.generatedAt
+
+    syncStatus.className =
+      'mb-1 flex items-center justify-between gap-2 text-[10px] text-base-content/55'
+    syncStatus.dataset.role = 'timeline-sync-status'
+    syncStatus.textContent = `图表同步中${
+      dataTimestamp ? ` · 数据截至 ${formatBucketDateTime(dataTimestamp)}` : ''
+    }`
+    body.classList.add('opacity-60', 'blur-[0.5px]')
+    body.setAttribute('aria-busy', 'true')
+    section.append(syncStatus)
+  }
+  section.append(body)
   const tooltipMode = getProxyMetricsTimelineTooltipMode(options.compact)
   const windowSummary = selectedWindow === '1h' ? document.createElement('div') : undefined
   const samplePoint = windowSummary ? document.createElement('div') : undefined
@@ -292,7 +327,7 @@ export const createLatencyTimelineChartSection = (
     appendWindowMetric(
       metricsGrid,
       '1h 抖动',
-      timeline.jitter === null ? '--' : `${Math.round(timeline.jitter)}ms`,
+      sampleJitter === null ? '--' : `${Math.round(sampleJitter)}ms`,
     )
     appendWindowMetric(metricsGrid, '延迟范围', formatLatencyRange(minDelay, maxDelay))
     appendWindowMetric(
@@ -323,8 +358,8 @@ export const createLatencyTimelineChartSection = (
           bottom: 20,
           left: 35,
         },
-        windowEnd: timeline.buckets.at(-1)?.end ?? samples.at(-1)?.timestamp ?? '',
-        windowStart: timeline.buckets[0]?.start ?? samples[0]?.timestamp ?? '',
+        windowEnd: sampleWindow?.end ?? timeline.buckets.at(-1)?.end ?? '',
+        windowStart: sampleWindow?.start ?? timeline.buckets[0]?.start ?? '',
       })
     : undefined
   const model = sampleModel ?? bucketModel
@@ -435,7 +470,7 @@ export const createLatencyTimelineChartSection = (
     'data-chart-hit-target': 'true',
     fill: 'transparent',
     height: model.axes.plotBottom - model.axes.plotTop,
-    'pointer-events': 'all',
+    'pointer-events': isSyncing ? 'none' : 'all',
     width: model.axes.plotRight - model.axes.plotLeft,
     x: model.axes.plotLeft,
     y: model.axes.plotTop,
@@ -698,8 +733,8 @@ export const createLatencyTimelineChartSection = (
     const relativeX = (guideX - model.axes.plotLeft) / (model.axes.plotRight - model.axes.plotLeft)
 
     if (usesRawSamples && sampleModel) {
-      const windowStart = Date.parse(timeline.buckets[0]?.start ?? samples[0]?.timestamp ?? '')
-      const windowEnd = Date.parse(timeline.buckets.at(-1)?.end ?? samples.at(-1)?.timestamp ?? '')
+      const windowStart = Date.parse(sampleWindow?.start ?? timeline.buckets[0]?.start ?? '')
+      const windowEnd = Date.parse(sampleWindow?.end ?? timeline.buckets.at(-1)?.end ?? '')
       const timestamp = windowStart + (windowEnd - windowStart) * relativeX
       let sampleIndex = -1
       let closestDistance = Number.POSITIVE_INFINITY
@@ -729,6 +764,8 @@ export const createLatencyTimelineChartSection = (
   }
 
   const updateHover = (event: Pick<PointerEvent, 'clientX'>) => {
+    if (isSyncing) return
+
     options.onInteraction?.()
     const position = getChartPosition(event.clientX)
 
@@ -755,6 +792,8 @@ export const createLatencyTimelineChartSection = (
   }
 
   const activateSelectedPoint = () => {
+    if (isSyncing) return
+
     if (usesRawSamples) {
       if (selectedSample) {
         options.onInteraction?.()

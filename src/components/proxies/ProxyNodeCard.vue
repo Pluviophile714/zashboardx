@@ -531,7 +531,7 @@ const getR5sLatencySamples = () => {
   return {
     samples:
       proxyMetricsSamplesMap.value[
-        getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+        getProxyMetricsSamplesCacheKey(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT)
       ] ?? [],
     sourceName,
   }
@@ -668,7 +668,7 @@ watch(
     const sourceName = getR5sLatencySampleSourceName()
     const appended =
       sourceName &&
-      getProxyMetricsSamplesUpdateKind(sourceName, '24h', LATENCY_DETAIL_SEGMENTS) === 'appended'
+      getProxyMetricsSamplesUpdateKind(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT) === 'appended'
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
     if (
@@ -708,7 +708,7 @@ const isLatencyTimelineSnapshotCurrent = (
 ) => {
   const sharedSamples =
     proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+      getProxyMetricsSamplesCacheKey(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT)
     ] ?? []
   const sharedLatestTimestamp = Date.parse(sharedSamples.at(-1)?.timestamp ?? '')
 
@@ -730,10 +730,9 @@ const getLatencyTimelineChartState = (
   const timeline = snapshot?.timeline ?? proxyMetricsTimelineMap.value[cacheKey]
   const sharedSamples =
     proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+      getProxyMetricsSamplesCacheKey(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT)
     ] ?? []
-  const samples =
-    window === '1h' ? (snapshot?.samples?.length ? snapshot.samples : sharedSamples) : undefined
+  const samples = window === '1h' ? sharedSamples : undefined
 
   if (timeline) {
     const hasSamples =
@@ -742,7 +741,14 @@ const getLatencyTimelineChartState = (
         : timeline.buckets.some((bucket) => bucket.sampleCount > 0)
 
     return hasSamples
-      ? { samples, status: 'ready', timeline }
+      ? {
+          samples,
+          status:
+            window !== '1h' && snapshot && !isLatencyTimelineSnapshotCurrent(sourceName, snapshot)
+              ? 'syncing'
+              : 'ready',
+          timeline,
+        }
       : { samples, status: 'empty', timeline }
   }
 
@@ -775,7 +781,7 @@ const getR5sLatencyHistory = () => {
 
   const sharedSamples =
     proxyMetricsSamplesMap.value[
-      getProxyMetricsSamplesCacheKey(sourceName, '24h', LATENCY_DETAIL_SEGMENTS)
+      getProxyMetricsSamplesCacheKey(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT)
     ] ?? []
 
   if (!sharedSamples.length && !metricsResolution) {
@@ -783,7 +789,7 @@ const getR5sLatencyHistory = () => {
   }
 
   return {
-    history: sharedSamples.map((sample) => ({
+    history: sharedSamples.slice(-LATENCY_DETAIL_SEGMENTS).map((sample) => ({
       delay: sample.success && sample.delay ? sample.delay : NOT_CONNECTED,
       time: sample.timestamp,
     })),
@@ -828,6 +834,12 @@ const refreshActiveR5sLatencyDetails = () => {
   const anchor = activeLatencyDetailsAnchor
 
   if (!instance || instance.state.isDestroyed || !sourceName || !anchor) {
+    return
+  }
+
+  if (activeLatencyTimelineWindow === '1h' && getProxyMetricsDetailsSnapshot(sourceName, '1h')) {
+    instance.setContent(createLatencyDetailsTip())
+    repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
     return
   }
 
