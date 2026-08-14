@@ -36,6 +36,7 @@ export type LatencyTimelineChartState =
 export type LatencyTimelineInputMode = 'coarse' | 'fine'
 
 export type LatencyTimelineChartOptions = {
+  animateWindowTransition?: boolean
   compact: boolean
   inputMode: LatencyTimelineInputMode
   onBucketActivate?: (bucket: ProxyMetricsTimelineBucket) => void
@@ -139,20 +140,6 @@ const appendEmptyState = (body: HTMLElement, message: string) => {
   body.append(placeholder)
 }
 
-const appendTooltipLine = (tooltip: HTMLElement, label: string, value: string) => {
-  const line = document.createElement('div')
-  const name = document.createElement('span')
-  const content = document.createElement('span')
-
-  line.className = 'flex items-center justify-between gap-3'
-  name.className = 'text-base-content/55'
-  name.textContent = label
-  content.className = 'font-semibold text-base-content'
-  content.textContent = value
-  line.append(name, content)
-  tooltip.append(line)
-}
-
 export const createLatencyTimelineChartSection = (
   state: LatencyTimelineChartState,
   options: LatencyTimelineChartOptions,
@@ -228,6 +215,10 @@ export const createLatencyTimelineChartSection = (
   header.append(headerInfo, rangeControl)
 
   body.className = 'relative'
+  body.dataset.role = 'latency-timeline-visual'
+  if (options.animateWindowTransition) {
+    body.classList.add('latency-timeline-window-enter')
+  }
   body.style.height = `${height}px`
   section.append(header)
 
@@ -524,8 +515,8 @@ export const createLatencyTimelineChartSection = (
   const tooltip = document.createElement('div')
 
   tooltip.dataset.mode = tooltipMode
-  tooltip.className =
-    'mt-1 grid min-h-12 grid-cols-2 gap-x-3 gap-y-0.5 rounded-md border border-base-content/10 bg-base-100/70 px-2 py-1.5 text-[10px] text-base-content/70'
+  tooltip.dataset.role = 'bucket-summary'
+  tooltip.className = 'mt-1 grid gap-1.5'
 
   body.append(svg)
   if (windowSummary) {
@@ -572,31 +563,43 @@ export const createLatencyTimelineChartSection = (
 
     if (showsBucketDetails) {
       tooltip.replaceChildren()
-      const time = document.createElement('div')
+      const interval = document.createElement('div')
+      const metricsGrid = document.createElement('div')
+      const hasSuccessfulLatency =
+        bucket.successCount > 0 &&
+        bucket.avgDelay !== null &&
+        bucket.minDelay !== null &&
+        bucket.maxDelay !== null
 
-      time.className = 'col-span-2 whitespace-nowrap font-semibold text-base-content'
-      time.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
-      tooltip.append(time)
-
-      if (bucket.successCount > 0) {
-        appendTooltipLine(tooltip, '平均', `${Math.round(bucket.avgDelay ?? 0)}ms`)
-        appendTooltipLine(
-          tooltip,
-          '范围',
-          bucket.minDelay === bucket.maxDelay
-            ? `${bucket.minDelay ?? 0}ms`
-            : `${bucket.minDelay ?? 0}-${bucket.maxDelay ?? 0}ms`,
-        )
-        appendTooltipLine(
-          tooltip,
-          '波动',
-          bucket.jitter === null ? '--' : `${Math.round(bucket.jitter)}ms`,
-        )
-      } else {
-        appendTooltipLine(tooltip, '延迟', bucket.sampleCount ? '测速失败' : '无样本')
-      }
-      appendTooltipLine(tooltip, '成功', `${bucket.successCount}/${bucket.sampleCount}`)
-      appendTooltipLine(tooltip, '失败', String(bucket.failureCount))
+      interval.dataset.role = 'bucket-summary-interval'
+      interval.className =
+        'flex min-h-9 items-center rounded-md border border-base-content/15 bg-base-200/30 px-2.5 py-1.5 text-xs font-semibold text-base-content'
+      interval.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
+      metricsGrid.dataset.role = 'bucket-summary-metrics'
+      metricsGrid.className = 'grid grid-cols-2 gap-1.5 sm:grid-cols-4'
+      appendWindowMetric(
+        metricsGrid,
+        '平均延迟',
+        hasSuccessfulLatency ? `${Math.round(bucket.avgDelay as number)}ms` : '--',
+      )
+      appendWindowMetric(
+        metricsGrid,
+        '桶内抖动',
+        hasSuccessfulLatency && bucket.jitter !== null ? `${Math.round(bucket.jitter)}ms` : '--',
+      )
+      appendWindowMetric(
+        metricsGrid,
+        '延迟范围',
+        hasSuccessfulLatency ? formatLatencyRange(bucket.minDelay, bucket.maxDelay) : '--',
+      )
+      appendWindowMetric(
+        metricsGrid,
+        '成功率',
+        bucket.sampleCount
+          ? `${((bucket.successCount / bucket.sampleCount) * 100).toFixed(1)}%`
+          : '--',
+      )
+      tooltip.append(interval, metricsGrid)
 
       if (canActivate) {
         tooltip.setAttribute('aria-disabled', 'false')

@@ -243,12 +243,17 @@ let latencyBucketDrilldownResetTimer: ReturnType<typeof window.setTimeout> | und
 let latencyTimelineRetryTimer: ReturnType<typeof window.setTimeout> | undefined
 let latencyTimelineRetryAttempt = 0
 let activeLatencyTimelineWindow: ProxyMetricsTimelineWindow = '1h'
+let latencyTimelineWindowTransitionTarget: ProxyMetricsTimelineWindow | null = null
 let activeLatencyTimelineBucket: ProxyMetricsTimelineBucket | null = null
 let activeLatencyTimelineSample: ProxyMetricsSample | null = null
 let latencyBucketHistory: LatencyStripHistoryItem[] = []
 const unavailableLatencyTimelineKeys = new Set<string>()
 const LATENCY_DETAILS_VIEWPORT_PADDING = 8
 const LATENCY_DETAILS_POPOVER_GAP = 8
+
+type LatencyDetailsTipRenderOptions = {
+  animateTimelineWindowTransition?: boolean
+}
 
 const clearLatencyDetailsCloseTimer = () => {
   if (!latencyDetailsCloseTimer) return
@@ -277,6 +282,7 @@ const resetLatencyBucketDrilldownState = () => {
   clearLatencyBucketDrilldownResetTimer()
   clearLatencyTimelineRetry()
   activeLatencyTimelineWindow = '1h'
+  latencyTimelineWindowTransitionTarget = null
   activeLatencyTimelineBucket = null
   activeLatencyTimelineSample = null
   latencyBucketHistory = []
@@ -1017,7 +1023,7 @@ const bindLatencyDetailsViewportChange = () => {
   }
 }
 
-const renderActiveLatencyDetailsTip = () => {
+const renderActiveLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions = {}) => {
   const instance = activeLatencyDetailsTip
   const anchor = activeLatencyDetailsAnchor
 
@@ -1027,7 +1033,7 @@ const renderActiveLatencyDetailsTip = () => {
 
   const currentRoot = instance.popper.querySelector('.tippy-content > div') as HTMLElement | null
   const currentMaxHeight = currentRoot?.style.maxHeight
-  const nextRoot = createLatencyDetailsTip()
+  const nextRoot = createLatencyDetailsTip(renderOptions)
 
   if (currentMaxHeight) {
     nextRoot.style.maxHeight = currentMaxHeight
@@ -1096,7 +1102,16 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
       scheduleLatencyTimelineRetry(sourceName, window)
     }
 
-    renderActiveLatencyDetailsTip()
+    const animateTimelineWindowTransition = latencyTimelineWindowTransitionTarget === window
+
+    if (animateTimelineWindowTransition && details?.timeline) {
+      latencyTimelineWindowTransitionTarget = null
+    }
+
+    renderActiveLatencyDetailsTip({
+      animateTimelineWindowTransition:
+        animateTimelineWindowTransition && Boolean(details?.timeline),
+    })
   })
 
   return request
@@ -1138,7 +1153,8 @@ const changeLatencyTimelineWindow = (window: ProxyMetricsTimelineWindow) => {
   exitLatencyBucketDrilldown()
   clearLatencyTimelineRetry()
   activeLatencyTimelineWindow = window
-  renderActiveLatencyDetailsTip()
+  latencyTimelineWindowTransitionTarget = window
+  renderActiveLatencyDetailsTip({ animateTimelineWindowTransition: true })
 
   const sourceName = activeLatencyDetailsSourceName
 
@@ -1447,7 +1463,7 @@ const buildLatencyStatusTimeline = (
   return timeline
 }
 
-const createLatencyDetailsTip = () => {
+const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions = {}) => {
   const compact = isCompactLatencyDetails()
   const detailHistorySource = getLatencyDetailsHistorySource()
   const recentHistory = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
@@ -1540,6 +1556,7 @@ const createLatencyDetailsTip = () => {
       createLatencyTimelineChartSection(
         getLatencyTimelineChartState(timelineSourceName, activeLatencyTimelineWindow),
         {
+          animateWindowTransition: renderOptions.animateTimelineWindowTransition,
           compact,
           inputMode: getLatencyTimelineInputMode(),
           onBucketActivate: activateLatencyTimelineBucket,

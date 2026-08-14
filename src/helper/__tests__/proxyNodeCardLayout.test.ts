@@ -142,7 +142,18 @@ const findElements = (element: TestElement, predicate: (element: TestElement) =>
   )
 }
 
-const createTimelineBucket = (index: number, sampleCount: number) => {
+const createTimelineBucket = (
+  index: number,
+  sampleCount: number,
+  overrides: Partial<{
+    avgDelay: number | null
+    failureCount: number
+    jitter: number | null
+    maxDelay: number | null
+    minDelay: number | null
+    successCount: number
+  }> = {},
+) => {
   const start = Date.parse('2026-07-04T00:00:00.000Z') + index * 15 * 60 * 1000
   const successCount = sampleCount ? 1 : 0
 
@@ -156,6 +167,7 @@ const createTimelineBucket = (index: number, sampleCount: number) => {
     sampleCount,
     start: new Date(start).toISOString(),
     successCount,
+    ...overrides,
   }
 }
 
@@ -173,6 +185,8 @@ const createTimelineSample = (
 
 const renderTimelineChart = (
   callbacks: {
+    animateWindowTransition?: boolean
+    buckets?: ReturnType<typeof createTimelineBucket>[]
     onBucketActivate?: (bucket: { sampleCount: number }) => void
     onBucketChange?: (bucket: { sampleCount: number }) => void
     onSampleActivate?: (sample: { timestamp: string }) => void
@@ -194,7 +208,7 @@ const renderTimelineChart = (
     value: new TestDocument(),
   })
 
-  const buckets = [createTimelineBucket(0, 0), createTimelineBucket(1, 1)]
+  const buckets = callbacks.buckets ?? [createTimelineBucket(0, 0), createTimelineBucket(1, 1)]
   const status = callbacks.status ?? (callbacks.syncing ? 'syncing' : 'ready')
   const timeline = {
     bucketSeconds: 900,
@@ -213,6 +227,7 @@ const renderTimelineChart = (
           timeline,
         }
   const section = createLatencyTimelineChartSection(state, {
+    animateWindowTransition: callbacks.animateWindowTransition,
     compact: callbacks.compact ?? false,
     inputMode: callbacks.inputMode ?? 'fine',
     onBucketActivate: callbacks.onBucketActivate,
@@ -242,12 +257,25 @@ const renderTimelineChart = (
     (element) => element.getAttribute('data-selected-guide') === 'true',
   )[0]
   const tooltip = findElements(section, (element) => element.className.includes('min-h-12'))[0]
+  const bucketSummary = findElements(
+    section,
+    (element) => element.dataset.role === 'bucket-summary',
+  )[0]
   const samplePoint = findElements(
     section,
     (element) => element.dataset.role === '1h-sample-point',
   )[0]
 
-  return { buttons, chartHitArea, samplePoint, section, selectedGuide, svg, tooltip }
+  return {
+    bucketSummary,
+    buttons,
+    chartHitArea,
+    samplePoint,
+    section,
+    selectedGuide,
+    svg,
+    tooltip: bucketSummary ?? tooltip,
+  }
 }
 
 const proxyNodeCardSource = readFileSync(
@@ -256,6 +284,10 @@ const proxyNodeCardSource = readFileSync(
 )
 const timelineChartSource = readFileSync(
   new URL('../../components/proxies/latencyTimelineChart.ts', import.meta.url),
+  'utf8',
+)
+const motionCssSource = readFileSync(
+  new URL('../../assets/styles/motion.css', import.meta.url),
   'utf8',
 )
 
@@ -719,11 +751,63 @@ test('uses the 1h current sample row as the mobile raw-sample activation target'
   assert.deepEqual(activations, ['2026-07-04T00:25:14.000Z'])
 })
 
-test('keeps bucket jitter details for longer timeline windows', () => {
-  const { svg, tooltip } = renderTimelineChart({ window: '6h' })
+test('renders a selected long-window bucket as an interval row and four metric cards', () => {
+  const buckets = [
+    createTimelineBucket(0, 0),
+    createTimelineBucket(1, 5, {
+      avgDelay: 107,
+      failureCount: 1,
+      jitter: 113,
+      maxDelay: 278,
+      minDelay: 53,
+      successCount: 4,
+    }),
+  ]
+  const { section, svg } = renderTimelineChart({ buckets, window: '6h' })
 
   svg.dispatchEvent(createEvent('pointermove', { clientX: 300 }))
-  assert.equal(findElements(tooltip, (element) => element.textContent === '波动').length, 1)
+  const summaries = findElements(section, (element) => element.dataset.role === 'bucket-summary')
+  const metrics = findElements(
+    section,
+    (element) => element.dataset.role === 'bucket-summary-metrics',
+  )
+
+  assert.equal(summaries.length, 1)
+  assert.equal(metrics.length, 1)
+  assert.equal(
+    findElements(summaries[0], (element) => element.dataset.role === 'bucket-summary-interval')
+      .length,
+    1,
+  )
+  for (const label of ['平均延迟', '桶内抖动', '延迟范围', '成功率']) {
+    assert.equal(findElements(metrics[0], (element) => element.textContent === label).length, 1)
+  }
+  for (const value of ['107ms', '113ms', '53-278ms', '80.0%']) {
+    assert.equal(findElements(metrics[0], (element) => element.textContent === value).length, 1)
+  }
+})
+
+test('keeps unavailable latency metrics empty for a fully failed bucket', () => {
+  const buckets = [
+    createTimelineBucket(0, 0),
+    createTimelineBucket(1, 2, {
+      avgDelay: null,
+      failureCount: 2,
+      jitter: null,
+      maxDelay: null,
+      minDelay: null,
+      successCount: 0,
+    }),
+  ]
+  const { section } = renderTimelineChart({ buckets, selectedBucketIndex: 1, window: '24h' })
+  const metrics = findElements(
+    section,
+    (element) => element.dataset.role === 'bucket-summary-metrics',
+  )[0]
+
+  assert.ok(metrics)
+  assert.equal(findElements(metrics, (element) => element.textContent === '--').length, 3)
+  assert.equal(findElements(metrics, (element) => element.textContent === '0.0%').length, 1)
 })
 
 test('restores the active bucket instead of resetting the guide to the latest sample', () => {
@@ -783,7 +867,7 @@ test('locks the desktop detail direction across range changes and recalculates i
 test('preserves the visible popover height while replacing latency detail content', () => {
   assert.match(
     proxyNodeCardSource,
-    /const renderActiveLatencyDetailsTip = \(\) => \{[\s\S]*currentRoot\?\.style\.maxHeight[\s\S]*nextRoot\.style\.maxHeight = currentMaxHeight[\s\S]*instance\.setContent\(nextRoot\)/,
+    /const renderActiveLatencyDetailsTip = \([^)]*\) => \{[\s\S]*currentRoot\?\.style\.maxHeight[\s\S]*nextRoot\.style\.maxHeight = currentMaxHeight[\s\S]*instance\.setContent\(nextRoot\)/,
   )
 })
 
@@ -954,6 +1038,79 @@ test('keeps the latency chart section at one fixed height across ranges and load
   assert.deepEqual(
     new Set(compactSections.map((section) => section.style.height)),
     new Set(['320px']),
+  )
+})
+
+test('animates only an explicit latency timeline window change', () => {
+  const animatedSection = renderTimelineChart({ animateWindowTransition: true }).section
+  const staticSection = renderTimelineChart().section
+  const animatedVisual = findElements(
+    animatedSection,
+    (element) => element.dataset.role === 'latency-timeline-visual',
+  )[0]
+  const staticVisual = findElements(
+    staticSection,
+    (element) => element.dataset.role === 'latency-timeline-visual',
+  )[0]
+
+  assert.ok(animatedVisual)
+  assert.ok(staticVisual)
+  assert.match(animatedVisual.className, /latency-timeline-window-enter/)
+  assert.doesNotMatch(staticVisual.className, /latency-timeline-window-enter/)
+  assert.match(
+    proxyNodeCardSource,
+    /changeLatencyTimelineWindow[\s\S]*renderActiveLatencyDetailsTip\(\{[\s\S]*animateTimelineWindowTransition: true/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /animateWindowTransition: renderOptions\.animateTimelineWindowTransition/,
+  )
+})
+
+test('keeps the window transition armed until the selected async refresh renders', () => {
+  const refreshStart = proxyNodeCardSource.indexOf('const refreshLatencyDetailsTimeline =')
+  const refreshEnd = proxyNodeCardSource.indexOf(
+    'const scheduleLatencyTimelineRetry =',
+    refreshStart,
+  )
+  const refreshSource = proxyNodeCardSource.slice(refreshStart, refreshEnd)
+  const rangeChangeStart = proxyNodeCardSource.indexOf('const changeLatencyTimelineWindow =')
+  const rangeChangeEnd = proxyNodeCardSource.indexOf(
+    'const activateLatencyTimelineBucket =',
+    rangeChangeStart,
+  )
+  const rangeChangeSource = proxyNodeCardSource.slice(rangeChangeStart, rangeChangeEnd)
+
+  assert.match(
+    proxyNodeCardSource,
+    /let latencyTimelineWindowTransitionTarget: ProxyMetricsTimelineWindow \| null = null/,
+  )
+  assert.match(
+    proxyNodeCardSource,
+    /resetLatencyBucketDrilldownState[\s\S]*latencyTimelineWindowTransitionTarget = null/,
+  )
+  assert.match(
+    rangeChangeSource,
+    /latencyTimelineWindowTransitionTarget = window[\s\S]*renderActiveLatencyDetailsTip\(\{[\s\S]*animateTimelineWindowTransition: true/,
+  )
+  assert.match(
+    refreshSource,
+    /const animateTimelineWindowTransition = latencyTimelineWindowTransitionTarget === window[\s\S]*latencyTimelineWindowTransitionTarget = null[\s\S]*renderActiveLatencyDetailsTip\(\{[\s\S]*animateTimelineWindowTransition/,
+  )
+})
+
+test('uses a 150ms chart-only fade and disables it for reduced motion', () => {
+  assert.match(
+    motionCssSource,
+    /\.latency-timeline-window-enter\s*\{[\s\S]*animation:\s*latencyTimelineWindowEnter 150ms ease-out/,
+  )
+  assert.match(
+    motionCssSource,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.latency-timeline-window-enter[\s\S]*animation:\s*none/,
+  )
+  assert.match(
+    motionCssSource,
+    /@keyframes latencyTimelineWindowEnter\s*\{\s*from\s*\{\s*opacity:\s*0\.35;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/,
   )
 })
 
