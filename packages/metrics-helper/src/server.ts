@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import type { MetricsAggregationCache } from './metricsCache.js'
 import type { MetricsDetailsCache } from './metricsDetailsCache.js'
 import type { MetricsUpdateHub } from './metricsEvents.js'
+import type { MetricsTimelineBundleCache } from './metricsTimelineBundleCache.js'
 import type { MetricsStorage } from './storage.js'
 import type { HelperHealth, ProbeSample } from './types.js'
 
@@ -12,6 +13,7 @@ type MetricsServerOptions = {
   defaultWindowSeconds: number
   detailsCache?: MetricsDetailsCache
   metricsCache?: MetricsAggregationCache
+  timelineBundleCache?: MetricsTimelineBundleCache
   updates?: MetricsUpdateHub
   now?: () => number
 }
@@ -210,6 +212,7 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
 
         if (accepted > 0) {
           void options.detailsCache?.markDirty()
+          void options.timelineBundleCache?.markDirty()
           options.metricsCache?.markDirty()
         }
 
@@ -266,6 +269,30 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
         'X-Accel-Buffering': 'no',
       })
       options.updates.subscribe(response)
+      return
+    }
+
+    if (url.pathname === '/api/metrics/timeline-bundle') {
+      const nodeName = url.searchParams.get('node')?.trim() ?? ''
+
+      if (!nodeName || nodeName.length > 512) {
+        sendStatus(response, 400, { error: 'invalid_node' })
+        return
+      }
+      if (!options.timelineBundleCache) {
+        sendStatus(response, 503, { error: 'metrics_timeline_bundle_unavailable' })
+        return
+      }
+
+      try {
+        sendJson(response, await options.timelineBundleCache.get({ nodeName, nowMs }))
+      } catch (error) {
+        response.setHeader('Retry-After', '1')
+        sendStatus(response, 503, {
+          error: error instanceof Error ? error.message : 'metrics_timeline_bundle_unavailable',
+          retryAfterMs: 1000,
+        })
+      }
       return
     }
 

@@ -26,6 +26,18 @@ export type ProbeTimelineBucket = {
   jitter: number | null
 }
 
+export type ProbeTimeline = {
+  bucketSeconds: number
+  buckets: ProbeTimelineBucket[]
+  jitter: number | null
+  windowSeconds: number
+}
+
+export type ProbeTimelineBundle = {
+  '6h': ProbeTimeline
+  '24h': ProbeTimeline
+}
+
 export type DiscoveredProxyNode = {
   name: string
   type: string | null

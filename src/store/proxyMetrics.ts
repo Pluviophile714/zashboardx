@@ -5,12 +5,14 @@ import {
   fetchProxyMetricsHelperAPI,
   fetchProxyMetricsSamplesAPI,
   fetchProxyMetricsTimelineAPI,
+  fetchProxyMetricsTimelineBundleAPI,
   openProxyMetricsEvents,
   type ProxyMetricsBucketSamplesResponse,
   type ProxyMetricsDetailsResponse,
   type ProxyMetricsEventSourceConstructor,
   type ProxyMetricsNode,
   type ProxyMetricsSample,
+  type ProxyMetricsTimelineBundleResponse,
   type ProxyMetricsTimelineResponse,
   type ProxyMetricsTimelineWindow,
 } from '../api/metricsHelper.ts'
@@ -37,6 +39,11 @@ const proxyMetricsDetailsFetchTimeMap = new Map<string, number>()
 const pendingDetailsRefreshMap = new Map<string, Promise<ProxyMetricsDetailsResponse | null>>()
 const proxyMetricsTimelineFetchTimeMap = new Map<string, number>()
 const pendingTimelineRefreshMap = new Map<string, Promise<ProxyMetricsTimelineResponse | null>>()
+const proxyMetricsTimelineBundleFetchTimeMap = new Map<string, number>()
+const pendingTimelineBundleRefreshMap = new Map<
+  string,
+  Promise<ProxyMetricsTimelineBundleResponse | null>
+>()
 const proxyMetricsBucketSamplesFetchTimeMap = new Map<string, number>()
 const pendingBucketSamplesRefreshMap = new Map<
   string,
@@ -476,6 +483,73 @@ export const refreshProxyMetricsTimeline = async (
   return request
 }
 
+export const refreshProxyMetricsTimelineBundle = async (
+  nodeName: string,
+  options: { force?: boolean } = {},
+) => {
+  if (!nodeName) return null
+
+  const now = Date.now()
+  const sixHourKey = getProxyMetricsTimelineCacheKey(nodeName, '6h')
+  const dayKey = getProxyMetricsTimelineCacheKey(nodeName, '24h')
+
+  if (
+    proxyMetricsTimelineMap.value[sixHourKey] &&
+    proxyMetricsTimelineMap.value[dayKey] &&
+    !options.force &&
+    now - (proxyMetricsTimelineBundleFetchTimeMap.get(nodeName) ?? 0) <
+      PROXY_METRICS_TIMELINE_CACHE_TTL
+  ) {
+    const snapshotAt = proxyMetricsTimelineMap.value[dayKey].snapshotAt
+
+    return {
+      generatedAt: snapshotAt,
+      nodeName,
+      snapshotAt,
+      timelines: {
+        '6h': proxyMetricsTimelineMap.value[sixHourKey],
+        '24h': proxyMetricsTimelineMap.value[dayKey],
+      },
+    } satisfies ProxyMetricsTimelineBundleResponse
+  }
+
+  const pending = pendingTimelineBundleRefreshMap.get(nodeName)
+
+  if (pending) return pending
+
+  const request = (async () => {
+    const response = await fetchProxyMetricsTimelineBundleAPI(nodeName)
+
+    if (!response) return null
+
+    const nextTimelineMap = { ...proxyMetricsTimelineMap.value }
+
+    for (const metricsWindow of ['6h', '24h'] as const) {
+      const key = getProxyMetricsTimelineCacheKey(nodeName, metricsWindow)
+      const previousSnapshotMs = Date.parse(nextTimelineMap[key]?.snapshotAt ?? '')
+      const responseSnapshotMs = Date.parse(response.timelines[metricsWindow].snapshotAt)
+
+      if (
+        !Number.isFinite(previousSnapshotMs) ||
+        !Number.isFinite(responseSnapshotMs) ||
+        responseSnapshotMs >= previousSnapshotMs
+      ) {
+        nextTimelineMap[key] = response.timelines[metricsWindow]
+        proxyMetricsTimelineFetchTimeMap.set(key, Date.now())
+      }
+    }
+
+    proxyMetricsTimelineBundleFetchTimeMap.set(nodeName, Date.now())
+    proxyMetricsTimelineMap.value = nextTimelineMap
+    return response
+  })().finally(() => {
+    pendingTimelineBundleRefreshMap.delete(nodeName)
+  })
+
+  pendingTimelineBundleRefreshMap.set(nodeName, request)
+  return request
+}
+
 export const refreshProxyMetricsBucketSamples = async (
   nodeName: string,
   start: string,
@@ -547,4 +621,6 @@ export const invalidateProxyMetricsTimeline = (nodeName: string) => {
       proxyMetricsTimelineFetchTimeMap.delete(key)
     }
   }
+
+  proxyMetricsTimelineBundleFetchTimeMap.delete(nodeName)
 }

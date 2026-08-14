@@ -749,6 +749,69 @@ test('supports fixed timeline profile geometry and boundary placement', () => {
   }
 })
 
+test('builds matching 6h and 24h timelines from one independent bundle read', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse('2026-07-05T00:00:00.500Z')
+  const samples: ProbeSample[] = [
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/old',
+      timestamp: '2026-07-04T01:00:00.000Z',
+      delay: 70,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/recent-a',
+      timestamp: '2026-07-04T19:05:00.000Z',
+      delay: 90,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/recent-b',
+      timestamp: '2026-07-04T19:07:00.000Z',
+      delay: 130,
+      success: true,
+    },
+    {
+      nodeName: 'HK-01',
+      testUrl: 'https://example.com/failure',
+      timestamp: '2026-07-04T23:59:00.000Z',
+      delay: null,
+      success: false,
+      errorType: 'timeout',
+    },
+  ]
+
+  samples.forEach((sample) => storage.insertProbeSample(sample))
+
+  const expected = {
+    '6h': {
+      bucketSeconds: 300,
+      buckets: storage.getNodeTimeline('HK-01', 21_600, 72, nowMs),
+      jitter: storage.getNodeJitter('HK-01', 21_600, nowMs),
+      windowSeconds: 21_600,
+    },
+    '24h': {
+      bucketSeconds: 900,
+      buckets: storage.getNodeTimeline('HK-01', 86_400, 96, nowMs),
+      jitter: storage.getNodeJitter('HK-01', 86_400, nowMs),
+      windowSeconds: 86_400,
+    },
+  }
+
+  storage.getNodeTimeline = () => {
+    throw new Error('bundle must not call getNodeTimeline')
+  }
+  storage.getNodeJitter = () => {
+    throw new Error('bundle must not call getNodeJitter')
+  }
+
+  assert.deepEqual(storage.getNodeTimelineBundle('HK-01', nowMs), expected)
+  storage.close()
+})
+
 test('returns raw samples in a half-open interval ordered by timestamp and database id', () => {
   const storage = createStorage()
   const start = '2026-07-04T00:10:00.000Z'

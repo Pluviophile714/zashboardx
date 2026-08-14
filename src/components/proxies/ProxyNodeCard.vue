@@ -63,8 +63,8 @@
     </div>
 
     <div
-      class="w-full overflow-hidden rounded-full"
-      :class="isSmallCard ? 'h-1' : 'h-1.5'"
+      class="latency-strip-viewport w-full"
+      :class="isSmallCard ? 'h-5' : 'h-6'"
       aria-hidden="true"
     >
       <div
@@ -78,9 +78,15 @@
         <div
           v-for="segment in latencyStripSegments"
           :key="segment.identity"
-          class="h-full min-w-0"
+          class="latency-strip-pill h-full min-w-0"
           :class="segment.class"
-        />
+        >
+          <span
+            v-if="segment.accent"
+            class="latency-strip-pill-accent absolute inset-x-0 bottom-0"
+            :style="getLatencyStripAccentStyle(segment.accent)"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -138,6 +144,7 @@ import {
   proxyMetricsUpdatedAt,
   refreshProxyMetricsBucketSamples,
   refreshProxyMetricsDetails,
+  refreshProxyMetricsTimelineBundle,
 } from '@/store/proxyMetrics'
 import type {
   ProxyMetricsDetailsResponse,
@@ -160,8 +167,10 @@ import {
 import ProxyIcon from './ProxyIcon.vue'
 import { getSmartOutbound } from './smartOutbound'
 
-const LATENCY_BAR_SEGMENTS = 10
 const LATENCY_DETAIL_SEGMENTS = 30
+const LATENCY_BAR_SEGMENTS = LATENCY_DETAIL_SEGMENTS
+const LATENCY_STRIP_COMPACT_HEIGHT = 20
+const LATENCY_STRIP_DEFAULT_HEIGHT = 24
 const LATENCY_ONE_HOUR_RAW_LIMIT = 200
 const LATENCY_AVAILABILITY_MAX_SAMPLES = 1500
 const LATENCY_AVAILABILITY_MIN_SAMPLES = 12
@@ -171,7 +180,7 @@ const LATENCY_DETAILS_R5S_PREFETCH_TIMEOUT = 350
 const LATENCY_DETAILS_LOCAL_MAX_AGE = 24 * 60 * 60 * 1000
 const LATENCY_SAMPLE_DETAIL_RESTORE_DELAY = 1000
 const LATENCY_BUCKET_DRILLDOWN_RESET_DELAY = 8000
-const LATENCY_STRIP_ANIMATION_FALLBACK_DELAY = 650
+const LATENCY_STRIP_ANIMATION_FALLBACK_DELAY = 300
 const LATENCY_TIMELINE_RETRY_BASE_DELAY = 750
 const LATENCY_TIMELINE_RETRY_MAX_DELAY = 5000
 const { t } = useI18n()
@@ -204,16 +213,13 @@ const typeDescription = computed(() => {
   return [type, isUDP, smartDesc, isV6].filter(Boolean).join(isSmallCard.value ? '/' : ' / ')
 })
 const getLatencySegmentClass = (delay?: number) => {
+  if (delay === undefined) {
+    return props.active ? 'bg-primary-content/30' : 'bg-base-content/15'
+  }
   if (!delay || delay === NOT_CONNECTED) {
     return props.active ? 'bg-primary-content/30' : 'bg-base-content/25'
   }
-  if (delay < lowLatency.value) {
-    return 'bg-low-latency'
-  }
-  if (delay < mediumLatency.value) {
-    return 'bg-medium-latency'
-  }
-  return 'bg-high-latency'
+  return 'bg-low-latency'
 }
 
 const hasLatencyDetailsHistory = () => {
@@ -416,30 +422,16 @@ const getLatencyTimelineAccent = (delay?: number) => {
   }
 }
 
-const getLatencyStats = (history: { delay: number }[], windowSize = LATENCY_BAR_SEGMENTS) => {
-  const recent = history.slice(-windowSize)
-  const successItems = recent.filter((item) => item.delay > NOT_CONNECTED)
-  const delays = successItems.map((item) => item.delay)
-
-  if (delays.length === 0) {
-    return null
-  }
-
-  const min = Math.min(...delays)
-  const max = Math.max(...delays)
-  const avg = Math.round(delays.reduce((sum, delay) => sum + delay, 0) / delays.length)
-  const variance = delays.reduce((sum, delay) => sum + (delay - avg) ** 2, 0) / delays.length
-
-  return {
-    avg,
-    max,
-    min,
-    jitter: Math.round(Math.sqrt(variance)),
-    successRate: Math.round((successItems.length / windowSize) * 100),
-    successTests: successItems.length,
-    totalTests: windowSize,
-  }
-}
+const getLatencyStripAccentStyle = (accent: { color: string; ratio: number }) => ({
+  height: `${Math.max(
+    2,
+    Math.round(
+      (isSmallCard.value ? LATENCY_STRIP_COMPACT_HEIGHT : LATENCY_STRIP_DEFAULT_HEIGHT) *
+        accent.ratio,
+    ),
+  )}px`,
+  backgroundColor: accent.color,
+})
 
 const formatSharedMetricsAvailability = (metrics: (typeof proxyMetricsMap.value)[string]) => {
   if (metrics.availability === null || !metrics.sampleCount) {
@@ -581,10 +573,15 @@ const latencyStabilityBar = computed(() => {
     identity: item.identity,
   }))
 
-  return [...emptySegments, ...recentSegments].map((item) => ({
-    class: getLatencySegmentClass(item?.delay),
-    identity: item.identity,
-  }))
+  return [...emptySegments, ...recentSegments].map((item) => {
+    const accent = getLatencyTimelineAccent(item.delay)
+
+    return {
+      class: getLatencySegmentClass(item.delay),
+      identity: item.identity,
+      accent,
+    }
+  })
 })
 
 type LatencyStripSegment = (typeof latencyStabilityBar.value)[number]
@@ -1371,6 +1368,8 @@ const buildLatencyStatusTimeline = (
     let activePointerId: number | null = null
     let restoreTimer: ReturnType<typeof window.setTimeout> | undefined
 
+    summaryLine.style.display = 'none'
+
     const clearRestoreTimer = () => {
       if (!restoreTimer) return
 
@@ -1386,6 +1385,7 @@ const buildLatencyStatusTimeline = (
     const restoreSummary = () => {
       clearSelectedSegment()
       summaryLine.replaceChildren(...summaryNodes)
+      summaryLine.style.display = 'none'
     }
     const showSample = (index: number) => {
       const item = timelineItems[index]
@@ -1418,6 +1418,7 @@ const buildLatencyStatusTimeline = (
         success ? 'bg-low-latency' : 'bg-high-latency'
       }`
       status.append(statusDot, document.createTextNode(success ? '成功' : '失败'))
+      summaryLine.style.display = 'flex'
       summaryLine.replaceChildren(time, delay, status)
     }
     const selectPointerSample = (event: PointerEvent) => {
@@ -1467,14 +1468,12 @@ const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions =
   const compact = isCompactLatencyDetails()
   const detailHistorySource = getLatencyDetailsHistorySource()
   const recentHistory = detailHistorySource.history.slice(-LATENCY_DETAIL_SEGMENTS)
-  const isSampleDrilldown = Boolean(activeLatencyTimelineSample)
   const isDrilldown = Boolean(activeLatencyTimelineBucket || activeLatencyTimelineSample)
   const history = resolveLatencyStripHistory({
     mode: isDrilldown ? 'bucket' : 'recent',
     recent: recentHistory,
     bucket: latencyBucketHistory,
   })
-  const stats = getLatencyStats(history, isDrilldown ? history.length : LATENCY_DETAIL_SEGMENTS)
   const sharedMetricsResolution = getSharedMetricsResolution()
   const sharedMetrics = sharedMetricsResolution?.metrics
   const timelineSourceName = getR5sLatencySampleSourceName()
@@ -1517,7 +1516,7 @@ const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions =
   freshnessLine.textContent = `${freshnessLabel} · ${ageLabel}`
   root.append(freshnessLine)
 
-  if (stats || history.length || sharedMetrics) {
+  if (history.length || sharedMetrics) {
     const chart = document.createElement('div')
     chart.className = compact
       ? 'shrink-0 rounded-lg bg-base-300/50 p-1.5'
@@ -1571,51 +1570,34 @@ const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions =
       ),
     )
 
-    const summaryLine = document.createElement('div')
-    if (stats) {
-      summaryLine.className = 'mt-1 flex items-center justify-between text-xs text-base-content/75'
-
-      const min = document.createElement('span')
-      min.textContent = `${stats.min}ms`
-      const avg = document.createElement('span')
-      avg.textContent = `avg: ${stats.avg}ms`
-      const max = document.createElement('span')
-      max.textContent = `${stats.max}ms`
-      summaryLine.append(min, avg, max)
-    } else {
-      summaryLine.className = 'mt-1 text-center text-xs text-base-content/55'
-      summaryLine.textContent = history.length
-        ? isDrilldown
-          ? isSampleDrilldown
-            ? '该记录暂无成功测速'
-            : '该时段暂无成功测速'
-          : '近30次暂无成功测速'
-        : isDrilldown
-          ? isSampleDrilldown
-            ? '该记录暂无记录'
-            : '该时段暂无记录'
-          : 'R5S近30次等待样本'
+    const summaryLine = isDrilldown ? document.createElement('div') : undefined
+    if (summaryLine) {
+      summaryLine.className = compact
+        ? 'mt-1 min-h-4 items-center justify-center gap-2 text-[10px] text-base-content/70'
+        : 'mt-1 min-h-4 items-center justify-center gap-2 text-[11px] text-base-content/70'
     }
 
-    chart.append(
-      buildLatencyStatusTimeline(
-        history,
-        compact,
-        activeLatencyTimelineBucket
-          ? formatLatencyBucketTitle(activeLatencyTimelineBucket, latencyBucketHistory.length)
-          : activeLatencyTimelineSample
-            ? `1h采样 ${dayjs(activeLatencyTimelineSample.timestamp).format('MM-DD HH:mm:ss')}`
-            : detailHistorySource.label,
-        summaryLine,
-        {
-          centerStableTracks: isDrilldown,
-          onInteraction: restartLatencyBucketDrilldownResetTimer,
-          onRestoreRecent: isDrilldown ? () => exitLatencyBucketDrilldown(true) : undefined,
-          preserveAll: isDrilldown,
-        },
-      ),
-      summaryLine,
-    )
+    if (isDrilldown) {
+      chart.append(
+        buildLatencyStatusTimeline(
+          history,
+          compact,
+          activeLatencyTimelineBucket
+            ? formatLatencyBucketTitle(activeLatencyTimelineBucket, latencyBucketHistory.length)
+            : activeLatencyTimelineSample
+              ? `1h采样 ${dayjs(activeLatencyTimelineSample.timestamp).format('MM-DD HH:mm:ss')}`
+              : detailHistorySource.label,
+          summaryLine,
+          {
+            centerStableTracks: true,
+            onInteraction: restartLatencyBucketDrilldownResetTimer,
+            onRestoreRecent: () => exitLatencyBucketDrilldown(true),
+            preserveAll: true,
+          },
+        ),
+      )
+      if (summaryLine) chart.append(summaryLine)
+    }
 
     root.append(chart)
   }
@@ -1671,6 +1653,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   const placement = compact ? mobilePlacement : 'top'
   const timelineSourceName = getR5sLatencySampleSourceName()
 
+  void refreshProxyMetricsTimelineBundle(timelineSourceName, { force: true })
   const refresh = refreshLatencyDetailsTimeline(timelineSourceName, activeLatencyTimelineWindow)
 
   await openWithDeferredRefresh({
@@ -1827,23 +1810,54 @@ onUnmounted(() => {
 
 .latency-strip-track {
   display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
+  grid-template-columns: repeat(30, minmax(0, 1fr));
   width: 100%;
-  height: 100%;
-  gap: 1px;
+  height: calc(100% - 1px);
+  gap: 2px;
+  justify-items: center;
   contain: layout paint;
   transform: translate3d(0, 0, 0);
 }
 
+.latency-strip-viewport {
+  overflow: hidden;
+  padding-top: 1px;
+}
+
+.latency-strip-pill {
+  position: relative;
+  width: min(45%, 8px);
+  min-width: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  transition:
+    transform 150ms ease,
+    filter 150ms ease;
+}
+
+.latency-strip-pill-accent {
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.95;
+}
+
+.latency-strip-pill:hover,
+.latency-strip-pill:focus-visible {
+  position: relative;
+  z-index: 1;
+  transform: translateY(-1px) scaleY(1.08);
+  filter: brightness(1.12);
+}
+
 .latency-strip-track--appending {
-  grid-template-columns: repeat(11, minmax(0, 1fr));
-  width: calc(110% + 0.1px);
+  grid-template-columns: repeat(31, minmax(0, 1fr));
+  width: calc(103.333333% + 0.2px);
   will-change: transform;
 }
 
 .latency-strip-track--sliding {
-  transform: translate3d(calc(-9.090909% - 0.090909px), 0, 0);
-  transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translate3d(calc(-3.225806% - 0.064516px), 0, 0);
+  transition: transform 250ms ease-in-out;
 }
 
 @media (prefers-reduced-motion: reduce) {

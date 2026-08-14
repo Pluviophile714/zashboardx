@@ -6,6 +6,10 @@ import { afterEach, test } from 'node:test'
 import { MetricsAggregationCache } from './metricsCache.js'
 import { MetricsDetailsCache } from './metricsDetailsCache.js'
 import { MetricsUpdateHub } from './metricsEvents.js'
+import {
+  MetricsTimelineBundleCache,
+  type MetricsTimelineBundleSnapshot,
+} from './metricsTimelineBundleCache.js'
 import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
@@ -247,6 +251,151 @@ test('accepts frontend latency samples and deduplicates repeated posts', async (
     assert.equal(nodeBody.metrics?.sampleCount, 1)
   } finally {
     server.close()
+    storage.close()
+  }
+})
+
+test('serves one node 6h and 24h timelines from the bundle cache', async () => {
+  const storage = createStorage()
+  const nowMs = Date.parse(at(30))
+  const timelineBundleCache = new MetricsTimelineBundleCache({
+    loader: async ({ nodeName, nowMs: snapshotMs }) => {
+      const timelines = storage.getNodeTimelineBundle(nodeName, snapshotMs)
+      const snapshotAt = new Date(snapshotMs).toISOString()
+      const withMetadata = (window: '6h' | '24h') => ({
+        ...timelines[window],
+        generatedAt: snapshotAt,
+        nodeName,
+        snapshotAt,
+      })
+
+      return {
+        generatedAt: snapshotAt,
+        nodeName,
+        snapshotAt,
+        timelines: {
+          '6h': withMetadata('6h'),
+          '24h': withMetadata('24h'),
+        },
+      }
+    },
+    refreshDebounceMs: 0,
+    ttlMs: 30_000,
+  })
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 1,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 86_400,
+    now: () => nowMs,
+    timelineBundleCache,
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/metrics/timeline-bundle?node=${encodeURIComponent('HK-01')}`,
+    )
+    const body = (await response.json()) as MetricsTimelineBundleSnapshot
+
+    assert.equal(response.status, 200)
+    assert.equal(body.nodeName, 'HK-01')
+    assert.equal(body.snapshotAt, at(30))
+    assert.equal(body.timelines['6h'].buckets.length, 72)
+    assert.equal(body.timelines['6h'].bucketSeconds, 300)
+    assert.equal(body.timelines['24h'].buckets.length, 96)
+    assert.equal(body.timelines['24h'].bucketSeconds, 900)
+
+    const missingNodeResponse = await fetch(`${baseUrl}/api/metrics/timeline-bundle`)
+    assert.equal(missingNodeResponse.status, 400)
+  } finally {
+    server.close()
+    timelineBundleCache.stop()
+    storage.close()
+  }
+})
+
+test('marks a recently requested timeline bundle dirty after accepting a new sample', async () => {
+  const storage = createStorage()
+  let nowMs = Date.parse(at(30))
+  let loadCount = 0
+  const timelineBundleCache = new MetricsTimelineBundleCache({
+    loader: async ({ nodeName, nowMs: snapshotMs }) => {
+      loadCount += 1
+      const timelines = storage.getNodeTimelineBundle(nodeName, snapshotMs)
+      const snapshotAt = new Date(snapshotMs).toISOString()
+      const withMetadata = (window: '6h' | '24h') => ({
+        ...timelines[window],
+        generatedAt: snapshotAt,
+        nodeName,
+        snapshotAt,
+      })
+
+      return {
+        generatedAt: snapshotAt,
+        nodeName,
+        snapshotAt,
+        timelines: {
+          '6h': withMetadata('6h'),
+          '24h': withMetadata('24h'),
+        },
+      }
+    },
+    now: () => nowMs,
+    refreshDebounceMs: 0,
+    ttlMs: 30_000,
+  })
+  const server = createMetricsServer({
+    storage,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 1,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 86_400,
+    now: () => nowMs,
+    timelineBundleCache,
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    await fetch(`${baseUrl}/api/metrics/timeline-bundle?node=HK-01`)
+    assert.equal(loadCount, 1)
+
+    nowMs = Date.parse(at(31))
+    const postResponse = await fetch(`${baseUrl}/api/metrics/samples`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        samples: [
+          {
+            nodeName: 'HK-01',
+            testUrl: 'https://example.com/new',
+            timestamp: at(31),
+            delay: 90,
+            success: true,
+          },
+        ],
+      }),
+    })
+
+    assert.equal(postResponse.status, 200)
+    await waitFor(() => loadCount === 2)
+    assert.equal(timelineBundleCache.peek('HK-01')?.snapshotAt, at(31))
+  } finally {
+    server.close()
+    timelineBundleCache.stop()
     storage.close()
   }
 })

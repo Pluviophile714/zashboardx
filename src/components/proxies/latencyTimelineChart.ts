@@ -53,8 +53,8 @@ export type LatencyTimelineChartOptions = {
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 const ACTIVATION_DRAG_THRESHOLD = 8
 const LATENCY_TIMELINE_SECTION_HEIGHT = {
-  compact: 320,
-  desktop: 360,
+  compact: 360,
+  desktop: 420,
 } as const
 let chartId = 0
 

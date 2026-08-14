@@ -134,9 +134,82 @@ export const getProxyMetricsTimelineTooltipMode = (compact: boolean) => {
   return 'outside' as const
 }
 
-export const getProxyMetricsTimelineHeight = (compact: boolean) => (compact ? 108 : 192)
+export const getProxyMetricsTimelineHeight = (compact: boolean) => (compact ? 140 : 252)
 
 const coordinate = (value: number) => Number(value.toFixed(2))
+
+type SvgPathPoint = {
+  x: number
+  y: number
+}
+
+const MONOTONE_CURVE_TENSION = 0.65
+
+const createMonotoneSvgCommands = (points: SvgPathPoint[]) => {
+  if (points.length < 2) return ''
+
+  const slopes = Array.from({ length: points.length - 1 }, (_, index) => {
+    const dx = points[index + 1].x - points[index].x
+
+    return dx > 0 ? (points[index + 1].y - points[index].y) / dx : 0
+  })
+  const tangents = points.map((_, index) => {
+    if (index === 0) return slopes[0]
+    if (index === points.length - 1) return slopes.at(-1) ?? 0
+
+    const previousSlope = slopes[index - 1]
+    const nextSlope = slopes[index]
+
+    if (previousSlope === 0 || nextSlope === 0 || previousSlope * nextSlope <= 0) return 0
+
+    const previousWidth = points[index].x - points[index - 1].x
+    const nextWidth = points[index + 1].x - points[index].x
+    const previousWeight = 2 * nextWidth + previousWidth
+    const nextWeight = nextWidth + 2 * previousWidth
+
+    return (previousWeight + nextWeight) / (previousWeight / previousSlope + nextWeight / nextSlope)
+  })
+
+  return points
+    .slice(1)
+    .map((point, index) => {
+      const previous = points[index]
+      const dx = point.x - previous.x
+
+      if (dx <= 0) return `L ${coordinate(point.x)} ${coordinate(point.y)}`
+
+      const firstControlX = coordinate(previous.x + dx / 3)
+      const firstControlY = coordinate(
+        previous.y + (tangents[index] * MONOTONE_CURVE_TENSION * dx) / 3,
+      )
+      const secondControlX = coordinate(point.x - dx / 3)
+      const secondControlY = coordinate(
+        point.y - (tangents[index + 1] * MONOTONE_CURVE_TENSION * dx) / 3,
+      )
+
+      return `C ${firstControlX} ${firstControlY} ${secondControlX} ${secondControlY} ${coordinate(point.x)} ${coordinate(point.y)}`
+    })
+    .join(' ')
+}
+
+export const createMonotoneSvgPath = (points: SvgPathPoint[]) => {
+  if (!points.length) return ''
+
+  const first = points[0]
+  const commands = createMonotoneSvgCommands(points)
+
+  return `M ${coordinate(first.x)} ${coordinate(first.y)}${commands ? ` ${commands}` : ''}`
+}
+
+const createMonotoneRangePath = (points: RangePoint[]) => {
+  if (!points.length) return ''
+
+  const upper = points.map((point) => ({ x: point.x, y: point.maxY }))
+  const lower = [...points].reverse().map((point) => ({ x: point.x, y: point.minY }))
+  const lowerCommands = createMonotoneSvgCommands(lower)
+
+  return `${createMonotoneSvgPath(upper)} L ${coordinate(lower[0].x)} ${coordinate(lower[0].y)}${lowerCommands ? ` ${lowerCommands}` : ''} Z`
+}
 
 const createPathRuns = <T>(points: (T | null)[], createPath: (run: T[]) => string): string[] => {
   const paths: string[] = []
@@ -242,20 +315,8 @@ export const buildProxyMetricsTimelineChartModel = (
     }
   })
 
-  const averagePaths = createPathRuns(points, (run) =>
-    run.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '),
-  )
-  const rangePaths = createPathRuns(rangePoints, (run) => {
-    const upper = run
-      .map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.maxY}`)
-      .join(' ')
-    const lower = [...run]
-      .reverse()
-      .map((point) => `L ${point.x} ${point.minY}`)
-      .join(' ')
-
-    return `${upper} ${lower} Z`
-  })
+  const averagePaths = createPathRuns(points, createMonotoneSvgPath)
+  const rangePaths = createPathRuns(rangePoints, createMonotoneRangePath)
   const yTickValues = [yMin, Math.round((yMin + yMax) / 2), yMax]
   const xTickIndices = [0, 0.25, 0.5, 0.75, 1]
     .map((ratio) => Math.round((bucketCount - 1) * ratio))
@@ -365,9 +426,7 @@ export const buildProxyMetricsSampleChartModel = (
       },
     ]
   })
-  const averagePaths = createPathRuns(points, (run) =>
-    run.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '),
-  )
+  const averagePaths = createPathRuns(points, createMonotoneSvgPath)
   const yTickValues = [yMin, Math.round((yMin + yMax) / 2), yMax]
   const xTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
     const timestamp = new Date(windowStart + windowDuration * ratio).toISOString()

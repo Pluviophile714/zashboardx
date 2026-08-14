@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   fetchProxyMetricsTimelineAPI,
+  fetchProxyMetricsTimelineBundleAPI,
   getProxyMetricsTimelineProfile,
   normalizeMetricsTimelineBucket,
   type ProxyMetricsTimelineWindow,
@@ -208,4 +209,66 @@ test('defaults missing window jitter to null for an older helper response', asyn
   await withTimelineResponse(response, async () => {
     assert.equal((await fetchProxyMetricsTimelineAPI('HK-01', '1h'))?.jitter, null)
   })
+})
+
+test('normalizes a complete 6h and 24h timeline bundle', async () => {
+  const snapshotAt = '2026-07-05T00:00:00.000Z'
+  const response = {
+    generatedAt: snapshotAt,
+    nodeName: 'HK-01',
+    snapshotAt,
+    timelines: {
+      '6h': createTimelineResponse('6h', { generatedAt: snapshotAt, snapshotAt }),
+      '24h': createTimelineResponse('24h', { generatedAt: snapshotAt, snapshotAt }),
+    },
+  }
+
+  await withTimelineResponse(response, async () => {
+    const result = await fetchProxyMetricsTimelineBundleAPI('HK-01')
+
+    assert.equal(result?.snapshotAt, snapshotAt)
+    assert.equal(result?.timelines['6h'].buckets.length, 72)
+    assert.equal(result?.timelines['24h'].buckets.length, 96)
+    assert.equal(result?.timelines['6h'].snapshotAt, snapshotAt)
+    assert.equal(result?.timelines['24h'].snapshotAt, snapshotAt)
+  })
+})
+
+test('rejects a partial or cross-snapshot timeline bundle', async () => {
+  const snapshotAt = '2026-07-05T00:00:00.000Z'
+  const valid = {
+    generatedAt: snapshotAt,
+    nodeName: 'HK-01',
+    snapshotAt,
+    timelines: {
+      '6h': createTimelineResponse('6h', { generatedAt: snapshotAt, snapshotAt }),
+      '24h': createTimelineResponse('24h', { generatedAt: snapshotAt, snapshotAt }),
+    },
+  }
+
+  await withTimelineResponse(
+    {
+      ...valid,
+      timelines: { '6h': valid.timelines['6h'] },
+    },
+    async () => {
+      assert.equal(await fetchProxyMetricsTimelineBundleAPI('HK-01'), null)
+    },
+  )
+
+  await withTimelineResponse(
+    {
+      ...valid,
+      timelines: {
+        ...valid.timelines,
+        '24h': {
+          ...valid.timelines['24h'],
+          snapshotAt: '2026-07-04T23:59:00.000Z',
+        },
+      },
+    },
+    async () => {
+      assert.equal(await fetchProxyMetricsTimelineBundleAPI('HK-01'), null)
+    },
+  )
 })

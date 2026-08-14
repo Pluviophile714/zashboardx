@@ -1,7 +1,14 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { NodeMetrics, ProbeSample, ProbeSampleRange, ProbeTimelineBucket } from './types.js'
+import type {
+  NodeMetrics,
+  ProbeSample,
+  ProbeSampleRange,
+  ProbeTimeline,
+  ProbeTimelineBucket,
+  ProbeTimelineBundle,
+} from './types.js'
 
 const FALLBACK_ROUND_WINDOW_MS = 2_000
 
@@ -29,6 +36,125 @@ type ProbeTimelineRow = {
   min_delay: number | null
   max_delay: number | null
   jitter: number | null
+}
+
+type ProbeTimelineBundleRow = {
+  delay: number | null
+  id: number
+  success: number
+  timestamp: string
+}
+
+type TimelineAccumulator = {
+  delaySum: number
+  failureCount: number
+  jitterCount: number
+  jitterSum: number
+  maxDelay: number | null
+  minDelay: number | null
+  previousDelay: number | null
+  sampleCount: number
+  successCount: number
+}
+
+const TIMELINE_BUNDLE_PROFILES = {
+  '6h': { bucketCount: 72, windowSeconds: 21_600 },
+  '24h': { bucketCount: 96, windowSeconds: 86_400 },
+} as const
+
+const buildTimelineFromRows = (
+  rows: ProbeTimelineBundleRow[],
+  windowSeconds: number,
+  bucketCount: number,
+  nowMs: number,
+): ProbeTimeline => {
+  const normalizedNowMs = Math.floor(nowMs / 1000) * 1000
+  const windowStartMs = normalizedNowMs - windowSeconds * 1000
+  const jitterWindowStartMs = nowMs - windowSeconds * 1000
+  const bucketSeconds = windowSeconds / bucketCount
+  const bucketMs = bucketSeconds * 1000
+  const accumulators: TimelineAccumulator[] = Array.from({ length: bucketCount }, () => ({
+    delaySum: 0,
+    failureCount: 0,
+    jitterCount: 0,
+    jitterSum: 0,
+    maxDelay: null,
+    minDelay: null,
+    previousDelay: null,
+    sampleCount: 0,
+    successCount: 0,
+  }))
+  let previousWindowDelay: number | null = null
+  let windowJitterCount = 0
+  let windowJitterSum = 0
+
+  for (const row of rows) {
+    const timestampMs = Date.parse(row.timestamp)
+
+    if (!Number.isFinite(timestampMs)) continue
+
+    if (
+      timestampMs >= jitterWindowStartMs &&
+      timestampMs <= nowMs &&
+      row.success === 1 &&
+      row.delay !== null
+    ) {
+      if (previousWindowDelay !== null) {
+        windowJitterSum += Math.abs(row.delay - previousWindowDelay)
+        windowJitterCount += 1
+      }
+      previousWindowDelay = row.delay
+    }
+
+    if (timestampMs < windowStartMs || timestampMs > normalizedNowMs) continue
+
+    const timestampSeconds = Math.floor(timestampMs / 1000)
+    const windowStartSeconds = Math.floor(windowStartMs / 1000)
+    const bucketIndex = Math.min(
+      bucketCount - 1,
+      Math.floor((timestampSeconds - windowStartSeconds) / bucketSeconds),
+    )
+    const accumulator = accumulators[bucketIndex]
+
+    if (!accumulator) continue
+
+    accumulator.sampleCount += 1
+    if (row.success !== 1 || row.delay === null) {
+      accumulator.failureCount += 1
+      continue
+    }
+
+    accumulator.successCount += 1
+    accumulator.delaySum += row.delay
+    accumulator.minDelay =
+      accumulator.minDelay === null ? row.delay : Math.min(accumulator.minDelay, row.delay)
+    accumulator.maxDelay =
+      accumulator.maxDelay === null ? row.delay : Math.max(accumulator.maxDelay, row.delay)
+
+    if (accumulator.previousDelay !== null) {
+      accumulator.jitterSum += Math.abs(row.delay - accumulator.previousDelay)
+      accumulator.jitterCount += 1
+    }
+    accumulator.previousDelay = row.delay
+  }
+
+  return {
+    bucketSeconds,
+    buckets: accumulators.map((accumulator, bucketIndex) => ({
+      start: new Date(windowStartMs + bucketIndex * bucketMs).toISOString(),
+      end: new Date(windowStartMs + (bucketIndex + 1) * bucketMs).toISOString(),
+      sampleCount: accumulator.sampleCount,
+      successCount: accumulator.successCount,
+      failureCount: accumulator.failureCount,
+      avgDelay:
+        accumulator.successCount > 0 ? accumulator.delaySum / accumulator.successCount : null,
+      minDelay: accumulator.minDelay,
+      maxDelay: accumulator.maxDelay,
+      jitter: accumulator.jitterCount > 0 ? accumulator.jitterSum / accumulator.jitterCount : null,
+    })),
+    jitter: windowJitterCount > 0 ? windowJitterSum / windowJitterCount : null,
+    windowSeconds,
+  }
 }
 
 type MetricsStorageInitOptions = {
@@ -400,6 +526,41 @@ export class MetricsStorage {
         jitter: row?.jitter === null || row === undefined ? null : Number(row.jitter),
       }
     })
+  }
+
+  getNodeTimelineBundle(nodeName: string, nowMs = Date.now()): ProbeTimelineBundle {
+    const normalizedNowMs = Math.floor(nowMs / 1000) * 1000
+    const earliestWindowStart = new Date(
+      normalizedNowMs - TIMELINE_BUNDLE_PROFILES['24h'].windowSeconds * 1000,
+    ).toISOString()
+    const now = new Date(nowMs).toISOString()
+    const rows = this.#db
+      .prepare(
+        `
+        SELECT id, timestamp, success, delay
+        FROM probe_samples
+        WHERE node_name = ?
+          AND timestamp >= ?
+          AND timestamp <= ?
+        ORDER BY timestamp ASC, id ASC
+      `,
+      )
+      .all(nodeName, earliestWindowStart, now) as ProbeTimelineBundleRow[]
+
+    return {
+      '6h': buildTimelineFromRows(
+        rows,
+        TIMELINE_BUNDLE_PROFILES['6h'].windowSeconds,
+        TIMELINE_BUNDLE_PROFILES['6h'].bucketCount,
+        nowMs,
+      ),
+      '24h': buildTimelineFromRows(
+        rows,
+        TIMELINE_BUNDLE_PROFILES['24h'].windowSeconds,
+        TIMELINE_BUNDLE_PROFILES['24h'].bucketCount,
+        nowMs,
+      ),
+    }
   }
 
   getNodeJitter(nodeName: string, windowSeconds: number, nowMs = Date.now()) {

@@ -2,6 +2,7 @@ import { loadConfig } from './config.js'
 import { MetricsAggregationCache } from './metricsCache.js'
 import { MetricsDetailsCache } from './metricsDetailsCache.js'
 import { MetricsUpdateHub } from './metricsEvents.js'
+import { MetricsTimelineBundleCache } from './metricsTimelineBundleCache.js'
 import { MihomoClient } from './mihomoClient.js'
 import { ProbeRunner } from './prober.js'
 import { ProbeStorageWorkerClient } from './probeStorageWorkerClient.js'
@@ -38,6 +39,12 @@ const detailsCache = new MetricsDetailsCache({
   refreshDebounceMs: config.metricsCacheRefreshDebounceMs,
   ttlMs: config.metricsCacheTtlSeconds * 1000,
 })
+const timelineBundleCache = new MetricsTimelineBundleCache({
+  databasePath: config.databasePath,
+  maxEntries: 32,
+  refreshDebounceMs: config.metricsCacheRefreshDebounceMs,
+  ttlMs: config.metricsCacheTtlSeconds * 1000,
+})
 const storageWorker =
   config.databasePath === ':memory:' ? undefined : new ProbeStorageWorkerClient(config.databasePath)
 
@@ -51,7 +58,7 @@ const runner = new ProbeRunner({
   config,
   health,
   onAfterRun: async () => {
-    await detailsCache.markDirty()
+    await Promise.all([detailsCache.markDirty(), timelineBundleCache.markDirty()])
     metricsCache.markDirty()
   },
   storageWorker,
@@ -62,6 +69,7 @@ const server = createMetricsServer({
   health,
   defaultWindowSeconds: config.probeWindowHours * 60 * 60,
   metricsCache,
+  timelineBundleCache,
   updates,
 })
 
@@ -76,6 +84,7 @@ runner.start()
 const shutdown = () => {
   runner.stop()
   detailsCache.stop()
+  timelineBundleCache.stop()
   metricsCache.stop()
   updates.close()
   server.close(async () => {

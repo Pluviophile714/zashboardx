@@ -8,6 +8,7 @@ import type {
 import {
   buildProxyMetricsSampleChartModel,
   buildProxyMetricsTimelineChartModel,
+  createMonotoneSvgPath,
   getProxyMetricsSampleJitter,
   getProxyMetricsSampleWindow,
   getProxyMetricsTimelineHeight,
@@ -132,6 +133,42 @@ test('splits average and range paths at failed and empty buckets', () => {
   assert.equal(model.points[3], null)
 })
 
+test('creates a low-tension monotone cubic path without control-point overshoot', () => {
+  assert.equal(
+    createMonotoneSvgPath([
+      { x: 0, y: 10 },
+      { x: 10, y: 0 },
+      { x: 20, y: 10 },
+    ]),
+    'M 0 10 C 3.33 7.83 6.67 0 10 0 C 13.33 0 16.67 7.83 20 10',
+  )
+})
+
+test('smooths each successful timeline run without bridging failed buckets', () => {
+  const response = timeline([
+    bucket(0),
+    bucket(1),
+    bucket(2),
+    bucket(3, {
+      avgDelay: null,
+      failureCount: 1,
+      maxDelay: null,
+      minDelay: null,
+      sampleCount: 1,
+      successCount: 0,
+    }),
+    bucket(4),
+    bucket(5),
+    bucket(6),
+  ])
+  const model = buildProxyMetricsTimelineChartModel(response, options)
+
+  assert.equal(model.averagePaths.length, 2)
+  assert.ok(model.averagePaths.every((path) => path.includes(' C ')))
+  assert.equal(model.rangePaths.length, 2)
+  assert.ok(model.rangePaths.every((path) => path.includes(' C ')))
+})
+
 test('gives constant latency a finite non-zero y range', () => {
   const response = timeline([
     bucket(0, { avgDelay: 100, minDelay: 100, maxDelay: 100 }),
@@ -206,8 +243,8 @@ test('keeps timeline details outside the plot on mobile and desktop', () => {
 })
 
 test('gives the wider desktop popover a taller timeline plot', () => {
-  assert.equal(getProxyMetricsTimelineHeight(true), 108)
-  assert.equal(getProxyMetricsTimelineHeight(false), 192)
+  assert.equal(getProxyMetricsTimelineHeight(true), 140)
+  assert.equal(getProxyMetricsTimelineHeight(false), 252)
 })
 
 test('exposes the supported timeline windows in compact control order', () => {

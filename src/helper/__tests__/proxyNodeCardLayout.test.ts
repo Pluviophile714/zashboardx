@@ -286,6 +286,10 @@ const timelineChartSource = readFileSync(
   new URL('../../components/proxies/latencyTimelineChart.ts', import.meta.url),
   'utf8',
 )
+const proxyMetricsTimelineSource = readFileSync(
+  new URL('../proxyMetricsTimeline.ts', import.meta.url),
+  'utf8',
+)
 const motionCssSource = readFileSync(
   new URL('../../assets/styles/motion.css', import.meta.url),
   'utf8',
@@ -348,10 +352,35 @@ test('uses the same focused information hierarchy on desktop and mobile', () => 
   assert.doesNotMatch(proxyNodeCardSource, /availabilityLine\.append\(coverage, sampleDetail\)/)
   assert.match(
     proxyNodeCardSource,
-    /const summaryLine = document\.createElement\('div'\)\r?\n\s*if \(stats\) \{/,
+    /const summaryLine = isDrilldown \? document\.createElement\('div'\) : undefined/,
   )
   assert.doesNotMatch(proxyNodeCardSource, /const stabilityLine = document\.createElement/)
   assert.match(timelineChartSource, /getProxyMetricsTimelineHeight\(options\.compact\)/)
+})
+
+test('does not render the redundant static min avg max line below the chart', () => {
+  assert.doesNotMatch(proxyNodeCardSource, /const getLatencyStats =/)
+  assert.doesNotMatch(proxyNodeCardSource, /avg: \$\{stats\.avg\}/)
+  assert.match(proxyNodeCardSource, /if \(summaryLine\) \{[\s\S]*chart\.append\(summaryLine\)/)
+  assert.match(proxyNodeCardSource, /summaryLine\.style\.display = 'none'/)
+})
+
+test('uses the shared recent 30 samples for the first-level latency strip', () => {
+  assert.match(proxyNodeCardSource, /const LATENCY_BAR_SEGMENTS = LATENCY_DETAIL_SEGMENTS/)
+  assert.match(proxyNodeCardSource, /history\.slice\(-LATENCY_BAR_SEGMENTS\)/)
+})
+
+test('does not duplicate the recent 30 strip in the normal secondary popover', () => {
+  assert.match(proxyNodeCardSource, /if \(isDrilldown\) \{\r?\n\s*chart\.append\(/)
+  assert.match(proxyNodeCardSource, /buildLatencyStatusTimeline\(/)
+})
+
+test('gives the timeline chart more room after removing the duplicate strip', () => {
+  assert.match(timelineChartSource, /compact: 360,[\s\S]*desktop: 420/)
+  assert.match(
+    proxyMetricsTimelineSource,
+    /getProxyMetricsTimelineHeight = \(compact: boolean\) => \(compact \? 140 : 252\)/,
+  )
 })
 
 test('wires input capability independently from compact layout', () => {
@@ -977,11 +1006,43 @@ test('animates first-level latency samples by translating one fixed track', () =
   assert.match(proxyNodeCardSource, /translate3d/)
   assert.match(proxyNodeCardSource, /IntersectionObserver/)
   assert.match(proxyNodeCardSource, /prefers-reduced-motion/)
+  assert.match(proxyNodeCardSource, /class="latency-strip-pill[^\"]*"/)
+  assert.match(proxyNodeCardSource, /:class="isSmallCard \? 'h-5' : 'h-6'"/)
+  assert.match(proxyNodeCardSource, /LATENCY_STRIP_ANIMATION_FALLBACK_DELAY = 300/)
+  assert.match(proxyNodeCardSource, /gap: 2px/)
+  assert.match(proxyNodeCardSource, /border-radius: 3px/)
+  assert.match(proxyNodeCardSource, /justify-items: center/)
+  assert.match(proxyNodeCardSource, /width: min\(45%, 8px\)/)
+  assert.match(proxyNodeCardSource, /const accent = getLatencyTimelineAccent\(item\.delay\)/)
+  assert.match(proxyNodeCardSource, /latency-strip-pill-accent/)
+  assert.doesNotMatch(proxyNodeCardSource, /\.latency-strip-pill \{[\s\S]*border-radius: 999px/)
+  assert.match(proxyNodeCardSource, /transition: transform 250ms ease-in-out/)
+  assert.match(
+    proxyNodeCardSource,
+    /\.latency-strip-pill:hover[\s\S]*transform: translateY\(-1px\) scaleY\(1\.08\)/,
+  )
+  assert.doesNotMatch(proxyNodeCardSource, /latencyHeartbeatAgo/)
 })
 
 test('uses a short desktop hover delay without changing the mobile long-press trigger', () => {
   assert.match(proxyNodeCardSource, /delay: \[500, 120\]/)
   assert.match(proxyNodeCardSource, /touch: \['hold', 500\]/)
+})
+
+test('prefetches the 6h and 24h bundle before waiting for the active detail refresh', () => {
+  const handlerStart = proxyNodeCardSource.indexOf('const handlerLatencyDetailsTip = async')
+  const handlerEnd = proxyNodeCardSource.indexOf('const latencyTipAnimationClass', handlerStart)
+  const handlerSource = proxyNodeCardSource.slice(handlerStart, handlerEnd)
+  const bundleStart = handlerSource.indexOf(
+    'refreshProxyMetricsTimelineBundle(timelineSourceName, { force: true })',
+  )
+  const activeRefreshStart = handlerSource.indexOf(
+    'refreshLatencyDetailsTimeline(timelineSourceName, activeLatencyTimelineWindow)',
+  )
+
+  assert.match(proxyNodeCardSource, /refreshProxyMetricsTimelineBundle/)
+  assert.ok(bundleStart >= 0)
+  assert.ok(activeRefreshStart > bundleStart)
 })
 
 test('refreshes the open R5S detail snapshot when the shared metrics update', () => {
@@ -1000,7 +1061,7 @@ test('loads the full 1h raw sample window through one forced R5S detail request'
   )
   assert.match(proxyNodeCardSource, /const LATENCY_ONE_HOUR_RAW_LIMIT = 200/)
   assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsSamples/)
-  assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline/)
+  assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline\(/)
 })
 
 test('opens and closes latency details with a fresh 1h range state', () => {
@@ -1033,11 +1094,11 @@ test('keeps the latency chart section at one fixed height across ranges and load
 
   assert.deepEqual(
     new Set(desktopSections.map((section) => section.style.height)),
-    new Set(['360px']),
+    new Set(['420px']),
   )
   assert.deepEqual(
     new Set(compactSections.map((section) => section.style.height)),
-    new Set(['320px']),
+    new Set(['360px']),
   )
 })
 
@@ -1219,7 +1280,7 @@ test('renders every raw bucket record and uses its exact interval title', () => 
     proxyNodeCardSource,
     /formatLatencyBucketTitle\(activeLatencyTimelineBucket, latencyBucketHistory\.length\)/,
   )
-  assert.match(proxyNodeCardSource, /preserveAll: isDrilldown/)
+  assert.match(proxyNodeCardSource, /preserveAll: true/)
   assert.match(
     proxyNodeCardSource,
     /const displayedHistory = options\.preserveAll\s*\? history\s*:\s*history\.slice\(-LATENCY_DETAIL_SEGMENTS\)/,
@@ -1243,7 +1304,7 @@ test('centers small bucket histories with the same tracks and spacing as recent 
     proxyNodeCardSource,
     /item\.delay === undefined && options\.centerStableTracks[\s\S]*segment\.style\.visibility = 'hidden'/,
   )
-  assert.match(proxyNodeCardSource, /centerStableTracks: isDrilldown/)
+  assert.match(proxyNodeCardSource, /centerStableTracks: true/)
 })
 
 test('shows a manual recent-30 restore control only during bucket drilldown', () => {
@@ -1251,10 +1312,7 @@ test('shows a manual recent-30 restore control only during bucket drilldown', ()
     proxyNodeCardSource,
     /if \(options\.onRestoreRecent\) \{[\s\S]*restoreButton\.textContent = '返回近 30 次'[\s\S]*options\.onRestoreRecent\?\.\(\)/,
   )
-  assert.match(
-    proxyNodeCardSource,
-    /onRestoreRecent: isDrilldown[\s\S]*\? \(\) => exitLatencyBucketDrilldown\(true\)[\s\S]*: undefined/,
-  )
+  assert.match(proxyNodeCardSource, /onRestoreRecent: \(\) => exitLatencyBucketDrilldown\(true\)/)
 })
 
 test('restarts the eight-second drilldown timer from chart and strip activity', () => {
