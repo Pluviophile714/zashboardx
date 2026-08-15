@@ -78,3 +78,21 @@ before the `limit=200` detail response arrived, producing a partial 1h curve.
 
 **Release:** User approved commit and deployment on 2026-08-15. The final
 commit, Actions run, and R5S verification are recorded with the release task.
+
+## 2026-08-15 - Release record for one-hour rolling cache hydration
+
+**Source commit:** `3576477` (`fix: keep one-hour latency charts complete`)
+on `master`.
+
+**GitHub Actions:** `Build Image` run `31857832700` completed successfully in
+3 minutes 56 seconds. It published the dashboard and Metrics helper images.
+
+**R5S deployment:** `/root/update-zashboardx.sh` pulled the new images and
+recreated `zashboardx` plus `zashboardx-metrics`.
+
+**R5S verification:**
+
+- `zashboardx`: `running`, `true`, restart count `0`.
+- Image: `ghcr.io/pluviophile714/zashboardx:latest`.
+- `http://192.168.8.2:2080/`: HTTP `200`.
+- `docker image prune -f`: reclaimed 15.18 MB of dangling image data.
