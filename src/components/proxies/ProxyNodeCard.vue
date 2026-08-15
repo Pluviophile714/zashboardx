@@ -136,6 +136,7 @@ import {
   getProxyMetricsSamplesUpdateKind,
   getProxyMetricsDetailsSnapshot,
   getProxyMetricsTimelineCacheKey,
+  hasProxyMetricsOneHourSamplesReady,
   invalidateProxyMetricsTimeline,
   proxyMetricsMap,
   proxyMetricsLiveConnected,
@@ -741,6 +742,11 @@ const getLatencyTimelineChartState = (
     proxyMetricsSamplesMap.value[
       getProxyMetricsSamplesCacheKey(sourceName, '1h', LATENCY_ONE_HOUR_RAW_LIMIT)
     ] ?? []
+
+  if (window === '1h' && !hasProxyMetricsOneHourSamplesReady(sourceName)) {
+    return { status: 'loading' }
+  }
+
   const samples = window === '1h' ? sharedSamples : undefined
 
   if (timeline) {
@@ -846,7 +852,7 @@ const refreshActiveR5sLatencyDetails = () => {
     return
   }
 
-  if (activeLatencyTimelineWindow === '1h' && getProxyMetricsDetailsSnapshot(sourceName, '1h')) {
+  if (activeLatencyTimelineWindow === '1h' && hasProxyMetricsOneHourSamplesReady(sourceName)) {
     instance.setContent(createLatencyDetailsTip())
     repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
     return

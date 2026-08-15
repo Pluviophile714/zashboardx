@@ -56,6 +56,7 @@ export const proxyMetricsSamplesSnapshotMap = shallowRef<Record<string, string>>
 export const proxyMetricsSamplesUpdateMap = shallowRef<
   Record<string, ProxyMetricsSampleUpdateKind>
 >({})
+export const proxyMetricsOneHourSamplesReadyMap = shallowRef<Record<string, true>>({})
 export const proxyMetricsTimelineMap = shallowRef<Record<string, ProxyMetricsTimelineResponse>>({})
 export const proxyMetricsDetailsMap = shallowRef<Record<string, ProxyMetricsDetailsResponse>>({})
 export const proxyMetricsBucketSamplesMap = shallowRef<
@@ -284,6 +285,13 @@ export const getProxyMetricsSamplesSnapshotAt = (
     getProxyMetricsSamplesCacheKey(nodeName, metricsWindow, limit)
   ]
 
+export const hasProxyMetricsOneHourSamplesReady = (nodeName: string) =>
+  Boolean(
+    proxyMetricsOneHourSamplesReadyMap.value[
+      getProxyMetricsSamplesCacheKey(nodeName, SHARED_RAW_SAMPLES_WINDOW, SHARED_RAW_SAMPLES_LIMIT)
+    ],
+  )
+
 export const getProxyMetricsTimelineCacheKey = (nodeName: string, metricsWindow = '24h') =>
   `${metricsWindow}\n${nodeName}`
 
@@ -391,6 +399,13 @@ export const refreshProxyMetricsDetails = async (
       proxyMetricsSamplesUpdateMap.value = {
         ...proxyMetricsSamplesUpdateMap.value,
         [samplesKey]: update.kind,
+      }
+    }
+
+    if (metricsWindow === SHARED_RAW_SAMPLES_WINDOW && limit >= SHARED_RAW_SAMPLES_LIMIT) {
+      proxyMetricsOneHourSamplesReadyMap.value = {
+        ...proxyMetricsOneHourSamplesReadyMap.value,
+        [samplesKey]: true,
       }
     }
 

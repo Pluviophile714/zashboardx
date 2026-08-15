@@ -6,8 +6,10 @@ import {
   type ProxyMetricsSnapshotReadyEvent,
 } from '../../api/metricsHelper.ts'
 import {
+  hasProxyMetricsOneHourSamplesReady,
   proxyMetricsDetailsMap,
   proxyMetricsLiveConnected,
+  proxyMetricsOneHourSamplesReadyMap,
   proxyMetricsSamplesMap,
   proxyMetricsUpdatedAt,
   refreshProxyMetricsDetails,
@@ -54,13 +56,21 @@ const detailsResponse = (
   snapshotAt: string,
   delay: number,
   sampleTimestamp = '2026-08-11T08:55:34.000Z',
+  timelineWindow: '1h' | '24h' = '24h',
 ) => {
   const endMs = Date.parse(snapshotAt)
-  const bucketSeconds = 15 * 60
-  const buckets = Array.from({ length: 96 }, (_, index) => {
-    const start = new Date(endMs - (96 - index) * bucketSeconds * 1000).toISOString()
-    const end = new Date(endMs - (95 - index) * bucketSeconds * 1000).toISOString()
-    const hasSample = index === 95
+  const profile =
+    timelineWindow === '1h'
+      ? { bucketCount: 60, bucketSeconds: 60, windowSeconds: 3_600 }
+      : { bucketCount: 96, bucketSeconds: 15 * 60, windowSeconds: 86_400 }
+  const buckets = Array.from({ length: profile.bucketCount }, (_, index) => {
+    const start = new Date(
+      endMs - (profile.bucketCount - index) * profile.bucketSeconds * 1000,
+    ).toISOString()
+    const end = new Date(
+      endMs - (profile.bucketCount - index - 1) * profile.bucketSeconds * 1000,
+    ).toISOString()
+    const hasSample = index === profile.bucketCount - 1
 
     return {
       avgDelay: hasSample ? delay : null,
@@ -89,13 +99,13 @@ const detailsResponse = (
     ],
     snapshotAt,
     timeline: {
-      bucketSeconds,
+      bucketSeconds: profile.bucketSeconds,
       buckets,
       generatedAt: snapshotAt,
       jitter: null,
       nodeName,
       snapshotAt,
-      windowSeconds: 86_400,
+      windowSeconds: profile.windowSeconds,
     },
   }
 }
@@ -275,6 +285,53 @@ test('promotes a newer detail snapshot into the shared recent samples', async ()
     assert.equal(proxyMetricsSamplesMap.value[key]?.at(-1)?.delay, 63)
   } finally {
     delete proxyMetricsSamplesMap.value[key]
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
+})
+
+test('marks a one-hour raw list ready only after its complete detail snapshot arrives', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-ONE-HOUR-READY-01'
+  const samplesKey = `1h\n200\n${nodeName}`
+  const detailsKey = `1h\n${nodeName}`
+
+  assert.equal(hasProxyMetricsOneHourSamplesReady(nodeName), false)
+
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(
+        JSON.stringify(
+          detailsResponse(
+            nodeName,
+            '2026-08-11T09:04:00.000Z',
+            63,
+            '2026-08-11T09:04:00.000Z',
+            '1h',
+          ),
+        ),
+        { status: 200 },
+      ),
+    window: globalThis,
+  })
+
+  try {
+    await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      limit: 200,
+      snapshotAt: '2026-08-11T09:04:00.000Z',
+      window: '1h',
+    })
+
+    assert.equal(proxyMetricsSamplesMap.value[samplesKey]?.at(-1)?.delay, 63)
+    assert.equal(hasProxyMetricsOneHourSamplesReady(nodeName), true)
+  } finally {
+    delete proxyMetricsDetailsMap.value[detailsKey]
+    delete proxyMetricsOneHourSamplesReadyMap.value[samplesKey]
+    delete proxyMetricsSamplesMap.value[samplesKey]
     Object.assign(globalThis, {
       fetch: originalFetch,
       window: originalWindow,

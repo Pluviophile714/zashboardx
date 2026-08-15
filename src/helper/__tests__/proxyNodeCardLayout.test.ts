@@ -995,6 +995,19 @@ test('uses only the shared rolling raw list for the 1h chart', () => {
   assert.doesNotMatch(chartSource, /snapshot\?\.samples/)
 })
 
+test('waits for the complete one-hour raw cache before plotting the shared samples', () => {
+  const chartStart = proxyNodeCardSource.indexOf('const getLatencyTimelineChartState =')
+  const chartEnd = proxyNodeCardSource.indexOf('const getLocalLatencyDetailsHistory =', chartStart)
+  const chartSource = proxyNodeCardSource.slice(chartStart, chartEnd)
+
+  assert.match(proxyNodeCardSource, /hasProxyMetricsOneHourSamplesReady/)
+  assert.match(
+    chartSource,
+    /if \(window === '1h' && !hasProxyMetricsOneHourSamplesReady\(sourceName\)\) \{\s*return \{ status: 'loading' \}/s,
+  )
+  assert.match(chartSource, /const samples = window === '1h' \? sharedSamples : undefined/)
+})
+
 test('animates first-level latency samples by translating one fixed track', () => {
   assert.doesNotMatch(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
   assert.match(proxyNodeCardSource, /class="latency-strip-track"/)
