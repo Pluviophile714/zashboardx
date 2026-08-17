@@ -186,3 +186,28 @@ empty until the later refresh arrived.
 - `git diff --check` - passed.
 
 **Release:** Awaiting user approval to commit and deploy.
+
+## 2026-08-17 - Release record for fresh complete one-hour snapshots
+
+**Source commit:** `218aed3` (`fix: keep complete one-hour latency snapshots
+fresh`) on `master`.
+
+**GitHub Actions:** `Build Image` run `31992843893` completed successfully in
+4 minutes 39 seconds. Type checking, Metrics helper tests, installer tests,
+the production build, and both multi-architecture GHCR image publishes passed.
+
+**R5S deployment:** `/root/update-zashboardx.sh` pulled the new dashboard and
+Metrics helper images and recreated both containers.
+
+**R5S verification:**
+
+- `zashboardx`: running, restart count `0`, image ID
+  `sha256:120d8c9998880983dcd33a5ae938505387702e890d5d3cb23404ae44a347ba96`.
+- `zashboardx-metrics`: running, restart count `0`, image ID
+  `sha256:082d6d8c238c48d89a4d260e1e16126b970e85db328d16b54b0242c70268f0d6`.
+- Dashboard endpoint returned HTTP `200`; Metrics health reported `ok` and
+  Mihomo reachable.
+- A real `window=1h&limit=200` request returned 51 raw samples spanning 57
+  minutes, with matching detail and timeline snapshot timestamps, in 261 ms.
+- Metrics helper logs contained only the normal listening message.
+- `docker image prune -f` reclaimed 15.18 MB of dangling image data.
