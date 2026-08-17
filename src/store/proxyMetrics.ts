@@ -384,7 +384,9 @@ export const refreshProxyMetricsDetails = async (
       !Number.isFinite(responseLastTimestamp) ||
       responseLastTimestamp >= previousLastTimestamp
 
-    if (responseSamples.length && snapshotIsCurrent && samplesAreCurrent) {
+    const sharedSamplesAccepted = responseSamples.length && snapshotIsCurrent && samplesAreCurrent
+
+    if (sharedSamplesAccepted) {
       const update = reconcileRecentSampleUpdate(previousSamples, responseSamples)
 
       proxyMetricsSamplesFetchTimeMap.set(samplesKey, Date.now())
@@ -400,12 +402,12 @@ export const refreshProxyMetricsDetails = async (
         ...proxyMetricsSamplesUpdateMap.value,
         [samplesKey]: update.kind,
       }
-    }
 
-    if (metricsWindow === SHARED_RAW_SAMPLES_WINDOW && limit >= SHARED_RAW_SAMPLES_LIMIT) {
-      proxyMetricsOneHourSamplesReadyMap.value = {
-        ...proxyMetricsOneHourSamplesReadyMap.value,
-        [samplesKey]: true,
+      if (metricsWindow === SHARED_RAW_SAMPLES_WINDOW && limit >= SHARED_RAW_SAMPLES_LIMIT) {
+        proxyMetricsOneHourSamplesReadyMap.value = {
+          ...proxyMetricsOneHourSamplesReadyMap.value,
+          [samplesKey]: true,
+        }
       }
     }
 

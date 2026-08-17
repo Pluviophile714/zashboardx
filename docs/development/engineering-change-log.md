@@ -96,3 +96,43 @@ recreated `zashboardx` plus `zashboardx-metrics`.
 - Image: `ghcr.io/pluviophile714/zashboardx:latest`.
 - `http://192.168.8.2:2080/`: HTTP `200`.
 - `docker image prune -f`: reclaimed 15.18 MB of dangling image data.
+
+## 2026-08-17 - One-hour readiness and initial popover placement
+
+**Status:** Local change, verified; not committed or deployed yet.
+
+**Problem:** A stale `1h`, `limit=200` detail response could be rejected because
+its snapshot preceded the shared metrics snapshot, while still marking the
+node's shared raw cache as ready. The cache could therefore contain only the
+recent 30 samples and render as a partial curve across a full one-hour axis.
+The latency details popover also initially opened with a temporary Tippy
+placement and unconstrained height, then changed direction and height on the
+next animation frame.
+
+**Change:**
+
+- The one-hour ready flag is now set only when the complete detail response is
+  accepted into the shared rolling raw-sample cache.
+- The popover now computes its final compact or desktop placement and max
+  height before calling `showTip`. Compact popovers start with zero Tippy
+  content padding, and Popper flipping is disabled because the application has
+  already selected a valid vertical side.
+- Live refreshes reuse the existing height-preserving detail render path, so a
+  delayed refresh cannot briefly remove the active height constraint.
+
+**Preserved behavior:**
+
+- A warm 1h cache still advances incrementally from SSE and polling updates;
+  this change does not refetch 200 samples for each new probe.
+- The first-level latency value and strip, secondary recent history, 1h raw
+  point drilldown, 6h/24h bucket drilldown, and viewport-resize repositioning
+  remain unchanged.
+
+**Verification:**
+
+- `node --test "src/helper/__tests__/*.test.ts"` - 141 passed.
+- `pnpm run type-check` - passed.
+- `pnpm run build` - passed.
+- Local preview - HTTP 200 at `http://127.0.0.1:5175/` with no console errors.
+
+**Release:** Awaiting user approval to commit and deploy.

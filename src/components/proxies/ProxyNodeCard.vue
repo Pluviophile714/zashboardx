@@ -853,8 +853,7 @@ const refreshActiveR5sLatencyDetails = () => {
   }
 
   if (activeLatencyTimelineWindow === '1h' && hasProxyMetricsOneHourSamplesReady(sourceName)) {
-    instance.setContent(createLatencyDetailsTip())
-    repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
+    renderActiveLatencyDetailsTip()
     return
   }
 
@@ -867,8 +866,7 @@ const refreshActiveR5sLatencyDetails = () => {
       return
     }
 
-    instance.setContent(createLatencyDetailsTip())
-    repositionLatencyDetailsTip(instance, anchor, activeLatencyDetailsCompact)
+    renderActiveLatencyDetailsTip()
   })
 }
 
@@ -1645,18 +1643,6 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       value: anchor,
     },
   }) as Event
-  const viewport = getLatencyDetailsViewportSize(
-    window.innerWidth,
-    window.innerHeight,
-    window.visualViewport,
-  )
-  const mobilePlacement = getCompactLatencyDetailsPlacement(
-    anchor.getBoundingClientRect(),
-    viewport,
-    LATENCY_DETAILS_VIEWPORT_PADDING,
-    LATENCY_DETAILS_POPOVER_GAP,
-  ).placement
-  const placement = compact ? mobilePlacement : 'top'
   const timelineSourceName = getR5sLatencySampleSourceName()
 
   void refreshProxyMetricsTimelineBundle(timelineSourceName, { force: true })
@@ -1669,7 +1655,33 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       if (!hasLatencyDetailsHistory()) return null
       if (!compact && !isHoveringElement(anchor) && !isHoveringElement(cardRef.value)) return null
 
-      const instance = showTip(tipEvent, createLatencyDetailsTip(), {
+      const viewport = getLatencyDetailsViewportSize(
+        window.innerWidth,
+        window.innerHeight,
+        window.visualViewport,
+      )
+      const initialLayout = compact
+        ? getCompactLatencyDetailsPlacement(
+            anchor.getBoundingClientRect(),
+            viewport,
+            LATENCY_DETAILS_VIEWPORT_PADDING,
+            LATENCY_DETAILS_POPOVER_GAP,
+          )
+        : getDesktopLatencyDetailsPlacement(
+            anchor.getBoundingClientRect(),
+            viewport,
+            Math.min(28 * 16, viewport.width - LATENCY_DETAILS_VIEWPORT_PADDING * 4),
+            LATENCY_DETAILS_VIEWPORT_PADDING,
+            activeLatencyDetailsPlacement,
+          )
+      const initialRoot = createLatencyDetailsTip()
+
+      initialRoot.style.maxHeight = `${initialLayout.maxHeight}px`
+      if (!compact) {
+        activeLatencyDetailsPlacement = initialLayout.placement
+      }
+
+      const instance = showTip(tipEvent, initialRoot, {
         animation: 'fade',
         appendTo: document.body,
         delay: [500, 120],
@@ -1680,6 +1692,14 @@ const handlerLatencyDetailsTip = async (e: Event) => {
         hideOnClick: false,
         maxWidth: 'none',
         offset: [0, LATENCY_DETAILS_POPOVER_GAP],
+        onCreate: (instance) => {
+          if (!compact) return
+
+          const content = instance.popper.querySelector('.tippy-content') as HTMLElement | null
+          if (content) {
+            content.style.padding = '0'
+          }
+        },
         onShown: (instance) => {
           bindLatencyDetailsTipHoverBoundary(anchor, instance.popper, compact)
           bindLatencyDetailsViewportChange()
@@ -1697,7 +1717,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
           }
           cleanupLatencyDetailsTip()
         },
-        placement,
+        placement: initialLayout.placement,
         popperOptions: {
           strategy: 'fixed',
           modifiers: [
@@ -1712,15 +1732,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
             },
             {
               name: 'flip',
-              enabled: compact,
-              options: {
-                boundary: 'viewport',
-                fallbackPlacements:
-                  compact && placement === 'bottom'
-                    ? ['bottom', 'top', 'right', 'left']
-                    : ['top', 'bottom', 'right', 'left'],
-                padding: 8,
-              },
+              enabled: false,
             },
           ],
         },
@@ -1736,12 +1748,7 @@ const handlerLatencyDetailsTip = async (e: Event) => {
       return instance
     },
     isActive: (instance) => Boolean(instance && !instance.state.isDestroyed),
-    update: (instance) => {
-      instance?.setContent(createLatencyDetailsTip())
-      if (instance) {
-        repositionLatencyDetailsTip(instance, anchor, compact)
-      }
-    },
+    update: () => renderActiveLatencyDetailsTip(),
   })
 }
 

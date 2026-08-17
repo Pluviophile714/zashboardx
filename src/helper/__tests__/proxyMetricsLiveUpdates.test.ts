@@ -11,6 +11,7 @@ import {
   proxyMetricsLiveConnected,
   proxyMetricsOneHourSamplesReadyMap,
   proxyMetricsSamplesMap,
+  proxyMetricsSamplesSnapshotMap,
   proxyMetricsUpdatedAt,
   refreshProxyMetricsDetails,
   startProxyMetricsLiveUpdates,
@@ -332,6 +333,64 @@ test('marks a one-hour raw list ready only after its complete detail snapshot ar
     delete proxyMetricsDetailsMap.value[detailsKey]
     delete proxyMetricsOneHourSamplesReadyMap.value[samplesKey]
     delete proxyMetricsSamplesMap.value[samplesKey]
+    Object.assign(globalThis, {
+      fetch: originalFetch,
+      window: originalWindow,
+    })
+  }
+})
+
+test('does not mark a recent-only one-hour cache ready when an older full detail snapshot is rejected', async () => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const nodeName = 'KUMA-ONE-HOUR-STALE-READY-01'
+  const samplesKey = `1h\n200\n${nodeName}`
+  const currentSample = {
+    delay: 57,
+    nodeName,
+    success: true,
+    testUrl: 'https://example.com',
+    timestamp: '2026-08-11T09:05:00.000Z',
+  }
+
+  proxyMetricsSamplesMap.value = {
+    ...proxyMetricsSamplesMap.value,
+    [samplesKey]: [currentSample],
+  }
+  proxyMetricsSamplesSnapshotMap.value = {
+    ...proxyMetricsSamplesSnapshotMap.value,
+    [samplesKey]: '2026-08-11T09:05:00.000Z',
+  }
+  Object.assign(globalThis, {
+    fetch: async () =>
+      new Response(
+        JSON.stringify(
+          detailsResponse(
+            nodeName,
+            '2026-08-11T09:04:00.000Z',
+            63,
+            '2026-08-11T09:04:00.000Z',
+            '1h',
+          ),
+        ),
+        { status: 200 },
+      ),
+    window: globalThis,
+  })
+
+  try {
+    await refreshProxyMetricsDetails(nodeName, {
+      force: true,
+      limit: 200,
+      window: '1h',
+    })
+
+    assert.deepEqual(proxyMetricsSamplesMap.value[samplesKey], [currentSample])
+    assert.equal(hasProxyMetricsOneHourSamplesReady(nodeName), false)
+  } finally {
+    delete proxyMetricsOneHourSamplesReadyMap.value[samplesKey]
+    delete proxyMetricsSamplesMap.value[samplesKey]
+    delete proxyMetricsSamplesSnapshotMap.value[samplesKey]
     Object.assign(globalThis, {
       fetch: originalFetch,
       window: originalWindow,

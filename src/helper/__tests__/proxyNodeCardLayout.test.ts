@@ -871,6 +871,23 @@ test('repositions an expanded desktop detail popover within the available viewpo
   assert.match(proxyNodeCardSource, /altAxis: true/)
 })
 
+test('sets the initial detail popover direction and height before it becomes visible', () => {
+  const handlerStart = proxyNodeCardSource.indexOf('const handlerLatencyDetailsTip = async')
+  const handlerEnd = proxyNodeCardSource.indexOf('const latencyTipAnimationClass', handlerStart)
+  const handlerSource = proxyNodeCardSource.slice(handlerStart, handlerEnd)
+
+  assert.match(
+    handlerSource,
+    /const initialLayout =[\s\S]*getCompactLatencyDetailsPlacement[\s\S]*getDesktopLatencyDetailsPlacement/,
+  )
+  assert.match(
+    handlerSource,
+    /const initialRoot = createLatencyDetailsTip\(\)[\s\S]*initialRoot\.style\.maxHeight = `\$\{initialLayout\.maxHeight\}px`[\s\S]*showTip\(tipEvent, initialRoot/,
+  )
+  assert.match(handlerSource, /activeLatencyDetailsPlacement = initialLayout\.placement/)
+  assert.match(handlerSource, /name: 'flip',[\s\S]*enabled: false/)
+})
+
 test('locks the desktop detail direction across range changes and recalculates it on resize', () => {
   const rangeChangeStart = proxyNodeCardSource.indexOf('const changeLatencyTimelineWindow =')
   const rangeChangeEnd = proxyNodeCardSource.indexOf(
@@ -880,7 +897,7 @@ test('locks the desktop detail direction across range changes and recalculates i
   const rangeChangeSource = proxyNodeCardSource.slice(rangeChangeStart, rangeChangeEnd)
 
   assert.match(proxyNodeCardSource, /activeLatencyDetailsPlacement/)
-  assert.match(proxyNodeCardSource, /enabled: compact/)
+  assert.match(proxyNodeCardSource, /name: 'flip',[\s\S]*enabled: false/)
   assert.match(
     proxyNodeCardSource,
     /const handleLatencyDetailsViewportChange = \(\) => \{[\s\S]*activeLatencyDetailsPlacement = undefined[\s\S]*repositionLatencyDetailsTip/,
@@ -1064,7 +1081,7 @@ test('refreshes the open R5S detail snapshot when the shared metrics update', ()
     proxyNodeCardSource,
     /refreshLatencyDetailsTimeline\(sourceName, activeLatencyTimelineWindow\)/,
   )
-  assert.match(proxyNodeCardSource, /instance\.setContent\(createLatencyDetailsTip\(\)\)/)
+  assert.match(proxyNodeCardSource, /renderActiveLatencyDetailsTip\(\)/)
 })
 
 test('loads the full 1h raw sample window through one forced R5S detail request', () => {
