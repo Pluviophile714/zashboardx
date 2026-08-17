@@ -374,17 +374,15 @@ export const refreshProxyMetricsDetails = async (
     })
     const responseLastTimestamp = Date.parse(responseSamples.at(-1)?.timestamp ?? '')
     const sharedSnapshotAtMs = Date.parse(proxyMetricsSamplesSnapshotMap.value[samplesKey] ?? '')
-    const snapshotIsCurrent =
-      !Number.isFinite(sharedSnapshotAtMs) ||
-      !Number.isFinite(responseSnapshotAtMs) ||
-      responseSnapshotAtMs >= sharedSnapshotAtMs
     const samplesAreCurrent =
       !previousSamples?.length ||
       !Number.isFinite(previousLastTimestamp) ||
       !Number.isFinite(responseLastTimestamp) ||
       responseLastTimestamp >= previousLastTimestamp
 
-    const sharedSamplesAccepted = responseSamples.length && snapshotIsCurrent && samplesAreCurrent
+    // A full detail snapshot can finish just behind the live SSE refresh. Merge its history
+    // with the live tail instead of rejecting it, while keeping the newer snapshot marker.
+    const sharedSamplesAccepted = responseSamples.length && samplesAreCurrent
 
     if (sharedSamplesAccepted) {
       const update = reconcileRecentSampleUpdate(previousSamples, responseSamples)
@@ -396,7 +394,11 @@ export const refreshProxyMetricsDetails = async (
       }
       proxyMetricsSamplesSnapshotMap.value = {
         ...proxyMetricsSamplesSnapshotMap.value,
-        [samplesKey]: response.snapshotAt,
+        [samplesKey]:
+          Number.isFinite(sharedSnapshotAtMs) &&
+          (!Number.isFinite(responseSnapshotAtMs) || responseSnapshotAtMs < sharedSnapshotAtMs)
+            ? proxyMetricsSamplesSnapshotMap.value[samplesKey]
+            : response.snapshotAt,
       }
       proxyMetricsSamplesUpdateMap.value = {
         ...proxyMetricsSamplesUpdateMap.value,

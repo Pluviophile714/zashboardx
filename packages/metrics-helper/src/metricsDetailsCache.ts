@@ -34,6 +34,10 @@ type MetricsDetailsCacheOptions = {
   ttlMs: number
 }
 
+type MetricsDetailsGetOptions = {
+  requireFresh?: boolean
+}
+
 type WorkerResponse = { ok: true; snapshot: MetricsDetailsSnapshot } | { error: string; ok: false }
 
 const getCacheKey = (request: MetricsDetailsRequest) =>
@@ -67,7 +71,7 @@ export class MetricsDetailsCache {
       options.loader ?? ((request) => this.#loadInWorker(options.databasePath!, request))
   }
 
-  async get(request: MetricsDetailsRequest) {
+  async get(request: MetricsDetailsRequest, options: MetricsDetailsGetOptions = {}) {
     const key = getCacheKey(request)
     const snapshot = this.#snapshots.get(key)
     const snapshotMs = Date.parse(snapshot?.snapshotAt ?? '')
@@ -77,7 +81,13 @@ export class MetricsDetailsCache {
 
     if (snapshot && Number.isFinite(snapshotMs) && snapshotMs <= request.nowMs) {
       if (this.#dirty.has(key) || request.nowMs - snapshotMs > this.#ttlMs) {
-        this.#scheduleRefresh(key, { ...request, nowMs: this.#now() }, 0)
+        const refreshRequest = { ...request, nowMs: this.#now() }
+
+        if (options.requireFresh) {
+          return this.#refresh(key, refreshRequest)
+        }
+
+        this.#scheduleRefresh(key, refreshRequest, 0)
       }
 
       return snapshot

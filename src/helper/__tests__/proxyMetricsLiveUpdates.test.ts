@@ -340,7 +340,7 @@ test('marks a one-hour raw list ready only after its complete detail snapshot ar
   }
 })
 
-test('does not mark a recent-only one-hour cache ready when an older full detail snapshot is rejected', async () => {
+test('hydrates a complete one-hour cache from an older detail snapshot without losing the live tail', async () => {
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const nodeName = 'KUMA-ONE-HOUR-STALE-READY-01'
@@ -385,8 +385,12 @@ test('does not mark a recent-only one-hour cache ready when an older full detail
       window: '1h',
     })
 
-    assert.deepEqual(proxyMetricsSamplesMap.value[samplesKey], [currentSample])
-    assert.equal(hasProxyMetricsOneHourSamplesReady(nodeName), false)
+    assert.deepEqual(
+      proxyMetricsSamplesMap.value[samplesKey]?.map((sample) => sample.delay),
+      [63, 57],
+    )
+    assert.equal(proxyMetricsSamplesSnapshotMap.value[samplesKey], '2026-08-11T09:05:00.000Z')
+    assert.equal(hasProxyMetricsOneHourSamplesReady(nodeName), true)
   } finally {
     delete proxyMetricsOneHourSamplesReadyMap.value[samplesKey]
     delete proxyMetricsSamplesMap.value[samplesKey]

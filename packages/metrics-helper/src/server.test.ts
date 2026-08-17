@@ -611,6 +611,78 @@ test('serves detail snapshots from the asynchronous detail cache', async () => {
   }
 })
 
+test('requires a fresh cached snapshot for the complete one-hour raw timeline', async () => {
+  const storage = createStorage()
+  let nowMs = Date.parse(at(30))
+  let loadCount = 0
+  const detailsCache = new MetricsDetailsCache({
+    loader: async (request) => {
+      loadCount += 1
+      const details = storage.getNodeDetails(
+        request.nodeName,
+        request.windowSeconds,
+        request.bucketCount,
+        request.limit,
+        request.nowMs,
+      )
+      const snapshotAt = new Date(request.nowMs).toISOString()
+
+      return {
+        generatedAt: snapshotAt,
+        nodeName: request.nodeName,
+        samples: details.samples,
+        snapshotAt,
+        timeline: {
+          bucketSeconds: request.windowSeconds / request.bucketCount,
+          buckets: details.buckets,
+          generatedAt: snapshotAt,
+          jitter: details.jitter,
+          nodeName: request.nodeName,
+          snapshotAt,
+          windowSeconds: request.windowSeconds,
+        },
+      }
+    },
+    now: () => nowMs,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+  const server = createMetricsServer({
+    storage,
+    detailsCache,
+    health: {
+      ok: true,
+      mihomoReachable: true,
+      running: false,
+      lastProbeAt: null,
+      lastProbeError: null,
+      lastProbeNodeCount: 0,
+      version: '0.1.0',
+    },
+    defaultWindowSeconds: 24 * 60 * 60,
+    now: () => nowMs,
+  })
+  const baseUrl = await listen(server)
+
+  try {
+    const first = await fetch(`${baseUrl}/api/metrics/details?node=HK-01&window=1h&limit=200`)
+    assert.equal(first.status, 200)
+    assert.equal(loadCount, 1)
+
+    nowMs += 30_000
+    const second = await fetch(`${baseUrl}/api/metrics/details?node=HK-01&window=1h&limit=200`)
+    const body = (await second.json()) as { snapshotAt: string }
+
+    assert.equal(second.status, 200)
+    assert.equal(loadCount, 2)
+    assert.equal(body.snapshotAt, new Date(nowMs).toISOString())
+  } finally {
+    detailsCache.stop()
+    server.close()
+    storage.close()
+  }
+})
+
 test('serves cached node metrics and refreshes cache after accepted frontend samples', async () => {
   const storage = createStorage()
   const metricsCache = new MetricsAggregationCache({

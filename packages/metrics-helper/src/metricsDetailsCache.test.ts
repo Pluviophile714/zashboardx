@@ -86,6 +86,48 @@ test('returns the last complete detail snapshot while a dirty refresh runs', asy
   cache.stop()
 })
 
+test('waits for the refreshed snapshot when a caller requires fresh details', async () => {
+  let loadCount = 0
+  let resolveRefresh: ((value: MetricsDetailsSnapshot) => void) | undefined
+  const first = snapshot(new Date(request.nowMs).toISOString(), 80)
+  const second = snapshot(new Date(request.nowMs + 30_000).toISOString(), 90)
+  const cache = new MetricsDetailsCache({
+    loader: async () => {
+      loadCount += 1
+
+      if (loadCount === 1) return first
+
+      return new Promise<MetricsDetailsSnapshot>((resolve) => {
+        resolveRefresh = resolve
+      })
+    },
+    now: () => request.nowMs + 30_000,
+    refreshDebounceMs: 0,
+    ttlMs: 10_000,
+  })
+
+  assert.equal(await cache.get(request), first)
+
+  const refreshing = cache.markDirty()
+  await waitFor(() => loadCount === 2)
+
+  let freshSettled = false
+  const fresh = cache
+    .get({ ...request, nowMs: request.nowMs + 30_000 }, { requireFresh: true })
+    .then((value) => {
+      freshSettled = true
+      return value
+    })
+
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(freshSettled, false)
+
+  resolveRefresh?.(second)
+  await refreshing
+  assert.equal(await fresh, second)
+  cache.stop()
+})
+
 test('coalesces concurrent cold detail loads for the same key', async () => {
   let loadCount = 0
   const first = snapshot(new Date(request.nowMs).toISOString(), 80)

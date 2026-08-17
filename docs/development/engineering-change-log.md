@@ -136,3 +136,53 @@ next animation frame.
 - Local preview - HTTP 200 at `http://127.0.0.1:5175/` with no console errors.
 
 **Release:** Awaiting user approval to commit and deploy.
+
+## 2026-08-17 - Fresh complete one-hour detail snapshots
+
+**Status:** Local change, verified; not committed or deployed yet.
+
+**Required behavior:** Opening the secondary node details must render a complete
+1h chart, newly stored probes must advance the chart and recent latency strips,
+and a temporary recent-only response must never be drawn across the full-hour
+axis.
+
+**Root cause:** `MetricsDetailsCache` used stale-while-revalidate for every
+timeline request. A dirty or expired `1h`, `limit=200` cache entry could
+therefore return an older snapshot containing only about 30 minutes of history
+while its complete refresh ran in the background. The frontend correctly kept
+the live right edge, but the stale response left the first half of the chart
+empty until the later refresh arrived.
+
+**Change:**
+
+- `MetricsDetailsCache.get()` now supports `requireFresh`. A dirty or expired
+  snapshot in this mode joins the existing in-flight refresh and returns its
+  completed result instead of returning the stale snapshot.
+- `/api/metrics/details` enables `requireFresh` only for the complete 1h raw
+  request (`window=1h`, `limit>=200`). The 6h/24h stale-while-revalidate and
+  bundle-cache behavior is unchanged.
+- If an older complete 1h response finishes immediately behind a newer SSE
+  update, the frontend merges that response's history with the live tail and
+  retains the newer snapshot marker. Recent updates can no longer prevent the
+  complete historical prefix from hydrating.
+
+**Data-source invariant:**
+
+- There is still one authoritative per-node rolling raw array. The complete 1h
+  chart uses the full array, both recent strips use its tail, and the latest
+  latency uses its final record.
+- After hydration, SSE and polling append new probes, prune records outside the
+  one-hour window, and redraw the chart and strips from that same array.
+- The recent-30 response is not a second 1h chart source and cannot replace a
+  previously complete one-hour array.
+
+**Verification:**
+
+- `pnpm --filter @zashboardx/metrics-helper test` - 76 passed.
+- `node --test "src/helper/__tests__/*.test.ts"` - 141 passed.
+- `pnpm run type-check` - passed.
+- `pnpm run build` - passed.
+- Prettier check for all changed source and test files - passed.
+- `git diff --check` - passed.
+
+**Release:** Awaiting user approval to commit and deploy.

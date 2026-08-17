@@ -345,13 +345,16 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
 
       if (options.detailsCache) {
         try {
-          const details = await options.detailsCache.get({
-            bucketCount: profile.bucketCount,
-            limit,
-            nodeName,
-            nowMs,
-            windowSeconds: profile.windowSeconds,
-          })
+          const details = await options.detailsCache.get(
+            {
+              bucketCount: profile.bucketCount,
+              limit,
+              nodeName,
+              nowMs,
+              windowSeconds: profile.windowSeconds,
+            },
+            { requireFresh: requestedWindow === '1h' && limit >= 200 },
+          )
 
           sendJson(response, details)
         } catch (error) {
