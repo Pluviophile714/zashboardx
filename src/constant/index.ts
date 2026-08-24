@@ -103,6 +103,12 @@ export enum CONNECTION_DISPLAY_STYLE {
   TABLE = 'table',
 }
 
+// 日志/规则页的展示形态,没有 AUTO —— 由用户在各自的 Ctrl 设置里显式选。
+export enum LIST_DISPLAY_STYLE {
+  CARD = 'card',
+  TABLE = 'table',
+}
+
 export enum RULE_TAB_TYPE {
   RULES = 'rules',
   PROVIDER = 'ruleProvider',
@@ -197,9 +203,13 @@ export enum PROXY_TYPE {
   Direct = 'direct',
   Reject = 'reject',
   RejectDrop = 'rejectdrop',
+  Block = 'block',
   Compatible = 'compatible',
   Pass = 'pass',
+  PassRule = 'passrule',
+  Rematch = 'rematch',
   Dns = 'dns',
+  Relay = 'relay',
   Selector = 'selector',
   Fallback = 'fallback',
   URLTest = 'urltest',
@@ -237,11 +247,7 @@ export const ALL_THEME = [
   ...(window.ksu ? ['light-monet', 'dark-monet'] : []),
   'halloween',
   'forest',
-  'lofi',
-  'wireframe',
-  'black',
   'dracula',
-  'business',
   'night',
   'dim',
   'nord',
@@ -290,6 +296,7 @@ export const DEFAULT_THEME = {
 export type THEME = Record<string, string>
 
 export enum IP_INFO_API {
+  IPIP = 'ipip.net',
   IPSB = 'ip.sb',
   IPWHOIS = 'ipwho.is',
   IPAPI = 'ipapi.is',

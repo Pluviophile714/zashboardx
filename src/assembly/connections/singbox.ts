@@ -1,4 +1,4 @@
-// sing-box native 后端的连接组装:订阅 gRPC SubscribeConnections,把 protobuf 事件
+// sing-box 后端的连接组装:订阅 gRPC SubscribeConnections,把 protobuf 事件
 // 维护成活跃连接表,并直接产出统一的 ConnectionsSnapshot(active 带瞬时速率、closed 为本拍增量)。
 // 速率由事件自带的 uplinkDelta/downlinkDelta 累计得到,CLOSED 事件直接产出已关闭连接 —— 无需快照 diff。
 import { getSingboxClient } from '@/api/singbox/client'
@@ -196,9 +196,10 @@ export const connectionAccessor: ConnectionAccessor = {
     return `${host}:${destinationPort}`
   },
   process: (connection) => {
-    const processPath = asSingbox(connection).processInfo?.processPath ?? ''
+    const processInfo = asSingbox(connection).processInfo
+    const processPath = processInfo?.processPath ?? ''
 
-    return processPath.replace(/^.*[/\\](.*)$/, '$1') || '-'
+    return processInfo?.packageNames[0] || processPath.replace(/^.*[/\\](.*)$/, '$1') || '-'
   },
   destination: (connection) => {
     const c = asSingbox(connection)

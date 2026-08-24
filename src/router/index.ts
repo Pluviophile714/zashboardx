@@ -1,4 +1,5 @@
-import { capabilities } from '@/assembly/backend'
+import { can, type Cap } from '@/assembly/backend'
+import { resolvePageTransition } from '@/composables/pageTransition'
 import { ROUTE_NAME } from '@/constant'
 import { renderRoutes } from '@/helper'
 import { isNativeAppMode } from '@/helper/appMode'
@@ -56,8 +57,8 @@ const childrenRouter = [
   },
 ]
 
-// Routes that require a specific channel capability to be visitable.
-const ROUTE_CAPABILITY: Partial<Record<string, keyof typeof capabilities.value>> = {
+// Routes that require a specific capability to be visitable.
+const ROUTE_CAPABILITY: Partial<Record<string, Cap>> = {
   [ROUTE_NAME.rules]: 'rules',
   [ROUTE_NAME.tools]: 'tools',
 }
@@ -102,16 +103,7 @@ const setTitleByName = (name: string | symbol | undefined) => {
 }
 
 router.beforeEach((to, from) => {
-  const toIndex = renderRoutes.value.findIndex((item) => item === to.name)
-  const fromIndex = renderRoutes.value.findIndex((item) => item === from.name)
-
-  if (toIndex === 0 && fromIndex === renderRoutes.value.length - 1) {
-    to.meta.transition = 'slide-left'
-  } else if (toIndex === renderRoutes.value.length - 1 && fromIndex === 0) {
-    to.meta.transition = 'slide-right'
-  } else if (toIndex !== fromIndex) {
-    to.meta.transition = toIndex < fromIndex ? 'slide-right' : 'slide-left'
-  }
+  resolvePageTransition(to, from)
 
   if (!activeBackend.value && ![ROUTE_NAME.app, ROUTE_NAME.setup].includes(to.name as ROUTE_NAME)) {
     router.push({ name: isNativeAppMode ? ROUTE_NAME.app : ROUTE_NAME.setup })
@@ -120,7 +112,7 @@ router.beforeEach((to, from) => {
 
   // Block navigation to a page the active backend's channels can't serve.
   const requiredCap = typeof to.name === 'string' ? ROUTE_CAPABILITY[to.name] : undefined
-  if (requiredCap && !capabilities.value[requiredCap]) {
+  if (requiredCap && !can(requiredCap)) {
     router.push({ name: ROUTE_NAME.proxies })
   }
 })
@@ -135,10 +127,11 @@ watch([language, activeBackend], () => {
   })
 })
 
-watch(capabilities, (currentCapabilities) => {
+// 能力变化(切后端 / 内核探测出结果)后,把停留在已失效页面的用户送回代理页。
+watch(renderRoutes, () => {
   const routeName = router.currentRoute.value.name
   const requiredCap = typeof routeName === 'string' ? ROUTE_CAPABILITY[routeName] : undefined
-  if (requiredCap && !currentCapabilities[requiredCap]) {
+  if (requiredCap && !can(requiredCap)) {
     router.push({ name: ROUTE_NAME.proxies })
   }
 })

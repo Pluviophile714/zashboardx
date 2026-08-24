@@ -1,12 +1,5 @@
 <template>
   <div class="mx-auto flex max-w-2xl flex-col p-2 sm:p-4">
-    <div
-      v-if="endpoints.length === 0"
-      class="text-base-content/50 p-12 text-center text-sm"
-    >
-      {{ $t('noEndpoints') }}
-    </div>
-
     <template
       v-for="endpoint in endpoints"
       :key="endpoint.endpointTag"
@@ -18,7 +11,7 @@
             {{ endpoint.endpointTag || 'Tailscale' }}
           </span>
           <span
-            class="rounded-full px-2 py-0.5 text-[0.65rem] font-medium tracking-normal"
+            class="rounded-full px-2 py-0.5 text-[0.65rem] tracking-normal"
             :class="statePill(endpoint.backendState)"
           >
             {{ endpoint.stateText || endpoint.backendState || $t('unknown') }}
@@ -26,7 +19,7 @@
         </span>
         <button
           v-if="!endpoint.keyAuth"
-          class="text-error/90 hover:text-error flex items-center gap-1 text-xs font-medium tracking-normal"
+          class="text-error/90 hover:text-error flex items-center gap-1 text-xs tracking-normal"
           @click="logout(endpoint.endpointTag)"
         >
           <ArrowRightOnRectangleIcon class="h-4 w-4" />
@@ -56,6 +49,20 @@
           <span class="text-base-content/50 truncate text-sm">
             {{ endpoint.exitNode ? peerDisplayName(endpoint.exitNode) : $t('disabledLabel') }}
           </span>
+          <ChevronRightIcon class="text-base-content/25 h-4 w-4 shrink-0" />
+        </button>
+        <button
+          v-if="taildropVisible(endpoint)"
+          class="setting-item hover:bg-base-content/3 active:bg-base-content/5 w-full text-left transition-colors"
+          @click="openTaildrop(endpoint)"
+        >
+          <span class="setting-item-label">Taildrop</span>
+          <span
+            v-if="endpoint.unreadFileCount > 0"
+            class="bg-primary text-primary-content shrink-0 rounded-full px-2 py-0.5 text-[0.65rem]"
+            >{{ endpoint.unreadFileCount }}</span
+          >
+          <span class="text-base-content/50 truncate text-sm">{{ taildropSummary(endpoint) }}</span>
           <ChevronRightIcon class="text-base-content/25 h-4 w-4 shrink-0" />
         </button>
         <div
@@ -99,6 +106,10 @@
             v-for="peer in group.peers"
             :key="peer.stableID"
             class="setting-item"
+            :class="dropTarget === peer.stableID && 'bg-primary/10'"
+            @dragover="onPeerDragOver($event, endpoint, peer)"
+            @dragleave="onPeerDragLeave($event, peer)"
+            @drop="onPeerDrop($event, endpoint, peer)"
           >
             <button
               class="flex min-w-0 flex-1 items-center gap-2.5 text-left"
@@ -108,25 +119,33 @@
                 class="inline-block h-2 w-2 shrink-0 rounded-full"
                 :class="peer.online ? 'bg-success' : 'bg-base-content/20'"
               ></span>
-              <span class="truncate text-sm font-medium">{{ peerDisplayName(peer) }}</span>
+              <span class="truncate text-sm">{{ peerDisplayName(peer) }}</span>
               <span class="text-base-content/40 truncate text-xs">{{ peer.tailscaleIPs[0] }}</span>
             </button>
             <span
               v-if="peer.exitNode || peer.exitNodeOption"
-              class="shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
+              class="shrink-0 rounded-full px-2 py-0.5 text-[0.65rem]"
               :class="peer.exitNode ? 'bg-primary/15 text-primary' : 'bg-info/15 text-info'"
               >{{ $t('exitNode') }}</span
             >
             <span
               v-if="peer.shareeNode"
-              class="bg-base-content/8 text-base-content/60 shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
+              class="bg-base-content/8 text-base-content/60 shrink-0 rounded-full px-2 py-0.5 text-[0.65rem]"
               >{{ $t('sharedIn') }}</span
             >
             <span
               v-if="peer.expired"
-              class="bg-error/15 text-error shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
+              class="bg-error/15 text-error shrink-0 rounded-full px-2 py-0.5 text-[0.65rem]"
               >{{ $t('expired') }}</span
             >
+            <button
+              v-if="canSendFiles(endpoint, peer)"
+              class="text-primary hover:bg-primary/10 shrink-0 rounded-md p-1 transition-colors"
+              :title="$t('taildropSendFiles')"
+              @click="pickFiles(endpoint, peer)"
+            >
+              <PaperAirplaneIcon class="h-4 w-4" />
+            </button>
             <button
               v-if="peerSSHAvailable(peer)"
               class="text-primary hover:bg-primary/10 shrink-0 rounded-md p-1 transition-colors"
@@ -151,8 +170,11 @@
       :endpoint="peerDetail.endpoint"
       :peer="peerDetail.peer"
       :is-self="peerDetail.isSelf"
+      :can-send-files="canSendFiles(peerDetail.endpoint, peerDetail.peer)"
       @connect-ssh="onPeerDetailConnectSSH"
       @edit-ssh="onPeerDetailEditSSH"
+      @pick-files="onPeerDetailPickFiles"
+      @send-files="onPeerDetailSendFiles"
     />
     <TailscaleExitNodeDialog
       v-if="exitPicker"
@@ -165,6 +187,18 @@
       v-model="sshPromptOpen"
       :peer="sshPrompt.peer"
       @connect="onSSHPromptConnect"
+    />
+    <TaildropDialog
+      v-if="taildropEndpoint"
+      v-model="taildropOpen"
+      :endpoint="taildropEndpoint"
+    />
+    <input
+      ref="fileInput"
+      type="file"
+      multiple
+      class="hidden"
+      @change="onFilesPicked"
     />
     <DialogWrapper
       v-model="authQROpen"
@@ -187,9 +221,11 @@
 </template>
 
 <script setup lang="ts">
-import { getSingboxClient, runStream, serverStream, type StreamHandle } from '@/assembly/tools'
+import { can } from '@/assembly/backend'
+import { getSingboxClient } from '@/assembly/tools'
 import DialogWrapper from '@/components/common/DialogWrapper.vue'
 import QRCodeView from '@/components/tools/QRCodeView.vue'
+import TaildropDialog from '@/components/tools/TaildropDialog.vue'
 import TailscaleExitNodeDialog from '@/components/tools/TailscaleExitNodeDialog.vue'
 import TailscalePeerDialog from '@/components/tools/TailscalePeerDialog.vue'
 import TailscaleSSHDialog from '@/components/tools/TailscaleSSHDialog.vue'
@@ -202,23 +238,26 @@ import {
   type SSHSessionOptions,
 } from '@/composables/tailscaleSSH'
 import {
-  StartedService,
   type TailscaleEndpointStatus,
   type TailscalePeer,
   type TailscaleUserGroup,
 } from '@/gen/daemon/started_service_pb'
+import { startTaildropSend, taildropSendSessions } from '@/composables/taildropSend'
 import {
   ArrowRightOnRectangleIcon,
   ChevronRightIcon,
   CommandLineIcon,
+  PaperAirplaneIcon,
   QrCodeIcon,
 } from '@heroicons/vue/24/outline'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+defineProps<{ endpoints: TailscaleEndpointStatus[] }>()
 
 const emit = defineEmits<{ ssh: [session: SSHSessionOptions] }>()
 
-const endpoints = ref<TailscaleEndpointStatus[]>([])
-let statusHandle: StreamHandle | null = null
+const { t } = useI18n()
 
 const groupsOf = (endpoint: TailscaleEndpointStatus): TailscaleUserGroup[] =>
   endpoint.userGroups.filter((g) => g.peers.length > 0)
@@ -328,13 +367,106 @@ const onSSHPromptConnect = (username: string, terminalType: string, remember: bo
   launchSSH(ctx.endpoint, ctx.peer, username, terminalType)
 }
 
-onMounted(() => {
-  if (!getSingboxClient()) return
-  statusHandle = runStream(
-    (signal) => serverStream(StartedService.method.subscribeTailscaleStatus, {}, signal),
-    (msg) => (endpoints.value = msg.endpoints),
-  )
-})
+// --- Taildrop ---
+// 服务端自己就报了两侧的资格:endpoint.canShareFiles 表示本机能发,
+// peer.canReceiveFiles 表示对端愿意收,不必在前端猜。
+const taildropSupported = computed(() => can('taildrop'))
 
-onBeforeUnmount(() => statusHandle?.close())
+const canSendFiles = (endpoint: TailscaleEndpointStatus, peer: TailscalePeer): boolean =>
+  taildropSupported.value && endpoint.canShareFiles && peer.online && peer.canReceiveFiles
+
+const sendingCount = (endpoint: TailscaleEndpointStatus) =>
+  taildropSendSessions(endpoint.endpointTag).length
+
+// 入口只在有内容可看(收件箱有文件 / 正在收发)或本机具备发送资格时出现。
+const taildropVisible = (endpoint: TailscaleEndpointStatus): boolean =>
+  taildropSupported.value &&
+  endpoint.backendState === 'Running' &&
+  (endpoint.canShareFiles ||
+    endpoint.waitingFileCount > 0 ||
+    endpoint.receivingFileCount > 0 ||
+    sendingCount(endpoint) > 0)
+
+const taildropSummary = (endpoint: TailscaleEndpointStatus): string => {
+  if (endpoint.receivingFileCount > 0) return t('taildropReceiving')
+  if (sendingCount(endpoint) > 0) return t('taildropSending')
+  if (endpoint.waitingFileCount > 0)
+    return t('taildropFileCount', { count: endpoint.waitingFileCount }, endpoint.waitingFileCount)
+  return ''
+}
+
+const taildropEndpoint = ref<TailscaleEndpointStatus>()
+const taildropOpen = ref(false)
+const openTaildrop = (endpoint: TailscaleEndpointStatus) => {
+  taildropEndpoint.value = endpoint
+  taildropOpen.value = true
+}
+
+const sendFiles = (endpoint: TailscaleEndpointStatus, peer: TailscalePeer, files: File[]) => {
+  if (files.length === 0) return
+  startTaildropSend(endpoint.endpointTag, peer.stableID, peerDisplayName(peer), files)
+  openTaildrop(endpoint)
+}
+
+// 隐藏的 file input 由整个面板共用,pickTarget 记住这次点的是哪个 peer。
+const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
+const pickTarget = ref<{ endpoint: TailscaleEndpointStatus; peer: TailscalePeer }>()
+
+const pickFiles = (endpoint: TailscaleEndpointStatus, peer: TailscalePeer) => {
+  const input = fileInput.value
+  if (!input) return
+  pickTarget.value = { endpoint, peer }
+  input.value = ''
+  input.click()
+}
+
+const onFilesPicked = (event: Event) => {
+  const target = pickTarget.value
+  pickTarget.value = undefined
+  const files = Array.from((event.target as HTMLInputElement).files ?? [])
+  if (target) sendFiles(target.endpoint, target.peer, files)
+}
+
+// --- 拖拽发送 ---
+const dropTarget = ref('')
+
+const onPeerDragOver = (
+  event: DragEvent,
+  endpoint: TailscaleEndpointStatus,
+  peer: TailscalePeer,
+) => {
+  if (!canSendFiles(endpoint, peer) || !event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+  dropTarget.value = peer.stableID
+}
+
+// 拖过子元素时也会冒出 dragleave,只有真的离开整行才灭高亮。
+const onPeerDragLeave = (event: DragEvent, peer: TailscalePeer) => {
+  const related = event.relatedTarget
+  if (related instanceof Node && (event.currentTarget as HTMLElement).contains(related)) return
+  if (dropTarget.value === peer.stableID) dropTarget.value = ''
+}
+
+const onPeerDrop = (event: DragEvent, endpoint: TailscaleEndpointStatus, peer: TailscalePeer) => {
+  if (!canSendFiles(endpoint, peer)) return
+  event.preventDefault()
+  dropTarget.value = ''
+  sendFiles(endpoint, peer, Array.from(event.dataTransfer?.files ?? []))
+}
+
+// 与 SSH 同理:详情弹层和 Taildrop 弹层共用一层,先关掉再发起。
+const onPeerDetailPickFiles = () => {
+  const ctx = peerDetail.value
+  if (!ctx) return
+  peerDetailOpen.value = false
+  pickFiles(ctx.endpoint, ctx.peer)
+}
+
+const onPeerDetailSendFiles = (files: File[]) => {
+  const ctx = peerDetail.value
+  if (!ctx) return
+  peerDetailOpen.value = false
+  sendFiles(ctx.endpoint, ctx.peer, files)
+}
 </script>

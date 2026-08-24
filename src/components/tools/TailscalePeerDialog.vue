@@ -5,7 +5,7 @@
   >
     <template #title-right>
       <span
-        class="ml-2 rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
+        class="ml-2 rounded-full px-2 py-0.5 text-[0.65rem]"
         :class="
           peer.online ? 'bg-success/15 text-success' : 'bg-base-content/10 text-base-content/60'
         "
@@ -17,7 +17,7 @@
     <div class="flex flex-col gap-4 text-sm">
       <!-- Addresses -->
       <section class="flex flex-col gap-1">
-        <div class="text-base-content/45 px-1 text-xs font-medium">{{ $t('addresses') }}</div>
+        <div class="text-base-content/45 px-1 text-xs">{{ $t('addresses') }}</div>
         <div class="divide-base-content/8 bg-base-200/40 divide-y overflow-hidden rounded-xl">
           <CopyLine
             v-if="magicDNS"
@@ -47,7 +47,7 @@
         class="flex flex-col gap-1"
       >
         <div class="flex items-center justify-between">
-          <span class="text-base-content/45 px-1 text-xs font-medium">{{ $t('ping') }}</span>
+          <span class="text-base-content/45 px-1 text-xs">{{ $t('ping') }}</span>
           <button
             class="btn btn-ghost btn-xs"
             @click="pingRunning ? stopPing() : startPing()"
@@ -104,7 +104,7 @@
 
       <!-- Details -->
       <section class="flex flex-col gap-1">
-        <div class="text-base-content/45 px-1 text-xs font-medium">{{ $t('detailsLabel') }}</div>
+        <div class="text-base-content/45 px-1 text-xs">{{ $t('detailsLabel') }}</div>
         <div class="divide-base-content/8 bg-base-200/40 divide-y overflow-hidden rounded-xl">
           <DataRow
             v-if="peer.os"
@@ -132,6 +132,25 @@
             {{ $t('yes') }}
           </DataRow>
         </div>
+      </section>
+
+      <!-- Taildrop -->
+      <section
+        v-if="canSendFiles"
+        class="flex flex-col gap-1"
+      >
+        <div class="text-base-content/45 px-1 text-xs">Taildrop</div>
+        <button
+          class="border-base-content/15 text-base-content/60 hover:border-primary hover:text-primary flex min-h-16 w-full items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-3 text-center text-sm transition-colors"
+          :class="dropActive && 'border-primary text-primary bg-primary/10'"
+          @click="emit('pickFiles')"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
+        >
+          <ArrowUpTrayIcon class="h-5 w-5 shrink-0" />
+          {{ $t('taildropDropHint') }}
+        </button>
       </section>
 
       <!-- SSH actions -->
@@ -170,6 +189,7 @@ import type {
 } from '@/gen/daemon/started_service_pb'
 import { showNotification } from '@/helper/notification'
 import {
+  ArrowUpTrayIcon,
   CommandLineIcon,
   DocumentDuplicateIcon,
   PlayIcon,
@@ -184,9 +204,15 @@ const props = defineProps<{
   endpoint: TailscaleEndpointStatus
   peer: TailscalePeer
   isSelf: boolean
+  canSendFiles?: boolean
 }>()
 const isOpen = defineModel<boolean>()
-const emit = defineEmits<{ connectSsh: []; editSsh: [] }>()
+const emit = defineEmits<{
+  connectSsh: []
+  editSsh: []
+  pickFiles: []
+  sendFiles: [files: File[]]
+}>()
 
 const { t } = useI18n()
 const { copy } = useClipboard()
@@ -244,6 +270,29 @@ const sshAvailable = computed(
   () => !props.isSelf && props.peer.online && props.peer.sshHostKeys.length > 0,
 )
 const sshRemembered = computed(() => sshPrefs.value[props.peer.stableID]?.remember ?? false)
+
+// --- Taildrop drop zone ---
+const dropActive = ref(false)
+
+const onDragOver = (event: DragEvent) => {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+  dropActive.value = true
+}
+
+const onDragLeave = (event: DragEvent) => {
+  const related = event.relatedTarget
+  if (related instanceof Node && (event.currentTarget as HTMLElement).contains(related)) return
+  dropActive.value = false
+}
+
+const onDrop = (event: DragEvent) => {
+  event.preventDefault()
+  dropActive.value = false
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (files.length > 0) emit('sendFiles', files)
+}
 
 // --- Ping ---
 const pingRunning = ref(false)
