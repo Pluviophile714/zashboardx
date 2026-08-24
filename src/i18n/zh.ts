@@ -498,6 +498,10 @@ const zh: LANG_MESSAGE = {
   MostUsed: '经常使用',
 
   // 代理文件夹
+  strategyPenetration: '策略穿透',
+  collapsePenetration: '收起穿透',
+  stepwisePenetration: '逐步穿透',
+  fullExpansion: '完全展开',
   proxyFolderMode: '文件夹模式',
   folderModeAuto: '自动',
   folderModeOn: '开启',

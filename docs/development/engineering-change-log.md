@@ -248,3 +248,41 @@ Tailscale, OpenVPN, terminal, and USB/IP surfaces.
 - `git diff --check` - passed.
 
 **Release:** Pending local proxy-page preview at `http://127.0.0.1:5175/`.
+
+## 2026-08-24 - Restore latency strip green
+
+**Status:** Local preview updated; not deployed.
+
+**Change:** Restored the historical low-latency color
+`oklch(0.648 0.15 160)` as a global token. Neutral themes no longer override
+the low-latency green, so the first-level latency strip and chart keep the same
+green across built-in themes.
+
+**Preserved behavior:** Latency thresholds, shared samples, SSE updates, strip
+animation, chart rendering, and 6h/24h bucket behavior were not changed.
+
+**Verification:**
+
+- `node --test src/helper/__tests__/latencyColorTokens.test.ts` - passed.
+- `pnpm exec vue-tsc --build --force` - passed.
+- `pnpm run build` - passed; PWA service worker generated.
+
+## 2026-08-24 - Restore proxy penetration translations
+
+**Status:** Local fix complete; not committed or deployed.
+
+**Root cause:** The upstream proxy penetration component referenced
+`strategyPenetration`, `collapsePenetration`, `stepwisePenetration`, and
+`fullExpansion`, but none of the four locale dictionaries defined those keys.
+Vue I18n therefore rendered the key names directly, which made the proxy
+penetration controls appear in English in the Chinese interface.
+
+**Change:** Added the four labels to English, Simplified Chinese, Traditional
+Chinese, and Russian dictionaries. No proxy penetration behavior or latency
+monitoring code was changed.
+
+**Verification:**
+
+- `node --test src/helper/__tests__/proxyPenetrationI18n.test.ts` - passed.
+- `pnpm exec vue-tsc --build --force` - passed.
+- `pnpm run build` - passed; PWA service worker generated.

@@ -511,6 +511,10 @@ const en = {
   MostUsed: 'Most used',
 
   // Proxy folders
+  strategyPenetration: 'Strategy penetration',
+  collapsePenetration: 'Collapse penetration',
+  stepwisePenetration: 'Stepwise penetration',
+  fullExpansion: 'Full expansion',
   proxyFolderMode: 'Proxy folder mode',
   folderModeAuto: 'Auto',
   folderModeOn: 'On',

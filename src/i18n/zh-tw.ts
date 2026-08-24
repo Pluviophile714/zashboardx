@@ -498,6 +498,10 @@ const zhTW: LANG_MESSAGE = {
   MostUsed: '經常使用',
 
   // 代理資料夾
+  strategyPenetration: '策略穿透',
+  collapsePenetration: '收起穿透',
+  stepwisePenetration: '逐步穿透',
+  fullExpansion: '完全展開',
   proxyFolderMode: '資料夾模式',
   folderModeAuto: '自動',
   folderModeOn: '開啟',

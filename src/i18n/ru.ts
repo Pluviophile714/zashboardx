@@ -513,6 +513,10 @@ const ru: LANG_MESSAGE = {
   MostUsed: 'Часто используется',
 
   // Папки прокси
+  strategyPenetration: 'Проникновение по стратегии',
+  collapsePenetration: 'Свернуть проникновение',
+  stepwisePenetration: 'Пошаговое раскрытие',
+  fullExpansion: 'Полное раскрытие',
   proxyFolderMode: 'Режим папок',
   folderModeAuto: 'Авто',
   folderModeOn: 'Вкл',
