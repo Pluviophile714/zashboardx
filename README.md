@@ -56,7 +56,7 @@ To run zashboard via Docker, use the following command:
 docker run -d -p 80:80 ghcr.io/pluviophile714/zashboardx:latest
 ```
 
-For persistent latency history, see the [Metrics installation guide](./docs/metrics-install.md).
+如需持久保存延迟历史，请参阅 [Metrics 安装说明](./docs/metrics-install.md)。
 
 ## Tips
 
