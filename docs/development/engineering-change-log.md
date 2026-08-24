@@ -211,3 +211,40 @@ Metrics helper images and recreated both containers.
   minutes, with matching detail and timeline snapshot timestamps, in 261 ms.
 - Metrics helper logs contained only the normal listening message.
 - `docker image prune -f` reclaimed 15.18 MB of dangling image data.
+
+## 2026-08-24 - Upstream 3.22.0 sync and sing-box removal
+
+**Status:** Local merge verified; awaiting preview approval and release.
+
+**Change:** Merged upstream release `3.22.0` (`07e5e5a`), then merged the
+official sing-box removal (`4adb487`). The latter removes the sing-box native
+API, its protocol dependencies, and the upstream Tools page with its related
+Tailscale, OpenVPN, terminal, and USB/IP surfaces.
+
+**Preserved fork behavior:**
+
+- The Metrics Helper workspace remains in `pnpm-workspace.yaml`; the root
+  `metrics:build` and `metrics:test` commands remain available.
+- The primary latency value, first-level strip, secondary recent history, 1h
+  raw timeline, SSE-driven rolling updates, and 6h/24h aggregated timeline
+  and bucket drilldown were retained without source changes in their custom
+  Metrics files.
+- The complete-1h hydration rule remains in force: a recent-only response
+  cannot become the 1h chart source, while a warm raw list still advances as
+  new probes are received.
+- Browser navigation filters the internal `app` route. It is reserved for an
+  upstream native shell but has no browser route; rendering it would create a
+  dead sidebar entry.
+- The remaining node-card latency test call uses the Mihomo-only signature;
+  the old fourth argument belonged to the removed sing-box path.
+
+**Verification:**
+
+- `pnpm install --frozen-lockfile` completed for both workspace projects.
+- `pnpm --filter @zashboardx/metrics-helper test` - 76 passed.
+- `node --test "src/helper/__tests__/*.test.ts"` - 141 passed.
+- `pnpm exec vue-tsc --build --force` - passed with no diagnostics.
+- `pnpm run build` - production bundle generated successfully.
+- `git diff --check` - passed.
+
+**Release:** Pending local proxy-page preview at `http://127.0.0.1:5175/`.

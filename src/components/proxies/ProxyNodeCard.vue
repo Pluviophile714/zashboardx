@@ -1758,7 +1758,7 @@ const handlerLatencyTest = async () => {
 
   isLatencyTesting.value = true
   try {
-    await proxyLatencyTest(props.name, getTestUrl(props.groupName), undefined, props.groupName)
+    await proxyLatencyTest(props.name, getTestUrl(props.groupName))
   } catch {
     // The existing latency notification reports the failure.
   } finally {

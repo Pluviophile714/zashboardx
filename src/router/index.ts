@@ -1,12 +1,8 @@
-import { can, type Cap } from '@/assembly/backend'
 import { resolvePageTransition } from '@/composables/pageTransition'
 import { ROUTE_NAME } from '@/constant'
-import { renderRoutes } from '@/helper'
-import { isNativeAppMode } from '@/helper/appMode'
 import { i18n } from '@/i18n'
 import { language } from '@/store/settings'
 import { activeBackend } from '@/store/setup'
-import AppLauncherPage from '@/views/AppLauncherPage.vue'
 import ConnectionsPage from '@/views/ConnectionsPage.vue'
 import HomePage from '@/views/HomePage.vue'
 import LogsPage from '@/views/LogsPage.vue'
@@ -46,36 +42,20 @@ const childrenRouter = [
     component: RulesPage,
   },
   {
-    path: 'tools',
-    name: ROUTE_NAME.tools,
-    component: () => import('@/views/ToolsPage.vue'),
-  },
-  {
     path: 'settings',
     name: ROUTE_NAME.settings,
     component: SettingsPage,
   },
 ]
 
-// Routes that require a specific capability to be visitable.
-const ROUTE_CAPABILITY: Partial<Record<string, Cap>> = {
-  [ROUTE_NAME.rules]: 'rules',
-  [ROUTE_NAME.tools]: 'tools',
-}
-
 const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
-      redirect: isNativeAppMode ? ROUTE_NAME.app : ROUTE_NAME.proxies,
+      redirect: ROUTE_NAME.proxies,
       component: HomePage,
       children: childrenRouter,
-    },
-    {
-      path: '/app',
-      name: ROUTE_NAME.app,
-      component: AppLauncherPage,
     },
     {
       path: '/setup',
@@ -91,9 +71,7 @@ const router = createRouter({
 
 const title = useTitle('zashboard')
 const setTitleByName = (name: string | symbol | undefined) => {
-  if (name === ROUTE_NAME.app) {
-    title.value = 'ZashboardX'
-  } else if (typeof name === 'string' && activeBackend.value) {
+  if (typeof name === 'string' && activeBackend.value) {
     const backend = activeBackend.value
     const prefix = backend.label || `${backend.host}:${backend.port}`
     title.value = `${prefix} | ${i18n.global.t(name)}`
@@ -105,15 +83,8 @@ const setTitleByName = (name: string | symbol | undefined) => {
 router.beforeEach((to, from) => {
   resolvePageTransition(to, from)
 
-  if (!activeBackend.value && ![ROUTE_NAME.app, ROUTE_NAME.setup].includes(to.name as ROUTE_NAME)) {
-    router.push({ name: isNativeAppMode ? ROUTE_NAME.app : ROUTE_NAME.setup })
-    return
-  }
-
-  // Block navigation to a page the active backend's channels can't serve.
-  const requiredCap = typeof to.name === 'string' ? ROUTE_CAPABILITY[to.name] : undefined
-  if (requiredCap && !can(requiredCap)) {
-    router.push({ name: ROUTE_NAME.proxies })
+  if (!activeBackend.value && to.name !== ROUTE_NAME.setup) {
+    router.push({ name: ROUTE_NAME.setup })
   }
 })
 
@@ -125,15 +96,6 @@ watch([language, activeBackend], () => {
   setTimeout(() => {
     setTitleByName(router.currentRoute.value.name)
   })
-})
-
-// 能力变化(切后端 / 内核探测出结果)后,把停留在已失效页面的用户送回代理页。
-watch(renderRoutes, () => {
-  const routeName = router.currentRoute.value.name
-  const requiredCap = typeof routeName === 'string' ? ROUTE_CAPABILITY[routeName] : undefined
-  if (requiredCap && !can(requiredCap)) {
-    router.push({ name: ROUTE_NAME.proxies })
-  }
 })
 
 export default router
