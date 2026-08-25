@@ -267,6 +267,28 @@ animation, chart rendering, and 6h/24h bucket behavior were not changed.
 - `pnpm exec vue-tsc --build --force` - passed.
 - `pnpm run build` - passed; PWA service worker generated.
 
+## 2026-08-25 - Restore metrics freshness translations
+
+**Status:** Local fix complete; not committed or deployed.
+
+**Root cause:** `ProxyNodeCard.vue` still rendered the metrics freshness line
+through `t('metricsLive')`, `t('metricsLastProbe')`, and the related unit keys,
+but a later locale-file restoration had removed those entries from all four
+language dictionaries. Vue I18n therefore displayed the raw keys, which made
+the status appear in English and hid the relative probe age.
+
+**Change:** Restored the seven freshness labels and three age-unit labels in
+English, Simplified Chinese, Traditional Chinese, and Russian. The freshness
+state calculation, SSE/polling updates, latency samples, and node-card layout
+were not changed.
+
+**Verification:**
+
+- `node --test src/helper/__tests__/metricsFreshnessI18n.test.ts` - passed.
+- `pnpm run type-check` - passed.
+- `pnpm run build` - passed; PWA service worker generated.
+- `git diff --check` - passed for the changed source and test files.
+
 ## 2026-08-24 - Restore proxy penetration translations
 
 **Status:** Local fix complete; not committed or deployed.
