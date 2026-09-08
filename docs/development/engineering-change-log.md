@@ -289,6 +289,42 @@ were not changed.
 - `pnpm run build` - passed; PWA service worker generated.
 - `git diff --check` - passed for the changed source and test files.
 
+## 2026-09-08 - Upstream 3.26 virtual-list browser verification
+
+**Status:** Local preview only in `zashboardx-upstream-326`; not pushed or deployed.
+
+**Observed failures and fixes:**
+
+- Browser verification initially passed 13/14 checks. Sorting after a latency
+  test unmounted the old node card, so its DOM-based scrolling did nothing.
+  The card now uses the list-provided `scrollNodeIntoViewKey` and the existing
+  shared highlight state. Non-virtual callers retain the DOM fallback.
+- Active cards inside a virtual list no longer independently schedule the old
+  delayed centering operation; the list owns active-row positioning.
+- Leaving the proxies route with a latency popover open left one detached
+  Tippy popover in the page. Card unmount now destroys its own active instance.
+  Desktop and mobile route-leave checks now report zero remaining popovers.
+- The isolated browser harness explicitly uses en-US for upstream tests that
+  locate English search placeholders. Product language settings are unchanged.
+
+**Verification:**
+
+- Frontend Node tests: 146/146 passed after the fixes.
+- Type check, production build, and diff whitespace check passed.
+- Upstream browser behavior suite: 14/14 passed after the scroll fix.
+- Collapse suite: all nine scenarios passed, including reversal and unmount.
+- Mobile benchmark at 390x844, 60 groups x 100 nodes, one run, no CPU throttle:
+  first cards 483 ms; DOM count 487 initially and 502 after scrolling to bottom.
+  This is a desktop-browser simulation, not physical-phone performance evidence.
+- Popover smoke screenshots: desktop 1440x900 and mobile 390x844; no horizontal
+  page overflow, popovers inside viewport, route leave removes the popover.
+- Preview at http://127.0.0.1:5176/ returned HTTP 200.
+
+**Limits:** The mock backend has no Metrics history. Popover screenshots show
+the loading state, not a verified complete 1h chart. Real R5S SSE-to-chart
+updates and 6h/24h bucket drilling still need browser verification with real
+history. No Metrics Helper source, storage, or real backend settings changed.
+
 ## 2026-08-24 - Restore proxy penetration translations
 
 **Status:** Local fix complete; not committed or deployed.

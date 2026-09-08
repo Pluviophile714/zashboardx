@@ -111,7 +111,7 @@ export const fetchProxies = async () => {
   })
 
   if (smartGroups.length > 0) {
-    initSmartWeights(smartGroups)
+    void initSmartWeights(smartGroups)
   }
 }
 

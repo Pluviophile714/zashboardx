@@ -114,6 +114,7 @@ import { getProxyMetricsFreshness } from '@/helper/proxyMetricsFreshness'
 import { getProxyMetricsSampleIdentity } from '@/helper/proxyMetricsRecentSamples'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
+import { highlightedProxyNode, highlightProxyNode, scrollNodeIntoViewKey } from '@/composables/proxiesScroll'
 import {
   getDisplayHistoryByName,
   getHistoryByName,
@@ -157,7 +158,7 @@ import { smartWeightsMap } from '@/store/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LatencyTag from './LatencyTag.vue'
 import {
@@ -1752,7 +1753,10 @@ const handlerLatencyDetailsTip = async (e: Event) => {
   })
 }
 
-const latencyTipAnimationClass = ref<string[]>([])
+const scrollNodeIntoView = inject(scrollNodeIntoViewKey, null)
+const latencyTipAnimationClass = computed(() =>
+  highlightedProxyNode.value === props.name ? ['bg-info/20!', 'transition-colors', 'duration-1500'] : [],
+)
 const handlerLatencyTest = async () => {
   if (isLatencyTesting.value) return
 
@@ -1769,17 +1773,15 @@ const handlerLatencyTest = async () => {
   }
 
   if (
-    [PROXY_SORT_TYPE.LATENCY_ASC, PROXY_SORT_TYPE.LATENCY_DESC].includes(proxySortType.value) &&
-    cardRef.value
+    [PROXY_SORT_TYPE.LATENCY_ASC, PROXY_SORT_TYPE.LATENCY_DESC].includes(proxySortType.value)
   ) {
-    const classList = ['bg-info/20!', 'transition-colors', 'duration-1500']
-
+    highlightProxyNode(props.name)
     await nextTick()
-    scrollIntoCenter(cardRef.value)
-    latencyTipAnimationClass.value = classList
-    setTimeout(() => {
-      latencyTipAnimationClass.value = []
-    }, 1500)
+    if (scrollNodeIntoView) {
+      scrollNodeIntoView(props.name)
+    } else if (cardRef.value) {
+      scrollIntoCenter(cardRef.value)
+    }
   }
 }
 
@@ -1798,7 +1800,7 @@ onMounted(() => {
     latencyStripVisibilityObserver.observe(cardRef.value)
   }
 
-  if (props.active) {
+  if (props.active && !scrollNodeIntoView) {
     setTimeout(() => {
       scrollIntoCenter(cardRef.value)
     }, 300)
@@ -1806,6 +1808,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  activeLatencyDetailsTip?.destroy()
   clearLatencyStripAnimationSchedule()
   latencyStripVisibilityObserver?.disconnect()
   latencyStripVisibilityObserver = undefined
