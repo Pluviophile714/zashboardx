@@ -61,6 +61,7 @@
 
 <script setup lang="ts">
 import { useBounceOnVisible } from '@/composables/bouncein'
+import { useOverlayDimState } from '@/composables/dialog'
 import { disableProxiesPageScroll } from '@/composables/proxies'
 import { useRenderProxyList } from '@/composables/renderProxies'
 import { PROXIES_PARENT_CLASS } from '@/helper/utils'
@@ -85,6 +86,9 @@ const modalMode = ref(false)
 const displayContent = ref(false)
 const showAllContent = ref(modalMode.value)
 const contentOpacity = ref(0)
+
+// 压暗层要连 iOS PWA 的状态栏一起暗下去，见 App.vue 的 setThemeColor。
+useOverlayDimState(modalMode)
 
 const cardWrapperRef = ref()
 const cardRef = ref()

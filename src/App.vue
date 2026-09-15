@@ -12,6 +12,7 @@ import UpgradeCoreModal from './components/settings/backend/UpgradeCoreModal.vue
 import { useAppearanceVars } from './composables/useAppearanceVars'
 import { showUpdateConfigModal, showUpgradeCoreModal } from './composables/backendActions'
 import ConfirmDialogHost from './components/common/ConfirmDialogHost.vue'
+import { dimmedOverlayCount } from './composables/dialog'
 import { useKeyboard } from './composables/keyboard'
 import { EMOJIS, FONTS } from './constant'
 import {
@@ -56,17 +57,52 @@ const fontClassName = computed(() => {
   )
 })
 
+/*
+ * iOS 的 PWA 会用 <meta name="theme-color"> 去刷状态栏那条 chrome，它在 web view 之外，
+ * 页面里任何 fixed 遮罩都盖不到。所以有全屏压暗层在场时，这里把 theme-color 也按同样的
+ * 强度（daisyUI 的 .modal 遮罩是 40% 纯黑）压一遍，顶部才不会留一条没暗下去的亮边。
+ */
+const OVERLAY_DIM_ALPHA = 0.4
+
+let colorProbe: CanvasRenderingContext2D | null | undefined
+
+// getComputedStyle 会原样吐回作者写的颜色空间（主题里就有 oklch()），这里借 canvas
+// 的 CSS 颜色解析统一压成 sRGB 三通道，免得自己写一套各种语法的解析。
+const toRgb = (color: string) => {
+  if (colorProbe === undefined) {
+    colorProbe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+  }
+  if (!colorProbe) return null
+
+  // 解析失败时 fillStyle 会保持原值，用哨兵色把这种情况认出来，别把状态栏刷错。
+  colorProbe.fillStyle = '#010203'
+  colorProbe.fillStyle = color
+  if (colorProbe.fillStyle === '#010203') return null
+
+  colorProbe.fillRect(0, 0, 1, 1)
+  const [r, g, b] = colorProbe.getImageData(0, 0, 1, 1).data
+  return { r, g, b }
+}
+
 const setThemeColor = () => {
   if (!app.value) return
 
   const themeColor = getComputedStyle(app.value!).getPropertyValue('background-color').trim()
   const metaThemeColor = document.querySelector('meta[name="theme-color"]')
-  if (metaThemeColor) {
+  if (!metaThemeColor) return
+
+  const rgb = dimmedOverlayCount.value > 0 ? toRgb(themeColor) : null
+  if (!rgb) {
     metaThemeColor.setAttribute('content', themeColor)
+    return
   }
+
+  const dim = (channel: number) => Math.round(channel * (1 - OVERLAY_DIM_ALPHA))
+  metaThemeColor.setAttribute('content', `rgb(${dim(rgb.r)}, ${dim(rgb.g)}, ${dim(rgb.b)})`)
 }
 
 watch(isPreferredDark, setThemeColor)
+watch(dimmedOverlayCount, setThemeColor)
 watch(
   theme,
   () => {
