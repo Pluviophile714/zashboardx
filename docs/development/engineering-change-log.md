@@ -285,6 +285,8 @@ still pending.
 - The live image does not contain `metrics_rollup_buckets` or the 7d profile,
   so the R5S is still running the pre-rollup Metrics implementation. No R5S
   container, environment variable, or database file was changed in this work.
+- The local Metrics Helper package version is now `0.2.0`; the deployed R5S
+  image remains `0.1.0` until the new Metrics image is built and deployed.
 
 **Changes:**
 
