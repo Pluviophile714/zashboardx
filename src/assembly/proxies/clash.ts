@@ -10,11 +10,10 @@ import {
   selectProxyAPI,
 } from '@/api/clash'
 import { postProxyMetricsSamplesAPI } from '@/api/metricsHelper'
-import { disconnectByIdAPI } from '@/assembly/connections'
+import { activeConnections, disconnectById } from '@/assembly/connections'
 import { GLOBAL, IPV6_TEST_URL, NOT_CONNECTED, PROXY_TYPE, SPEEDTEST_MODE } from '@/constant'
 import { getConnectionChains, isProxyGroup } from '@/helper'
 import { showNotification } from '@/helper/notification'
-import { activeConnections } from '@/store/connections'
 import {
   automaticDisconnection,
   iconReflectList,
@@ -23,10 +22,10 @@ import {
   speedtestMode,
   speedtestTimeout,
 } from '@/store/settings'
-import { initSmartWeights } from '@/store/smart'
 import type { Proxy } from '@/types'
 import { last } from 'lodash'
 import pLimit from 'p-limit'
+import { initSmartWeights } from './smart'
 import {
   getHistoryByName,
   getLatencyByName,
@@ -37,7 +36,7 @@ import {
   proxyMap,
   proxyProviederList,
   speedtestUrlWithDefault,
-} from './index'
+} from './state'
 
 let fetchTime = 0
 
@@ -130,7 +129,7 @@ export const handlerProxySelect = async (proxyGroupName: string, proxyName: stri
   if (automaticDisconnection.value) {
     activeConnections.value
       .filter((c) => getConnectionChains(c).includes(proxyGroupName))
-      .forEach((c) => disconnectByIdAPI(c.id))
+      .forEach((c) => disconnectById(c.id))
   }
   fetchProxies()
 }

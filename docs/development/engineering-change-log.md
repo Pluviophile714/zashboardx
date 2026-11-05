@@ -267,6 +267,60 @@ animation, chart rendering, and 6h/24h bucket behavior were not changed.
 - `pnpm exec vue-tsc --build --force` - passed.
 - `pnpm run build` - passed; PWA service worker generated.
 
+## 2026-11-05 - Metrics rollups, seven-day chart, and upstream 3.30 sync
+
+**Status:** Local merge and preview verified; GitHub push and R5S deployment are
+still pending.
+
+**R5S Metrics baseline captured before any deployment:**
+
+- Container: `zashboardx-metrics`, running with restart count `0`.
+- Image: `ghcr.io/pluviophile714/zashboardx:metrics-latest`.
+- Current image ID: `sha256:afdd9b382eb6d6e78576a740b27c7637c384eb8cae8cdf2b4e0a85796854c3ca`.
+- Metrics package in `/app/package.json`: `@zashboardx/metrics-helper@0.1.0`.
+- Runtime: `node dist/index.js`; database: `/data/metrics.sqlite`.
+- Host data mount: `/opt/zashboardx/metrics-data:/data`.
+- Probe/scrape interval: 30 seconds; probe concurrency: 8; cache TTL: 10
+  seconds; refresh debounce: 1500 ms.
+- The live image does not contain `metrics_rollup_buckets` or the 7d profile,
+  so the R5S is still running the pre-rollup Metrics implementation. No R5S
+  container, environment variable, or database file was changed in this work.
+
+**Changes:**
+
+- Added persistent 1-minute, 5-minute, and 15-minute rollup buckets while
+  retaining `probe_samples` for the seven-day raw retention policy.
+- Added the 7d timeline profile with 672 fifteen-minute buckets. The default
+  popover range remains 1h; 6h/24h/7d data is requested on demand, and bucket
+  drilldown remains available.
+- Kept 1h on the complete raw rolling sample list and preserved SSE/polling
+  live advancement, so new samples continue to move the chart and latency
+  strips together.
+- Synchronized the fork with official `Zephyruso/zashboard` v3.30.0 while
+  preserving Metrics Helper, SSE, latency strips, 1h/6h/24h charts, Smart
+  weights, and time-bucket inspection.
+- Unified the post-v3.30 proxy state so the page, proxy helpers, latency tests,
+  Smart ordering, and the new driver layer use the same `proxyMap`, group list,
+  IPv6 state, and proxy-tab state.
+
+**Verification:**
+
+- `pnpm --filter @zashboardx/metrics-helper test` - 82 passed.
+- `node --test "src/helper/__tests__/*.test.ts"` - 150 passed.
+- `pnpm run type-check` - passed.
+- `pnpm run build` - passed.
+- Edge-backed `node test/verify.mjs` - 14/14 passed.
+- Edge-backed `node test/collapse.mjs` - all 9 scenarios passed.
+- Edge-backed `node test/latency-popover-smoke.mjs` - desktop and mobile
+  popovers stayed inside the viewport and route leave removed all popovers.
+- Local preview `http://127.0.0.1:5176/` returned HTTP 200 and displayed the
+  v3.30 proxy list against the mock Mihomo backend.
+
+**Release boundary:** Do not overwrite `/opt/zashboardx/metrics-data` during
+the later image update. The existing database must be migrated in place by the
+new helper, then the Metrics health endpoint, rollup readiness, SSE, and the
+dashboard HTTP 200 must be checked on the R5S.
+
 ## 2026-08-25 - Restore metrics freshness translations
 
 **Status:** Local fix complete; not committed or deployed.

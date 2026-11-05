@@ -112,11 +112,11 @@
 </template>
 
 <script setup lang="ts">
-import { useBounceOnVisible } from '@/composables/bouncein'
-import { useRenderProxyList } from '@/composables/renderProxies'
+import { useBounceOnVisible } from '@/composables/use-bounce-on-visible'
+import { useRenderProxyList } from '@/composables/use-render-proxy-list'
 import { getConnectionChains } from '@/helper'
 import { prettyBytesHelper } from '@/helper/utils'
-import { activeConnections } from '@/store/connections'
+import { activeConnections } from '@/assembly/connections'
 import { handlerProxySelect, proxyGroupLatencyTest, proxyMap } from '@/assembly/proxies'
 import {
   collapseGroupMap,

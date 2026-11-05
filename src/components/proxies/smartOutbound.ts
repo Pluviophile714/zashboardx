@@ -1,8 +1,8 @@
+import { activeConnections } from '@/assembly/connections'
 import { proxyMap } from '@/assembly/proxies'
+import { smartOrderMap, smartWeightsMap } from '@/assembly/proxies/smart'
 import { PROXY_TYPE } from '@/constant'
 import { getConnectionChains, getConnectionStart } from '@/helper'
-import { activeConnections } from '@/store/connections'
-import { smartOrderMap, smartWeightsMap } from '@/store/smart'
 
 export const getTopSmartNode = (groupName: string) => {
   const group = proxyMap.value[groupName]

@@ -114,7 +114,11 @@ import { getProxyMetricsFreshness } from '@/helper/proxyMetricsFreshness'
 import { getProxyMetricsSampleIdentity } from '@/helper/proxyMetricsRecentSamples'
 import { checkTruncation, useTooltip } from '@/helper/tooltip'
 import { scrollIntoCenter } from '@/helper/utils'
-import { highlightedProxyNode, highlightProxyNode, scrollNodeIntoViewKey } from '@/composables/proxiesScroll'
+import {
+  highlightedProxyNode,
+  highlightProxyNode,
+  scrollNodeIntoViewKey,
+} from '@/helper/proxies-scroll'
 import {
   getDisplayHistoryByName,
   getHistoryByName,
@@ -154,7 +158,7 @@ import type {
   ProxyMetricsTimelineBucket,
   ProxyMetricsTimelineWindow,
 } from '@/api/metricsHelper'
-import { smartWeightsMap } from '@/store/smart'
+import { smartWeightsMap } from '@/assembly/proxies/smart'
 import dayjs from 'dayjs'
 import type { Instance } from 'tippy.js'
 import { twMerge } from 'tailwind-merge'
@@ -1755,7 +1759,9 @@ const handlerLatencyDetailsTip = async (e: Event) => {
 
 const scrollNodeIntoView = inject(scrollNodeIntoViewKey, null)
 const latencyTipAnimationClass = computed(() =>
-  highlightedProxyNode.value === props.name ? ['bg-info/20!', 'transition-colors', 'duration-1500'] : [],
+  highlightedProxyNode.value === props.name
+    ? ['bg-info/20!', 'transition-colors', 'duration-1500']
+    : [],
 )
 const handlerLatencyTest = async () => {
   if (isLatencyTesting.value) return
@@ -1772,9 +1778,7 @@ const handlerLatencyTest = async () => {
     }
   }
 
-  if (
-    [PROXY_SORT_TYPE.LATENCY_ASC, PROXY_SORT_TYPE.LATENCY_DESC].includes(proxySortType.value)
-  ) {
+  if ([PROXY_SORT_TYPE.LATENCY_ASC, PROXY_SORT_TYPE.LATENCY_DESC].includes(proxySortType.value)) {
     highlightProxyNode(props.name)
     await nextTick()
     if (scrollNodeIntoView) {
