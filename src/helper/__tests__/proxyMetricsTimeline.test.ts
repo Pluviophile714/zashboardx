@@ -248,5 +248,5 @@ test('gives the wider desktop popover a taller timeline plot', () => {
 })
 
 test('exposes the supported timeline windows in compact control order', () => {
-  assert.deepEqual(LATENCY_TIMELINE_WINDOWS, ['1h', '6h', '24h'])
+  assert.deepEqual(LATENCY_TIMELINE_WINDOWS, ['1h', '6h', '24h', '7d'])
 })

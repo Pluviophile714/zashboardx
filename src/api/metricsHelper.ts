@@ -62,7 +62,7 @@ export type ProxyMetricsTimelineBucket = {
   jitter: number | null
 }
 
-export type ProxyMetricsTimelineWindow = '1h' | '6h' | '24h'
+export type ProxyMetricsTimelineWindow = '1h' | '6h' | '24h' | '7d'
 
 export const PROXY_METRICS_TIMELINE_PROFILES = {
   '1h': {
@@ -79,6 +79,11 @@ export const PROXY_METRICS_TIMELINE_PROFILES = {
     bucketCount: 96,
     bucketSeconds: 900,
     windowSeconds: 86_400,
+  },
+  '7d': {
+    bucketCount: 672,
+    bucketSeconds: 900,
+    windowSeconds: 604_800,
   },
 } as const satisfies Record<
   ProxyMetricsTimelineWindow,

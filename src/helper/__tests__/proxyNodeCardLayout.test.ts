@@ -411,14 +411,14 @@ test('dispatches renderer callbacks through the range control and selected chart
     onWindowChange: (window) => windowChanges.push(window),
   })
 
-  assert.equal(buttons.length, 3)
+  assert.equal(buttons.length, 4)
   assert.deepEqual(
     buttons.map((button) => button.textContent),
-    ['1h', '6h', '24h'],
+    ['1h', '6h', '24h', '7d'],
   )
   assert.deepEqual(
     buttons.map((button) => button.getAttribute('aria-pressed')),
-    ['false', 'true', 'false'],
+    ['false', 'true', 'false', 'false'],
   )
 
   buttons[0].dispatchEvent(createEvent('click'))

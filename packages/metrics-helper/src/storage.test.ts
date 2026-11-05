@@ -206,6 +206,44 @@ test('calculates window jitter across successful samples and ignores failures', 
   storage.close()
 })
 
+test('calculates seven-day jitter from rollups after raw samples are unavailable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-rollup-jitter-'))
+
+  tempDirs.push(dir)
+
+  const databasePath = join(dir, 'metrics.sqlite')
+  const storage = new MetricsStorage(databasePath)
+  storage.init()
+  const nowMs = Date.parse('2026-07-05T00:05:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/one',
+    timestamp: '2026-07-05T00:01:00.000Z',
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/two',
+    timestamp: '2026-07-05T00:05:00.000Z',
+    delay: 120,
+    success: true,
+  })
+  storage.rebuildMetricsRollups(7, nowMs)
+  storage.close()
+
+  const database = new DatabaseSync(databasePath)
+  database.prepare('DELETE FROM probe_samples').run()
+  database.close()
+
+  const rollupOnlyStorage = new MetricsStorage(databasePath)
+  rollupOnlyStorage.init({ readonly: true })
+
+  assert.equal(rollupOnlyStorage.getNodeJitter('HK-01', 604_800, nowMs), 40)
+  rollupOnlyStorage.close()
+})
+
 test('returns null for a single node without samples in the window', () => {
   const storage = createStorage()
 
@@ -708,6 +746,7 @@ test('supports fixed timeline profile geometry and boundary placement', () => {
     { windowSeconds: 3_600, bucketCount: 60, bucketSeconds: 60 },
     { windowSeconds: 21_600, bucketCount: 72, bucketSeconds: 300 },
     { windowSeconds: 86_400, bucketCount: 96, bucketSeconds: 900 },
+    { windowSeconds: 604_800, bucketCount: 672, bucketSeconds: 900 },
   ]
   const nowMs = Date.parse('2026-07-05T00:00:00.000Z')
 
@@ -747,6 +786,183 @@ test('supports fixed timeline profile geometry and boundary placement', () => {
     assert.equal(buckets[profile.bucketCount - 1].sampleCount, 1)
     storage.close()
   }
+})
+
+test('builds persistent rollup levels from raw samples and marks the snapshot ready', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse('2026-07-05T00:00:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/one',
+    timestamp: '2026-07-04T23:44:00.000Z',
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/two',
+    timestamp: '2026-07-04T23:59:00.000Z',
+    delay: 120,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/three',
+    timestamp: '2026-07-04T23:59:30.000Z',
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+
+  const rollupStorage = storage as unknown as {
+    getMetricsRollupBucketCount: (nodeName: string, bucketSeconds: number) => number
+    getMetricsRollupState: () => { ready: boolean }
+    rebuildMetricsRollups: (retentionDays: number, rebuildNowMs: number) => void
+  }
+
+  rollupStorage.rebuildMetricsRollups(7, nowMs)
+
+  assert.deepEqual(rollupStorage.getMetricsRollupState(), { ready: true })
+  assert.equal(rollupStorage.getMetricsRollupBucketCount('HK-01', 60), 2)
+  assert.equal(rollupStorage.getMetricsRollupBucketCount('HK-01', 300), 2)
+  assert.equal(rollupStorage.getMetricsRollupBucketCount('HK-01', 900), 2)
+
+  const timeline = storage.getNodeTimeline('HK-01', 604_800, 672, nowMs)
+
+  assert.equal(timeline.length, 672)
+  assert.ok(timeline.some((bucket) => bucket.sampleCount === 2))
+  storage.close()
+})
+
+test('refreshes only affected rollup buckets after a new or corrected sample', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse('2026-07-05T00:05:00.000Z')
+  const initialSample = {
+    nodeName: 'Smart-01',
+    testUrl: 'https://example.com',
+    timestamp: '2026-07-05T00:04:30.000Z',
+    delay: 80,
+    success: true,
+  } satisfies ProbeSample
+
+  storage.recordNode('Smart-01', 'Smart')
+  storage.insertProbeSample(initialSample)
+  storage.rebuildMetricsRollups(7, nowMs)
+  storage.insertProbeSample({ ...initialSample, timestamp: '2026-07-05T00:04:45.000Z', delay: 120 })
+
+  const rollupStorage = storage as unknown as {
+    refreshMetricsRollupBuckets: (nodeName: string, timestamps: string[]) => void
+  }
+
+  rollupStorage.refreshMetricsRollupBuckets('Smart-01', [
+    initialSample.timestamp,
+    new Date(nowMs).toISOString(),
+  ])
+
+  const timeline = storage.getNodeTimeline('Smart-01', 86_400, 96, nowMs)
+  const activeBucket = timeline.at(-1)
+
+  assert.equal(activeBucket?.sampleCount, 2)
+  assert.equal(activeBucket?.avgDelay, 100)
+  assert.equal(activeBucket?.minDelay, 80)
+  assert.equal(activeBucket?.maxDelay, 120)
+  storage.close()
+})
+
+test('serves node summaries from ready rollups without changing their public fields', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-rollup-summary-'))
+
+  tempDirs.push(dir)
+
+  const databasePath = join(dir, 'metrics.sqlite')
+  const storage = new MetricsStorage(databasePath)
+  storage.init()
+  const nowMs = Date.parse('2026-07-05T00:05:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/one',
+    timestamp: '2026-07-05T00:01:00.000Z',
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/two',
+    timestamp: '2026-07-05T00:04:00.000Z',
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.rebuildMetricsRollups(7, nowMs)
+  storage.close()
+
+  const database = new DatabaseSync(databasePath)
+  database.prepare('DELETE FROM probe_samples').run()
+  database.close()
+
+  const rollupOnlyStorage = new MetricsStorage(databasePath)
+  rollupOnlyStorage.init({ readonly: true })
+
+  const metrics = rollupOnlyStorage.getNodeMetrics(86_400, nowMs)['HK-01']
+
+  assert.equal(metrics.sampleCount, 2)
+  assert.equal(metrics.successCount, 1)
+  assert.equal(metrics.failureCount, 1)
+  assert.equal(metrics.availability, 0.5)
+  assert.equal(metrics.avgDelay, 80)
+  assert.equal(metrics.lastDelay, 80)
+  assert.equal(metrics.firstSampleAt, '2026-07-05T00:01:00.000Z')
+  assert.equal(metrics.lastSampleAt, '2026-07-05T00:04:00.000Z')
+  rollupOnlyStorage.close()
+})
+
+test('serves six-hour and twenty-four-hour bundle timelines from rollups after raw samples are unavailable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-metrics-rollup-bundle-'))
+
+  tempDirs.push(dir)
+
+  const databasePath = join(dir, 'metrics.sqlite')
+  const storage = new MetricsStorage(databasePath)
+  storage.init()
+  const nowMs = Date.parse('2026-07-05T00:05:00.000Z')
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/one',
+    timestamp: '2026-07-04T23:55:00.000Z',
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com/two',
+    timestamp: '2026-07-05T00:00:00.000Z',
+    delay: null,
+    success: false,
+    errorType: 'timeout',
+  })
+  storage.rebuildMetricsRollups(7, nowMs)
+  storage.close()
+
+  const database = new DatabaseSync(databasePath)
+  database.prepare('DELETE FROM probe_samples').run()
+  database.close()
+
+  const rollupOnlyStorage = new MetricsStorage(databasePath)
+  rollupOnlyStorage.init({ readonly: true })
+
+  const bundle = rollupOnlyStorage.getNodeTimelineBundle('HK-01', nowMs)
+  assert.equal(
+    bundle['6h'].buckets.reduce((total, bucket) => total + bucket.sampleCount, 0),
+    2,
+  )
+  assert.equal(
+    bundle['24h'].buckets.reduce((total, bucket) => total + bucket.sampleCount, 0),
+    2,
+  )
+  rollupOnlyStorage.close()
 })
 
 test('builds matching 6h and 24h timelines from one independent bundle read', () => {

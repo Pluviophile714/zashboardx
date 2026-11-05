@@ -985,8 +985,20 @@ test('validates timeline requests and retains the global method check', async ()
     assert.equal(longNodeResponse.status, 400)
     assert.equal(longNodeBody.error, 'invalid_node')
 
+    const sevenDayResponse = await fetch(`${baseUrl}/api/metrics/timeline?node=HK-01&window=7d`)
+    const sevenDayBody = (await sevenDayResponse.json()) as {
+      bucketSeconds: number
+      buckets: unknown[]
+      windowSeconds: number
+    }
+
+    assert.equal(sevenDayResponse.status, 200)
+    assert.equal(sevenDayBody.windowSeconds, 604_800)
+    assert.equal(sevenDayBody.bucketSeconds, 900)
+    assert.equal(sevenDayBody.buckets.length, 672)
+
     const unsupportedWindowResponse = await fetch(
-      `${baseUrl}/api/metrics/timeline?node=HK-01&window=7d`,
+      `${baseUrl}/api/metrics/timeline?node=HK-01&window=8d`,
     )
     const unsupportedWindowBody = (await unsupportedWindowResponse.json()) as { error: string }
 

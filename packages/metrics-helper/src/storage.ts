@@ -11,6 +11,8 @@ import type {
 } from './types.js'
 
 const FALLBACK_ROUND_WINDOW_MS = 2_000
+const ROLLUP_BUCKET_SECONDS = [60, 300, 900] as const
+const ROLLUP_READY_METADATA_KEY = 'metrics_rollup_ready'
 
 type NodeMetricsRow = {
   node_name: string
@@ -206,7 +208,54 @@ export class MetricsStorage {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS metrics_rollup_buckets (
+        node_name TEXT NOT NULL,
+        bucket_seconds INTEGER NOT NULL,
+        bucket_start INTEGER NOT NULL,
+        sample_count INTEGER NOT NULL,
+        success_count INTEGER NOT NULL,
+        failure_count INTEGER NOT NULL,
+        delay_sum REAL NOT NULL,
+        min_delay REAL,
+        max_delay REAL,
+        jitter_sum REAL NOT NULL,
+        jitter_count INTEGER NOT NULL,
+        first_timestamp TEXT NOT NULL,
+        last_timestamp TEXT NOT NULL,
+        last_success_at TEXT,
+        last_success_delay REAL,
+        last_failure_at TEXT,
+        PRIMARY KEY (node_name, bucket_seconds, bucket_start)
+      );
+      CREATE INDEX IF NOT EXISTS idx_metrics_rollup_window
+        ON metrics_rollup_buckets (bucket_seconds, bucket_start, node_name);
     `)
+
+    const rollupColumns = new Set(
+      (
+        this.#db.prepare('PRAGMA table_info(metrics_rollup_buckets)').all() as { name: string }[]
+      ).map((column) => column.name),
+    )
+    const rollupColumnMigrations = [
+      ['last_success_at', 'TEXT'],
+      ['last_success_delay', 'REAL'],
+      ['last_failure_at', 'TEXT'],
+    ] as const
+    let rollupSchemaChanged = false
+
+    for (const [column, type] of rollupColumnMigrations) {
+      if (!rollupColumns.has(column)) {
+        this.#db.exec(`ALTER TABLE metrics_rollup_buckets ADD COLUMN ${column} ${type}`)
+        rollupSchemaChanged = true
+      }
+    }
+
+    if (rollupSchemaChanged) {
+      this.#db
+        .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+        .run(ROLLUP_READY_METADATA_KEY, '0')
+    }
+
     const schemaVersionRow = this.#database
       .prepare('SELECT value FROM metadata WHERE key = ?')
       .get('schema_version') as { value: string } | undefined
@@ -262,8 +311,7 @@ export class MetricsStorage {
         `,
         )
         .get(sample.nodeName, sample.testUrl, timestampSecond) as
-        | { id: number; timestamp: string }
-        | undefined
+        { id: number; timestamp: string } | undefined
 
       if (existingRound) {
         if (sample.timestamp <= existingRound.timestamp) {
@@ -380,8 +428,11 @@ export class MetricsStorage {
 
   getNodeMetrics(windowSeconds: number, nowMs = Date.now()) {
     const metrics: Record<string, NodeMetrics> = {}
+    const rows = this.#canUseMetricsRollups(windowSeconds)
+      ? this.#rollupMetricRows(windowSeconds, nowMs)
+      : this.#metricRows(windowSeconds, nowMs)
 
-    for (const row of this.#metricRows(windowSeconds, nowMs)) {
+    for (const row of rows) {
       metrics[row.node_name] = {
         ...this.#nodeMetricsFromRow(row),
         recentSamples: this.getRecentProbeSamples(row.node_name, windowSeconds, 30, nowMs),
@@ -392,7 +443,9 @@ export class MetricsStorage {
   }
 
   getSingleNodeMetrics(nodeName: string, windowSeconds: number, nowMs = Date.now()) {
-    const row = this.#metricRows(windowSeconds, nowMs, nodeName)[0]
+    const row = this.#canUseMetricsRollups(windowSeconds)
+      ? this.#rollupMetricRows(windowSeconds, nowMs, nodeName)[0]
+      : this.#metricRows(windowSeconds, nowMs, nodeName)[0]
 
     return row
       ? {
@@ -433,9 +486,17 @@ export class MetricsStorage {
     bucketCount = 96,
     nowMs = Date.now(),
   ): ProbeTimelineBucket[] {
+    const bucketSeconds = windowSeconds / bucketCount
+
+    if (
+      this.getMetricsRollupState().ready &&
+      ROLLUP_BUCKET_SECONDS.includes(bucketSeconds as 60 | 300 | 900)
+    ) {
+      return this.#getNodeRollupTimeline(nodeName, windowSeconds, bucketCount, nowMs)
+    }
+
     const normalizedNowMs = Math.floor(nowMs / 1000) * 1000
     const windowStartMs = normalizedNowMs - windowSeconds * 1000
-    const bucketSeconds = windowSeconds / bucketCount
     const windowStart = new Date(windowStartMs).toISOString()
     const now = new Date(normalizedNowMs).toISOString()
     const rows = this.#db
@@ -528,7 +589,352 @@ export class MetricsStorage {
     })
   }
 
+  getMetricsRollupState() {
+    const row = this.#db
+      .prepare('SELECT value FROM metadata WHERE key = ?')
+      .get(ROLLUP_READY_METADATA_KEY) as { value: string } | undefined
+
+    return { ready: row?.value === '1' }
+  }
+
+  getMetricsRollupBucketCount(nodeName: string, bucketSeconds: number) {
+    const row = this.#db
+      .prepare(
+        `
+        SELECT COUNT(*) AS count
+        FROM metrics_rollup_buckets
+        WHERE node_name = ? AND bucket_seconds = ?
+      `,
+      )
+      .get(nodeName, bucketSeconds) as { count: number }
+
+    return Number(row.count)
+  }
+
+  rebuildMetricsRollups(retentionDays: number, nowMs = Date.now()) {
+    const cutoff = new Date(nowMs - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+    const now = new Date(nowMs).toISOString()
+
+    this.transaction(() => {
+      this.#db.exec('DELETE FROM metrics_rollup_buckets')
+      this.#database
+        ?.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+        .run(ROLLUP_READY_METADATA_KEY, '0')
+
+      for (const bucketSeconds of ROLLUP_BUCKET_SECONDS) {
+        this.#db
+          .prepare(
+            `
+            WITH bucketed AS (
+              SELECT
+                node_name,
+                timestamp,
+                id,
+                success,
+                delay,
+                CAST(unixepoch(timestamp) / ? AS INTEGER) * ? AS bucket_start
+              FROM probe_samples
+              WHERE timestamp >= ? AND timestamp <= ?
+            ),
+            aggregated AS (
+              SELECT
+                node_name,
+                bucket_start,
+                COUNT(*) AS sample_count,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failure_count,
+                COALESCE(
+                  SUM(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay ELSE 0 END),
+                  0
+                ) AS delay_sum,
+                MIN(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS min_delay,
+                MAX(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END) AS max_delay,
+                0 AS jitter_sum,
+                0 AS jitter_count,
+                MIN(timestamp) AS first_timestamp,
+                MAX(timestamp) AS last_timestamp,
+                MAX(CASE WHEN success = 1 THEN timestamp END) AS last_success_at,
+                MAX(CASE WHEN success = 0 THEN timestamp END) AS last_failure_at
+              FROM bucketed
+              GROUP BY node_name, bucket_start
+            ),
+            latest_success AS (
+              SELECT node_name, bucket_start, delay AS last_success_delay
+              FROM (
+                SELECT
+                  node_name,
+                  bucket_start,
+                  delay,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY node_name, bucket_start
+                    ORDER BY timestamp DESC, id DESC
+                  ) AS row_number
+                FROM bucketed
+                WHERE success = 1
+              )
+              WHERE row_number = 1
+            )
+            INSERT INTO metrics_rollup_buckets (
+              node_name,
+              bucket_seconds,
+              bucket_start,
+              sample_count,
+              success_count,
+              failure_count,
+              delay_sum,
+              min_delay,
+              max_delay,
+              jitter_sum,
+              jitter_count,
+              first_timestamp,
+              last_timestamp,
+              last_success_at,
+              last_success_delay,
+              last_failure_at
+            )
+            SELECT
+              aggregated.node_name,
+              ?,
+              aggregated.bucket_start,
+              aggregated.sample_count,
+              aggregated.success_count,
+              aggregated.failure_count,
+              aggregated.delay_sum,
+              aggregated.min_delay,
+              aggregated.max_delay,
+              aggregated.jitter_sum,
+              aggregated.jitter_count,
+              aggregated.first_timestamp,
+              aggregated.last_timestamp,
+              aggregated.last_success_at,
+              latest_success.last_success_delay,
+              aggregated.last_failure_at
+            FROM aggregated
+            LEFT JOIN latest_success USING (node_name, bucket_start)
+          `,
+          )
+          .run(bucketSeconds, bucketSeconds, cutoff, now, bucketSeconds)
+
+        this.#db
+          .prepare(
+            `
+            WITH bucketed AS (
+              SELECT
+                node_name,
+                timestamp,
+                id,
+                delay,
+                CAST(unixepoch(timestamp) / ? AS INTEGER) * ? AS bucket_start
+              FROM probe_samples
+              WHERE timestamp >= ?
+                AND timestamp <= ?
+                AND success = 1
+                AND delay IS NOT NULL
+            ),
+            ordered AS (
+              SELECT
+                node_name,
+                bucket_start,
+                delay,
+                LAG(delay) OVER (
+                  PARTITION BY node_name, bucket_start
+                  ORDER BY timestamp ASC, id ASC
+                ) AS previous_delay
+              FROM bucketed
+            ),
+            jitter AS (
+              SELECT
+                node_name,
+                bucket_start,
+                SUM(ABS(delay - previous_delay)) AS jitter_sum,
+                COUNT(*) AS jitter_count
+              FROM ordered
+              WHERE previous_delay IS NOT NULL
+              GROUP BY node_name, bucket_start
+            )
+            UPDATE metrics_rollup_buckets
+            SET jitter_sum = COALESCE(
+                  (
+                    SELECT jitter.jitter_sum
+                    FROM jitter
+                    WHERE jitter.node_name = metrics_rollup_buckets.node_name
+                      AND jitter.bucket_start = metrics_rollup_buckets.bucket_start
+                  ),
+                  0
+                ),
+                jitter_count = COALESCE(
+                  (
+                    SELECT jitter.jitter_count
+                    FROM jitter
+                    WHERE jitter.node_name = metrics_rollup_buckets.node_name
+                      AND jitter.bucket_start = metrics_rollup_buckets.bucket_start
+                  ),
+                  0
+                )
+            WHERE bucket_seconds = ?
+          `,
+          )
+          .run(bucketSeconds, bucketSeconds, cutoff, now, bucketSeconds)
+      }
+
+      this.#database
+        ?.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+        .run(ROLLUP_READY_METADATA_KEY, '1')
+    })
+  }
+
+  refreshMetricsRollupBuckets(nodeName: string, timestamps: string[]) {
+    if (!this.getMetricsRollupState().ready || !nodeName || !timestamps.length) {
+      return
+    }
+
+    const affectedBuckets = new Map<number, Set<number>>()
+
+    for (const bucketSeconds of ROLLUP_BUCKET_SECONDS) {
+      const bucketStarts = new Set<number>()
+
+      for (const timestamp of timestamps) {
+        const timestampMs = Date.parse(timestamp)
+
+        if (!Number.isFinite(timestampMs)) continue
+
+        bucketStarts.add(Math.floor(timestampMs / (bucketSeconds * 1000)) * bucketSeconds)
+      }
+
+      if (bucketStarts.size) affectedBuckets.set(bucketSeconds, bucketStarts)
+    }
+
+    this.transaction(() => {
+      for (const [bucketSeconds, bucketStarts] of affectedBuckets) {
+        for (const bucketStart of bucketStarts) {
+          this.#refreshMetricsRollupBucket(nodeName, bucketSeconds, bucketStart)
+        }
+      }
+    })
+  }
+
+  #getNodeRollupTimeline(
+    nodeName: string,
+    windowSeconds: number,
+    bucketCount: number,
+    nowMs: number,
+  ): ProbeTimelineBucket[] {
+    const bucketSeconds = windowSeconds / bucketCount
+    const bucketMs = bucketSeconds * 1000
+    const currentBucketStartMs = Math.floor(nowMs / bucketMs) * bucketMs
+    const windowEndMs = currentBucketStartMs + bucketMs
+    const windowStartMs = windowEndMs - windowSeconds * 1000
+    const rows = this.#db
+      .prepare(
+        `
+        SELECT
+          bucket_start,
+          sample_count,
+          success_count,
+          failure_count,
+          delay_sum,
+          min_delay,
+          max_delay,
+          jitter_sum,
+          jitter_count
+        FROM metrics_rollup_buckets
+        WHERE node_name = ?
+          AND bucket_seconds = ?
+          AND bucket_start >= ?
+          AND bucket_start < ?
+        ORDER BY bucket_start ASC
+      `,
+      )
+      .all(
+        nodeName,
+        bucketSeconds,
+        Math.floor(windowStartMs / 1000),
+        Math.floor(windowEndMs / 1000),
+      ) as {
+      bucket_start: number
+      delay_sum: number
+      failure_count: number
+      jitter_count: number
+      jitter_sum: number
+      max_delay: number | null
+      min_delay: number | null
+      sample_count: number
+      success_count: number
+    }[]
+    const rowsByBucket = new Map(rows.map((row) => [Number(row.bucket_start), row]))
+
+    return Array.from({ length: bucketCount }, (_, bucketIndex) => {
+      const bucketStartMs = windowStartMs + bucketIndex * bucketMs
+      const row = rowsByBucket.get(Math.floor(bucketStartMs / 1000))
+      const successCount = row ? Number(row.success_count) : 0
+
+      return {
+        start: new Date(bucketStartMs).toISOString(),
+        end: new Date(bucketStartMs + bucketMs).toISOString(),
+        sampleCount: row ? Number(row.sample_count) : 0,
+        successCount,
+        failureCount: row ? Number(row.failure_count) : 0,
+        avgDelay: row && successCount > 0 ? Number(row.delay_sum) / successCount : null,
+        minDelay: row?.min_delay === null || row === undefined ? null : Number(row.min_delay),
+        maxDelay: row?.max_delay === null || row === undefined ? null : Number(row.max_delay),
+        jitter:
+          row && Number(row.jitter_count) > 0
+            ? Number(row.jitter_sum) / Number(row.jitter_count)
+            : null,
+      }
+    })
+  }
+
+  #getNodeRollupJitter(nodeName: string, windowSeconds: number, nowMs: number) {
+    const bucketSeconds = windowSeconds === 3_600 ? 60 : windowSeconds === 21_600 ? 300 : 900
+    const bucketMs = bucketSeconds * 1000
+    const currentBucketStartMs = Math.floor(nowMs / bucketMs) * bucketMs
+    const windowEndMs = currentBucketStartMs + bucketMs
+    const windowStartMs = windowEndMs - windowSeconds * 1000
+    const row = this.#db
+      .prepare(
+        `
+        SELECT
+          COALESCE(SUM(jitter_sum), 0) AS jitter_sum,
+          COALESCE(SUM(jitter_count), 0) AS jitter_count
+        FROM metrics_rollup_buckets
+        WHERE node_name = ?
+          AND bucket_seconds = ?
+          AND bucket_start >= ?
+          AND bucket_start < ?
+      `,
+      )
+      .get(
+        nodeName,
+        bucketSeconds,
+        Math.floor(windowStartMs / 1000),
+        Math.floor(windowEndMs / 1000),
+      ) as { jitter_count: number; jitter_sum: number }
+
+    return Number(row.jitter_count) > 0 ? Number(row.jitter_sum) / Number(row.jitter_count) : null
+  }
+
   getNodeTimelineBundle(nodeName: string, nowMs = Date.now()): ProbeTimelineBundle {
+    if (this.getMetricsRollupState().ready) {
+      const buildRollupTimeline = (windowSeconds: number, bucketCount: number): ProbeTimeline => ({
+        bucketSeconds: windowSeconds / bucketCount,
+        buckets: this.#getNodeRollupTimeline(nodeName, windowSeconds, bucketCount, nowMs),
+        jitter: this.#getNodeRollupJitter(nodeName, windowSeconds, nowMs),
+        windowSeconds,
+      })
+
+      return {
+        '6h': buildRollupTimeline(
+          TIMELINE_BUNDLE_PROFILES['6h'].windowSeconds,
+          TIMELINE_BUNDLE_PROFILES['6h'].bucketCount,
+        ),
+        '24h': buildRollupTimeline(
+          TIMELINE_BUNDLE_PROFILES['24h'].windowSeconds,
+          TIMELINE_BUNDLE_PROFILES['24h'].bucketCount,
+        ),
+      }
+    }
+
     const normalizedNowMs = Math.floor(nowMs / 1000) * 1000
     const earliestWindowStart = new Date(
       normalizedNowMs - TIMELINE_BUNDLE_PROFILES['24h'].windowSeconds * 1000,
@@ -564,6 +970,10 @@ export class MetricsStorage {
   }
 
   getNodeJitter(nodeName: string, windowSeconds: number, nowMs = Date.now()) {
+    if (this.#canUseMetricsRollups(windowSeconds)) {
+      return this.#getNodeRollupJitter(nodeName, windowSeconds, nowMs)
+    }
+
     const windowStart = new Date(nowMs - windowSeconds * 1000).toISOString()
     const now = new Date(nowMs).toISOString()
     const row = this.#db
@@ -768,6 +1178,123 @@ export class MetricsStorage {
     }
   }
 
+  #refreshMetricsRollupBucket(nodeName: string, bucketSeconds: number, bucketStart: number) {
+    const bucketStartMs = bucketStart * 1000
+    const bucketEndMs = bucketStartMs + bucketSeconds * 1000
+    const bucketStartIso = new Date(bucketStartMs).toISOString()
+    const bucketEndIso = new Date(bucketEndMs).toISOString()
+
+    this.#db
+      .prepare(
+        `
+        DELETE FROM metrics_rollup_buckets
+        WHERE node_name = ? AND bucket_seconds = ? AND bucket_start = ?
+      `,
+      )
+      .run(nodeName, bucketSeconds, bucketStart)
+    this.#db
+      .prepare(
+        `
+        INSERT INTO metrics_rollup_buckets (
+          node_name,
+          bucket_seconds,
+          bucket_start,
+          sample_count,
+          success_count,
+          failure_count,
+          delay_sum,
+          min_delay,
+          max_delay,
+          last_success_at,
+          last_success_delay,
+          last_failure_at,
+          jitter_sum,
+          jitter_count,
+          first_timestamp,
+          last_timestamp
+        )
+        SELECT
+          node_name,
+          ?,
+          ?,
+          COUNT(*),
+          SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END),
+          COALESCE(SUM(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay ELSE 0 END), 0),
+          MIN(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END),
+          MAX(CASE WHEN success = 1 AND delay IS NOT NULL THEN delay END),
+          MAX(CASE WHEN success = 1 THEN timestamp END),
+          (
+            SELECT delay
+            FROM probe_samples
+            WHERE node_name = ?
+              AND timestamp >= ?
+              AND timestamp < ?
+              AND success = 1
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+          ),
+          MAX(CASE WHEN success = 0 THEN timestamp END),
+          COALESCE(
+            (
+              SELECT SUM(ABS(delay - previous_delay))
+              FROM (
+                SELECT
+                  delay,
+                  LAG(delay) OVER (ORDER BY timestamp ASC, id ASC) AS previous_delay
+                FROM probe_samples
+                WHERE node_name = ?
+                  AND timestamp >= ?
+                  AND timestamp < ?
+                  AND success = 1
+                  AND delay IS NOT NULL
+              )
+              WHERE previous_delay IS NOT NULL
+            ),
+            0
+          ),
+          COALESCE(
+            (
+              SELECT COUNT(*)
+              FROM (
+                SELECT
+                  LAG(delay) OVER (ORDER BY timestamp ASC, id ASC) AS previous_delay
+                FROM probe_samples
+                WHERE node_name = ?
+                  AND timestamp >= ?
+                  AND timestamp < ?
+                  AND success = 1
+                  AND delay IS NOT NULL
+              )
+              WHERE previous_delay IS NOT NULL
+            ),
+            0
+          ),
+          MIN(timestamp),
+          MAX(timestamp)
+        FROM probe_samples
+        WHERE node_name = ? AND timestamp >= ? AND timestamp < ?
+        GROUP BY node_name
+      `,
+      )
+      .run(
+        bucketSeconds,
+        bucketStart,
+        nodeName,
+        bucketStartIso,
+        bucketEndIso,
+        nodeName,
+        bucketStartIso,
+        bucketEndIso,
+        nodeName,
+        bucketStartIso,
+        bucketEndIso,
+        nodeName,
+        bucketStartIso,
+        bucketEndIso,
+      )
+  }
+
   #metricRows(windowSeconds: number, nowMs: number, nodeName?: string) {
     const windowStart = new Date(nowMs - windowSeconds * 1000).toISOString()
     const now = new Date(nowMs).toISOString()
@@ -816,6 +1343,84 @@ export class MetricsStorage {
               AND probe_samples.timestamp <= ?
               AND probe_samples.success = 1
             ORDER BY probe_samples.timestamp DESC
+            LIMIT 1
+          ) AS last_delay,
+          aggregated.last_success_at,
+          aggregated.last_failure_at
+        FROM aggregated
+        ORDER BY aggregated.node_name ASC
+      `,
+      )
+      .all(...parameters) as NodeMetricsRow[]
+  }
+
+  #canUseMetricsRollups(windowSeconds: number) {
+    return (
+      this.getMetricsRollupState().ready && [3_600, 21_600, 86_400, 604_800].includes(windowSeconds)
+    )
+  }
+
+  #rollupMetricRows(windowSeconds: number, nowMs: number, nodeName?: string) {
+    const bucketSeconds = windowSeconds === 3_600 ? 60 : windowSeconds === 21_600 ? 300 : 900
+    const bucketMs = bucketSeconds * 1000
+    const currentBucketStartMs = Math.floor(nowMs / bucketMs) * bucketMs
+    const windowEndMs = currentBucketStartMs + bucketMs
+    const windowStartMs = windowEndMs - windowSeconds * 1000
+    const nodeClause = nodeName ? 'AND node_name = ?' : ''
+    const parameters: (number | string)[] = [
+      bucketSeconds,
+      Math.floor(windowStartMs / 1000),
+      Math.floor(windowEndMs / 1000),
+    ]
+
+    if (nodeName) parameters.push(nodeName)
+    parameters.push(bucketSeconds, Math.floor(windowStartMs / 1000), Math.floor(windowEndMs / 1000))
+
+    return this.#db
+      .prepare(
+        `
+        WITH aggregated AS (
+          SELECT
+            node_name,
+            MIN(first_timestamp) AS first_timestamp,
+            MAX(last_timestamp) AS last_timestamp,
+            SUM(sample_count) AS sample_count,
+            SUM(success_count) AS success_count,
+            SUM(failure_count) AS failure_count,
+            CASE
+              WHEN SUM(success_count) > 0 THEN SUM(delay_sum) / SUM(success_count)
+              ELSE NULL
+            END AS avg_delay,
+            MIN(min_delay) AS min_delay,
+            MAX(max_delay) AS max_delay,
+            MAX(last_success_at) AS last_success_at,
+            MAX(last_failure_at) AS last_failure_at
+          FROM metrics_rollup_buckets
+          WHERE bucket_seconds = ?
+            AND bucket_start >= ?
+            AND bucket_start < ?
+            ${nodeClause}
+          GROUP BY node_name
+        )
+        SELECT
+          aggregated.node_name,
+          aggregated.first_timestamp,
+          aggregated.last_timestamp,
+          aggregated.sample_count,
+          aggregated.success_count,
+          aggregated.failure_count,
+          aggregated.avg_delay,
+          aggregated.min_delay,
+          aggregated.max_delay,
+          (
+            SELECT latest.last_success_delay
+            FROM metrics_rollup_buckets AS latest
+            WHERE latest.node_name = aggregated.node_name
+              AND latest.bucket_seconds = ?
+              AND latest.bucket_start >= ?
+              AND latest.bucket_start < ?
+              AND latest.last_success_at IS NOT NULL
+            ORDER BY latest.last_success_at DESC, latest.bucket_start DESC
             LIMIT 1
           ) AS last_delay,
           aggregated.last_success_at,

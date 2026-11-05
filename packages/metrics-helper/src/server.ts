@@ -22,6 +22,7 @@ const TIMELINE_PROFILES = {
   '1h': { windowSeconds: 3_600, bucketCount: 60 },
   '6h': { windowSeconds: 21_600, bucketCount: 72 },
   '24h': { windowSeconds: 86_400, bucketCount: 96 },
+  '7d': { windowSeconds: 604_800, bucketCount: 672 },
 } as const
 const MAX_BUCKET_SAMPLE_INTERVAL_MS = 900_000
 const BUCKET_SAMPLE_LIMIT = 200

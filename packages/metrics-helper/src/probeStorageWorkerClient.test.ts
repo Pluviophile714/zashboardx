@@ -69,3 +69,61 @@ test('persists a large probe round without blocking the main event loop', async 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('rebuilds rollups before a later probe round and refreshes the active bucket', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zashboardx-probe-rollup-worker-'))
+  const databasePath = join(dir, 'metrics.sqlite')
+  const nowMs = Date.UTC(2026, 6, 11, 8, 5, 0)
+  const client = new ProbeStorageWorkerClient(databasePath)
+
+  try {
+    await client.prepareRound(
+      [
+        {
+          name: 'HK-01',
+          type: 'Shadowsocks',
+          historySamples: [
+            {
+              nodeName: 'HK-01',
+              testUrl: 'https://example.com',
+              timestamp: new Date(nowMs - 30_000).toISOString(),
+              delay: 80,
+              success: true,
+            },
+          ],
+        },
+      ],
+      nowMs,
+      120_000,
+    )
+    const rollupClient = client as ProbeStorageWorkerClient & {
+      rebuildMetricsRollups: (retentionDays: number, rebuildNowMs: number) => Promise<void>
+    }
+
+    await rollupClient.rebuildMetricsRollups(7, nowMs)
+    await client.finishRound(
+      [
+        {
+          nodeName: 'HK-01',
+          testUrl: 'https://example.com',
+          timestamp: new Date(nowMs).toISOString(),
+          delay: 120,
+          success: true,
+        },
+      ],
+      7,
+      nowMs,
+    )
+
+    const storage = new MetricsStorage(databasePath)
+    storage.init({ readonly: true })
+    const timeline = storage.getNodeTimeline('HK-01', 86_400, 96, nowMs)
+
+    assert.equal(timeline.at(-1)?.sampleCount, 2)
+    assert.equal(timeline.at(-1)?.avgDelay, 100)
+    storage.close()
+  } finally {
+    await client.stop()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

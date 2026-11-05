@@ -2,8 +2,7 @@ import { Worker } from 'node:worker_threads'
 import type { DiscoveredProxyNode, ProbeSample } from './types.js'
 
 type WorkerResponse =
-  | { id: number; ok: true; value: null | string[] }
-  | { error: string; id: number; ok: false }
+  { id: number; ok: true; value: null | string[] } | { error: string; id: number; ok: false }
 
 type PendingRequest = {
   reject: (error: Error) => void
@@ -50,6 +49,10 @@ export class ProbeStorageWorkerClient {
 
   async finishRound(samples: ProbeSample[], retentionDays: number, nowMs = Date.now()) {
     await this.#request({ nowMs, retentionDays, samples, type: 'finish_round' })
+  }
+
+  async rebuildMetricsRollups(retentionDays: number, nowMs = Date.now()) {
+    await this.#request({ nowMs, retentionDays, type: 'rebuild_rollups' })
   }
 
   async stop() {

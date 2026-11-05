@@ -18,11 +18,17 @@ type FinishRoundMessage = {
   type: 'finish_round'
 }
 
-type WorkerRequest = FinishRoundMessage | PrepareRoundMessage
+type RebuildRollupsMessage = {
+  id: number
+  nowMs: number
+  retentionDays: number
+  type: 'rebuild_rollups'
+}
+
+type WorkerRequest = FinishRoundMessage | PrepareRoundMessage | RebuildRollupsMessage
 
 type WorkerResponse =
-  | { id: number; ok: true; value: null | string[] }
-  | { error: string; id: number; ok: false }
+  { id: number; ok: true; value: null | string[] } | { error: string; id: number; ok: false }
 
 const databasePath = (workerData as { databasePath: string }).databasePath
 const storage = new MetricsStorage(databasePath)
@@ -34,6 +40,7 @@ const respond = (response: WorkerResponse) => parentPort?.postMessage(response)
 parentPort?.on('message', (message: WorkerRequest) => {
   try {
     if (message.type === 'prepare_round') {
+      const changedTimestamps = new Map<string, string[]>()
       const fallbackNames = storage.transaction(() => {
         const names: string[] = []
 
@@ -41,7 +48,12 @@ parentPort?.on('message', (message: WorkerRequest) => {
           storage.recordNode(node.name, node.type)
 
           for (const sample of node.historySamples ?? []) {
-            storage.insertProbeSample(sample, { collapseFallbackRound: true })
+            if (storage.insertProbeSample(sample, { collapseFallbackRound: true })) {
+              const timestamps = changedTimestamps.get(sample.nodeName) ?? []
+
+              timestamps.push(sample.timestamp)
+              changedTimestamps.set(sample.nodeName, timestamps)
+            }
           }
 
           const latestSampleAt = storage.getLatestSampleTimestamp(node.name)
@@ -57,17 +69,36 @@ parentPort?.on('message', (message: WorkerRequest) => {
         return names
       })
 
+      for (const [nodeName, timestamps] of changedTimestamps) {
+        storage.refreshMetricsRollupBuckets(nodeName, timestamps)
+      }
+
       respond({ id: message.id, ok: true, value: fallbackNames })
       return
     }
 
+    if (message.type === 'rebuild_rollups') {
+      storage.rebuildMetricsRollups(message.retentionDays, message.nowMs)
+      respond({ id: message.id, ok: true, value: null })
+      return
+    }
+
+    const changedTimestamps = new Map<string, string[]>()
     storage.transaction(() => {
       for (const sample of message.samples) {
-        storage.insertProbeSample(sample)
+        if (storage.insertProbeSample(sample)) {
+          const timestamps = changedTimestamps.get(sample.nodeName) ?? []
+
+          timestamps.push(sample.timestamp)
+          changedTimestamps.set(sample.nodeName, timestamps)
+        }
       }
 
       storage.prune(message.retentionDays, message.nowMs)
     })
+    for (const [nodeName, timestamps] of changedTimestamps) {
+      storage.refreshMetricsRollupBuckets(nodeName, timestamps)
+    }
     respond({ id: message.id, ok: true, value: null })
   } catch (error) {
     respond({

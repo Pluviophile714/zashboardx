@@ -160,9 +160,14 @@ test('exposes the fixed timeline response profiles', () => {
   assert.equal(getProxyMetricsTimelineProfile('1h').bucketCount, 60)
   assert.equal(getProxyMetricsTimelineProfile('6h').bucketSeconds, 300)
   assert.equal(getProxyMetricsTimelineProfile('24h').windowSeconds, 86_400)
+  const sevenDayWindow = '7d' as ProxyMetricsTimelineWindow
+
+  assert.equal(getProxyMetricsTimelineProfile(sevenDayWindow).bucketCount, 672)
+  assert.equal(getProxyMetricsTimelineProfile(sevenDayWindow).bucketSeconds, 900)
+  assert.equal(getProxyMetricsTimelineProfile(sevenDayWindow).windowSeconds, 604_800)
 })
 
-for (const window of ['1h', '6h', '24h'] as const) {
+for (const window of ['1h', '6h', '24h', '7d'] as const) {
   test(`normalizes the expected ${window} timeline response geometry`, async () => {
     await withTimelineResponse(createTimelineResponse(window), async () => {
       const result = await fetchProxyMetricsTimelineAPI('HK-01', window)
