@@ -109,6 +109,36 @@ const formatBucketDateTime = (timestamp: string) => {
   }).format(date)
 }
 
+const formatBucketDate = (timestamp: string) => {
+  const date = new Date(timestamp)
+
+  if (!Number.isFinite(date.getTime())) {
+    return '--'
+  }
+
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+export const formatLatencyTimelineTick = (timestamp: string, window: ProxyMetricsTimelineWindow) =>
+  window === '7d' ? formatBucketDate(timestamp) : formatBucketTime(timestamp)
+
+export const formatLatencyTimelineBucketRange = (
+  start: string,
+  end: string,
+  window: ProxyMetricsTimelineWindow,
+) => {
+  if (window !== '7d') {
+    return `${formatBucketTime(start)} - ${formatBucketTime(end)}`
+  }
+
+  const startDate = formatBucketDate(start)
+  const endDate = formatBucketDate(end)
+
+  return startDate === endDate
+    ? `${startDate} ${formatBucketTime(start)} - ${formatBucketTime(end)}`
+    : `${startDate} ${formatBucketTime(start)} - ${endDate} ${formatBucketTime(end)}`
+}
+
 const formatLatencyRange = (min: number | null, max: number | null) => {
   if (min === null || max === null) {
     return '--'
@@ -507,7 +537,7 @@ export const createLatencyTimelineChartSection = (
         'text-anchor': 'middle',
       })
 
-      label.textContent = formatBucketTime(bucket.start)
+      label.textContent = formatLatencyTimelineTick(bucket.start, selectedWindow)
       svg.append(label)
     }
   }
@@ -574,7 +604,11 @@ export const createLatencyTimelineChartSection = (
       interval.dataset.role = 'bucket-summary-interval'
       interval.className =
         'flex min-h-9 items-center rounded-md border border-base-content/15 bg-base-200/30 px-2.5 py-1.5 text-xs font-semibold text-base-content'
-      interval.textContent = `${formatBucketTime(bucket.start)} - ${formatBucketTime(bucket.end)}`
+      interval.textContent = formatLatencyTimelineBucketRange(
+        bucket.start,
+        bucket.end,
+        selectedWindow,
+      )
       metricsGrid.dataset.role = 'bucket-summary-metrics'
       metricsGrid.className = 'grid grid-cols-2 gap-1.5 sm:grid-cols-4'
       appendWindowMetric(

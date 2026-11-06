@@ -16,8 +16,12 @@ registerHooks({
   },
 })
 
-const { createLatencyTimelineChartSection, getLatencyTimelineInputMode } =
-  await import('../../components/proxies/latencyTimelineChart.ts')
+const {
+  createLatencyTimelineChartSection,
+  formatLatencyTimelineBucketRange,
+  formatLatencyTimelineTick,
+  getLatencyTimelineInputMode,
+} = await import('../../components/proxies/latencyTimelineChart.ts')
 
 type TestEvent = {
   clientX?: number
@@ -302,9 +306,20 @@ test('uses the 24h chart as the only latency line chart in node details', () => 
 })
 
 test('renders empty timelines on the same concrete-time chart axes', () => {
-  assert.match(timelineChartSource, /formatBucketTime\(bucket\.start\)/)
+  assert.match(timelineChartSource, /formatLatencyTimelineTick\(bucket\.start, selectedWindow\)/)
   assert.match(timelineChartSource, /state\.status === 'empty'/)
   assert.doesNotMatch(timelineChartSource, /24h前/)
+})
+
+test('uses calendar dates for 7d axis labels and bucket details', () => {
+  const start = new Date(2026, 10, 6, 15, 57)
+  const end = new Date(2026, 10, 6, 16, 12)
+
+  assert.equal(formatLatencyTimelineTick(start.toISOString(), '7d'), '11-06')
+  assert.equal(
+    formatLatencyTimelineBucketRange(start.toISOString(), end.toISOString(), '7d'),
+    '11-06 15:57 - 16:12',
+  )
 })
 
 test('keeps the latency range visible while lighter than the average line', () => {

@@ -400,3 +400,23 @@ monitoring code was changed.
 - `node --test src/helper/__tests__/proxyPenetrationI18n.test.ts` - passed.
 - `pnpm exec vue-tsc --build --force` - passed.
 - `pnpm run build` - passed; PWA service worker generated.
+
+## 2026-11-06 - Add calendar dates to 7d latency details
+
+**Status:** Local fix complete; ready to push and deploy with the current
+upstream-synced release.
+
+**Change:** 7d chart axis labels now use compact calendar dates such as
+`11-06`, while the selected bucket interval includes the date and time. If a
+bucket crosses midnight, both ends include their dates. 1h, 6h, and 24h keep
+their existing time-only labels. Metrics data, Rollup profiles, SSE updates,
+and bucket drilldown behavior are unchanged.
+
+**Verification:**
+
+- Proxy latency layout tests: 64/64 passed.
+- Full frontend helper tests: 151/151 passed.
+- Metrics Helper tests: 82/82 passed.
+- Type check and production build passed.
+- The browser verification suites could not start their local Chrome
+  debugging endpoint in this run; no application assertion failed.
