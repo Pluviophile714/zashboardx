@@ -7,6 +7,7 @@ import { MihomoClient } from './mihomoClient.js'
 import { ProbeRunner } from './prober.js'
 import { ProbeStorageWorkerClient } from './probeStorageWorkerClient.js'
 import { createMetricsServer } from './server.js'
+import { shouldRebuildMetricsRollups } from './startup.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
 
@@ -78,9 +79,11 @@ server.listen(config.port, config.bindHost, () => {
     `zashboardx-metrics listening on ${config.bindHost}:${config.port}, mihomo=${config.mihomoBaseUrl}`,
   )
   metricsCache.scheduleRefresh(0)
-  void storageWorker?.rebuildMetricsRollups(config.retentionDays).catch((error) => {
-    console.error('metrics rollup rebuild failed', error)
-  })
+  if (storageWorker && shouldRebuildMetricsRollups(storage.getMetricsRollupState().ready)) {
+    void storageWorker.rebuildMetricsRollups(config.retentionDays).catch((error) => {
+      console.error('metrics rollup rebuild failed', error)
+    })
+  }
 })
 runner.start()
 

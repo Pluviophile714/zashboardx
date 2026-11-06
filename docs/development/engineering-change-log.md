@@ -420,3 +420,24 @@ and bucket drilldown behavior are unchanged.
 - Type check and production build passed.
 - The browser verification suites could not start their local Chrome
   debugging endpoint in this run; no application assertion failed.
+
+## 2026-11-06 - Skip redundant Metrics rollup rebuilds on restart
+
+**Status:** Local fix complete; ready to push and deploy.
+
+**Root cause:** The Metrics service rebuilt all seven days of Rollup data on
+every startup, even when the persisted Rollup metadata already marked the
+tables ready. The single storage worker was occupied by that full rebuild, so
+fresh Mihomo samples and the 1h chart appeared stale during deployment.
+
+**Change:** Startup now rebuilds Rollups only when the persisted ready marker
+is absent or not ready. Existing raw samples, 7d Rollup data, SSE updates, and
+the first-time rebuild path are unchanged.
+
+**Verification:**
+
+- Added startup policy tests for ready and not-ready Rollup states.
+- R5S first-time rebuild completed successfully: 3,936,255 60-second rows,
+  793,323 300-second rows, and 265,222 900-second rows.
+- R5S health recovered to `ok=true` and `mihomoReachable=true` after the
+  first rebuild.
