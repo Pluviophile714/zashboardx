@@ -10,7 +10,7 @@ import { createMetricsServer } from './server.js'
 import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
 
-const version = '0.1.0'
+const version = '0.2.0'
 const config = loadConfig()
 const health: HelperHealth = {
   ok: false,
