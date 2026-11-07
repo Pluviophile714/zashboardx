@@ -445,6 +445,7 @@ const zhTW: LANG_MESSAGE = {
   metricsLive: '即時資料',
   metricsPolling: '輪詢備援',
   metricsStale: '資料延遲',
+  metricsOrganizing: '資料整理中',
   metricsWaiting: '等待資料',
   metricsNoSample: '暫無測速',
   metricsJustNow: '剛剛',

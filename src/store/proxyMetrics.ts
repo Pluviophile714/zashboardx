@@ -66,6 +66,7 @@ export const proxyMetricsAvailable = ref(false)
 export const proxyMetricsUpdatedAt = ref(0)
 export const proxyMetricsRequestDurationMs = ref<number | null>(null)
 export const proxyMetricsRequestFailed = ref(false)
+export const proxyMetricsFallback = ref(false)
 export const proxyMetricsLastRequestAt = ref(0)
 export const proxyMetricsLiveConnected = ref(false)
 export const proxyMetricsLastEventAt = ref(0)
@@ -136,6 +137,7 @@ export const refreshProxyMetrics = async (options: { force?: boolean } = {}) => 
 
     proxyMetricsAvailable.value = true
     proxyMetricsRequestFailed.value = false
+    proxyMetricsFallback.value = response.fallback === true
     proxyMetricsUpdatedAt.value = Date.parse(response.generatedAt) || Date.now()
   })().finally(() => {
     pendingRefresh = undefined

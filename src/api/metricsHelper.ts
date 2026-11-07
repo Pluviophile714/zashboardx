@@ -18,6 +18,7 @@ export type ProxyMetricsNode = {
 }
 
 export type ProxyMetricsResponse = {
+  fallback?: boolean
   windowSeconds: number
   generatedAt: string
   nodes: Record<string, ProxyMetricsNode>
@@ -332,6 +333,7 @@ export const fetchProxyMetricsHelperAPI = async (
     const generatedAt = data.generatedAt || new Date().toISOString()
 
     return {
+      fallback: data.fallback === true,
       windowSeconds: Number(data.windowSeconds) || 24 * 60 * 60,
       generatedAt,
       nodes: Object.fromEntries(

@@ -1040,6 +1040,11 @@ test('waits for the complete one-hour raw cache before plotting the shared sampl
   assert.match(chartSource, /const samples = window === '1h' \? sharedSamples : undefined/)
 })
 
+test('marks database fallback metrics as organizing instead of live', () => {
+  assert.match(proxyNodeCardSource, /proxyMetricsFallback/)
+  assert.match(proxyNodeCardSource, /proxyMetricsFallback\.value[\s\S]*t\('metricsOrganizing'\)/)
+})
+
 test('animates first-level latency samples by translating one fixed track', () => {
   assert.doesNotMatch(proxyNodeCardSource, /<TransitionGroup[\s\S]*name="latency-strip"/)
   assert.match(proxyNodeCardSource, /class="latency-strip-track"/)

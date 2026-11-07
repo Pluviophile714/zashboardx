@@ -459,10 +459,12 @@ export const createMetricsServer = (options: MetricsServerOptions) =>
       const metricsSnapshot = options.metricsCache?.get(windowSeconds, nowMs)
 
       if (options.metricsCache && !metricsSnapshot) {
-        response.setHeader('Retry-After', '1')
-        sendStatus(response, 503, {
-          error: 'metrics_warming_up',
-          retryAfterMs: 1000,
+        sendJson(response, {
+          cached: false,
+          fallback: true,
+          generatedAt: new Date(nowMs).toISOString(),
+          nodes: options.storage.getNodeMetrics(windowSeconds, nowMs),
+          windowSeconds,
         })
         return
       }

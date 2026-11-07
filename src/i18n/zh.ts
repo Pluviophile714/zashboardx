@@ -445,6 +445,7 @@ const zh: LANG_MESSAGE = {
   metricsLive: '实时数据',
   metricsPolling: '轮询兜底',
   metricsStale: '数据滞后',
+  metricsOrganizing: '数据整理中',
   metricsWaiting: '等待数据',
   metricsNoSample: '暂无测速',
   metricsJustNow: '刚刚',

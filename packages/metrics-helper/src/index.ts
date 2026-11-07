@@ -12,6 +12,8 @@ import { MetricsStorage } from './storage.js'
 import type { HelperHealth } from './types.js'
 
 const version = '0.2.0'
+const ONE_HOUR_SECONDS = 60 * 60
+const SECONDARY_METRICS_PREWARM_DELAY_MS = 2_000
 const config = loadConfig()
 const health: HelperHealth = {
   ok: false,
@@ -48,6 +50,7 @@ const timelineBundleCache = new MetricsTimelineBundleCache({
 })
 const storageWorker =
   config.databasePath === ':memory:' ? undefined : new ProbeStorageWorkerClient(config.databasePath)
+let secondaryMetricsPrewarmTimer: NodeJS.Timeout | undefined
 
 const client = new MihomoClient({
   baseUrl: config.mihomoBaseUrl,
@@ -78,7 +81,12 @@ server.listen(config.port, config.bindHost, () => {
   console.log(
     `zashboardx-metrics listening on ${config.bindHost}:${config.port}, mihomo=${config.mihomoBaseUrl}`,
   )
-  metricsCache.scheduleRefresh(0)
+  // The 1h path is the user-facing live view; warm it before the heavier default window.
+  metricsCache.scheduleRefresh(0, ONE_HOUR_SECONDS)
+  secondaryMetricsPrewarmTimer = setTimeout(() => {
+    secondaryMetricsPrewarmTimer = undefined
+    metricsCache.scheduleRefresh(0)
+  }, SECONDARY_METRICS_PREWARM_DELAY_MS)
   if (storageWorker && shouldRebuildMetricsRollups(storage.getMetricsRollupState().ready)) {
     void storageWorker.rebuildMetricsRollups(config.retentionDays).catch((error) => {
       console.error('metrics rollup rebuild failed', error)
@@ -89,6 +97,10 @@ runner.start()
 
 const shutdown = () => {
   runner.stop()
+  if (secondaryMetricsPrewarmTimer) {
+    clearTimeout(secondaryMetricsPrewarmTimer)
+    secondaryMetricsPrewarmTimer = undefined
+  }
   detailsCache.stop()
   timelineBundleCache.stop()
   metricsCache.stop()

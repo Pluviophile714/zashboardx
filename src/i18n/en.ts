@@ -457,6 +457,7 @@ const en = {
   metricsLive: 'Live data',
   metricsPolling: 'Polling fallback',
   metricsStale: 'Stale data',
+  metricsOrganizing: 'Organizing data',
   metricsWaiting: 'Waiting for data',
   metricsNoSample: 'No probe yet',
   metricsJustNow: 'just now',

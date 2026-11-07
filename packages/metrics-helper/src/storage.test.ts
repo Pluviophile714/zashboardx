@@ -631,6 +631,34 @@ test('prunes samples older than retention days', () => {
   storage.close()
 })
 
+test('prunes rollup buckets older than the raw sample retention window', () => {
+  const storage = createStorage()
+  const nowMs = Date.parse(at(30))
+
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: new Date(Date.UTC(2026, 5, 20, 0, 0, 0)).toISOString(),
+    delay: 80,
+    success: true,
+  })
+  storage.insertProbeSample({
+    nodeName: 'HK-01',
+    testUrl: 'https://example.com',
+    timestamp: at(0),
+    delay: 100,
+    success: true,
+  })
+
+  storage.rebuildMetricsRollups(30, nowMs)
+  assert.equal(storage.getMetricsRollupBucketCount('HK-01', 60), 2)
+
+  storage.prune(7, nowMs)
+
+  assert.equal(storage.getMetricsRollupBucketCount('HK-01', 60), 1)
+  storage.close()
+})
+
 test('aggregates one node into ordered timeline buckets and preserves gaps', () => {
   const storage = createStorage()
   const nowMs = Date.parse('2026-07-05T00:00:00.000Z')

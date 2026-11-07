@@ -460,6 +460,7 @@ const ru: LANG_MESSAGE = {
   metricsLive: 'Данные в реальном времени',
   metricsPolling: 'Резервный опрос',
   metricsStale: 'Данные устарели',
+  metricsOrganizing: 'Обработка данных',
   metricsWaiting: 'Ожидание данных',
   metricsNoSample: 'Проб данных еще нет',
   metricsJustNow: 'только что',

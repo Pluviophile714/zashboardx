@@ -145,6 +145,7 @@ import {
   invalidateProxyMetricsTimeline,
   proxyMetricsMap,
   proxyMetricsLiveConnected,
+  proxyMetricsFallback,
   proxyMetricsSamplesMap,
   proxyMetricsTimelineMap,
   proxyMetricsUpdatedAt,
@@ -1504,8 +1505,9 @@ const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions =
     proxyMetricsLiveConnected.value,
   )
   const freshnessLine = document.createElement('div')
-  const freshnessLabel =
-    freshness.state === 'live'
+  const freshnessLabel = proxyMetricsFallback.value
+    ? t('metricsOrganizing')
+    : freshness.state === 'live'
       ? t('metricsLive')
       : freshness.state === 'polling'
         ? t('metricsPolling')
@@ -1522,6 +1524,9 @@ const createLatencyDetailsTip = (renderOptions: LatencyDetailsTipRenderOptions =
   freshnessLine.className = compact
     ? 'mb-1 text-center text-[10px] text-base-content/50'
     : 'mb-1.5 text-center text-[11px] text-base-content/50'
+  if (proxyMetricsFallback.value) {
+    freshnessLine.classList.add('text-medium-latency')
+  }
   freshnessLine.textContent = `${freshnessLabel} · ${ageLabel}`
   root.append(freshnessLine)
 

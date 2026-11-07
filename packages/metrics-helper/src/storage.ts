@@ -1107,8 +1107,14 @@ export class MetricsStorage {
   }
 
   prune(retentionDays: number, nowMs = Date.now()) {
-    const cutoff = new Date(nowMs - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+    const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1000
+    const cutoff = new Date(cutoffMs).toISOString()
+    const cutoffBucketStart = Math.floor(cutoffMs / 1000)
     const result = this.#db.prepare('DELETE FROM probe_samples WHERE timestamp < ?').run(cutoff)
+
+    this.#db
+      .prepare('DELETE FROM metrics_rollup_buckets WHERE bucket_start < ?')
+      .run(cutoffBucketStart)
 
     return Number(result.changes ?? 0)
   }

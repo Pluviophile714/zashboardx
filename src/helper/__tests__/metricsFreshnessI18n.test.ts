@@ -6,6 +6,7 @@ const freshnessKeys = [
   'metricsLive',
   'metricsPolling',
   'metricsStale',
+  'metricsOrganizing',
   'metricsWaiting',
   'metricsNoSample',
   'metricsJustNow',

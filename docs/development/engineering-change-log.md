@@ -441,3 +441,70 @@ the first-time rebuild path are unchanged.
   793,323 300-second rows, and 265,222 900-second rows.
 - R5S health recovered to `ok=true` and `mihomoReachable=true` after the
   first rebuild.
+
+## 2026-11-07 - Keep Metrics cold starts usable and prune expired rollups
+
+**Status:** Local change, verified; not committed or deployed yet.
+
+**Problem:** A cold Metrics process had no in-memory snapshot for a requested
+non-default window, so `/api/metrics/nodes` returned `503 metrics_warming_up`
+until the background aggregation completed. Daily retention removed old raw
+`probe_samples`, but did not remove old `metrics_rollup_buckets`, allowing the
+Rollup table and its indexes to grow beyond the seven-day retention window.
+
+**Change:**
+
+- Cold `/api/metrics/nodes` requests now return the available database-backed
+  aggregation immediately with `fallback: true` while the requested in-memory
+  snapshot continues warming in the background.
+- Metrics startup schedules the 1h aggregation first, then schedules the
+  default 24h aggregation after a short delay. This does not replace the 1h
+  raw detail path or its SSE-driven rolling updates.
+- The existing retention pass now deletes Rollup buckets older than the same
+  configured retention window as raw samples. Seven-day raw history and the
+  7d chart remain enabled.
+
+**Preserved behavior:**
+
+- 1h remains the complete raw-sample chart and continues to append new samples
+  from SSE/polling, trimming samples that leave the one-hour window.
+- Existing stale-while-revalidate behavior still shows an older timeline first
+  and replaces it after the background refresh; no artificial blurred image is
+  created when no previous snapshot exists.
+- 6h/24h bucket aggregation, bucket drilldown, 7d Rollup data, Smart metrics,
+  and the first-level latency strip are unchanged.
+
+**Verification:**
+
+- `pnpm run metrics:test` - 85 passed.
+- `git diff --check` - passed.
+- Frontend type check and production build remain to be run before release.
+
+**Release:** Not committed, pushed, or deployed yet.
+
+## 2026-11-07 - Surface Metrics fallback state in latency details
+
+**Status:** Local change, verified; not committed or deployed yet.
+
+**Problem:** The cold-start node response now has a `fallback` marker, but the
+frontend did not consume it. A database-backed response could therefore look
+like live data even while the in-memory aggregation was still being built.
+
+**Change:**
+
+- Propagated the Metrics `fallback` marker through the API and shared store.
+- Latency details now label fallback data as `数据整理中` in Simplified Chinese
+  and use matching translations in the other supported locales.
+- Kept the existing stale timeline state separate: an older complete chart is
+  still shown as syncing with the light blur treatment.
+- Kept the complete-raw-sample gate for 1h, so fallback recent samples cannot
+  be drawn as a partial one-hour chart.
+
+**Verification:**
+
+- Frontend helper tests: 152 passed.
+- Metrics Helper tests: 85 passed.
+- Type check and production build passed.
+- `git diff --check` passed.
+
+**Release:** Not committed, pushed, or deployed yet.

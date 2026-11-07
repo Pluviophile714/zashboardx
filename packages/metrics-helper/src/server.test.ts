@@ -688,9 +688,9 @@ test('serves cached node metrics and refreshes cache after accepted frontend sam
   const metricsCache = new MetricsAggregationCache({
     storage,
     defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
     refreshDebounceMs: 0,
     ttlMs: 10_000,
-    now: () => Date.parse(at(30)),
   })
 
   metricsCache.refresh()
@@ -842,11 +842,12 @@ test('marks active detail snapshots dirty after accepted frontend samples', asyn
   }
 })
 
-test('returns a warming response while the metrics cache is still cold', async () => {
+test('falls back to stored node metrics while the metrics cache is still cold', async () => {
   const storage = createStorage()
   const metricsCache = new MetricsAggregationCache({
     storage,
     defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
     refreshDebounceMs: 0,
     ttlMs: 10_000,
   })
@@ -863,16 +864,24 @@ test('returns a warming response while the metrics cache is still cold', async (
       version: '0.1.0',
     },
     defaultWindowSeconds: 24 * 60 * 60,
+    now: () => Date.parse(at(30)),
   })
   const baseUrl = await listen(server)
 
   try {
-    const response = await fetch(`${baseUrl}/api/metrics/nodes?window=24h`)
-    const body = (await response.json()) as { error: string; retryAfterMs: number }
+    const response = await fetch(`${baseUrl}/api/metrics/nodes?window=6h`)
+    const body = (await response.json()) as {
+      cached?: boolean
+      fallback?: boolean
+      nodes: Record<string, { sampleCount: number }>
+      windowSeconds: number
+    }
 
-    assert.equal(response.status, 503)
-    assert.equal(body.error, 'metrics_warming_up')
-    assert.equal(body.retryAfterMs, 1000)
+    assert.equal(response.status, 200)
+    assert.equal(body.cached, false)
+    assert.equal(body.fallback, true)
+    assert.equal(body.windowSeconds, 6 * 60 * 60)
+    assert.equal(body.nodes['HK-01'].sampleCount, 1)
   } finally {
     metricsCache.stop()
     server.close()
