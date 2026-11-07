@@ -485,7 +485,7 @@ Rollup table and its indexes to grow beyond the seven-day retention window.
 
 ## 2026-11-07 - Avoid blank latency charts during slow first reads
 
-**Status:** Local fix verified; deployment pending.
+**Status:** Deployed to the R5S and verified.
 
 **Problem:** The first 1h detail request must load the complete raw sample window. On
 the R5S, a cold detail worker can take longer than the frontend's three-second
