@@ -151,6 +151,7 @@ import {
   proxyMetricsUpdatedAt,
   refreshProxyMetricsBucketSamples,
   refreshProxyMetricsDetails,
+  refreshProxyMetricsTimeline,
   refreshProxyMetricsTimelineBundle,
 } from '@/store/proxyMetrics'
 import type {
@@ -1078,9 +1079,12 @@ const restartLatencyBucketDrilldownResetTimer = () => {
 const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsTimelineWindow) => {
   const timelineCacheKey = getProxyMetricsTimelineCacheKey(sourceName, window)
   const requestGeneration = (latencyTimelineRequestGeneration += 1)
-  const request = refreshR5sLatencyDetailsSnapshot(sourceName, window, true)
+  const request =
+    window === '1h'
+      ? refreshR5sLatencyDetailsSnapshot(sourceName, window, true)
+      : refreshProxyMetricsTimeline(sourceName, { force: true, window })
 
-  void request.then((details) => {
+  void request.then((result) => {
     if (
       requestGeneration !== latencyTimelineRequestGeneration ||
       activeLatencyTimelineWindow !== window ||
@@ -1089,18 +1093,24 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
       return
     }
 
-    if (details?.timeline) {
+    const timeline = result && 'timeline' in result ? result.timeline : result
+
+    if (timeline) {
       unavailableLatencyTimelineKeys.delete(timelineCacheKey)
 
-      if (isLatencyTimelineSnapshotCurrent(sourceName, details)) {
+      if (
+        window !== '1h' ||
+        (result && 'timeline' in result && isLatencyTimelineSnapshotCurrent(sourceName, result))
+      ) {
         clearLatencyTimelineRetry()
       } else {
         scheduleLatencyTimelineRetry(sourceName, window)
       }
     } else {
       const previousSnapshot = getProxyMetricsDetailsSnapshot(sourceName, window)
+      const previousTimeline = proxyMetricsTimelineMap.value[timelineCacheKey]
 
-      if (previousSnapshot?.timeline) {
+      if (previousSnapshot?.timeline || previousTimeline) {
         unavailableLatencyTimelineKeys.delete(timelineCacheKey)
       } else if (latencyTimelineRetryAttempt >= 2) {
         unavailableLatencyTimelineKeys.add(timelineCacheKey)
@@ -1111,13 +1121,12 @@ const refreshLatencyDetailsTimeline = (sourceName: string, window: ProxyMetricsT
 
     const animateTimelineWindowTransition = latencyTimelineWindowTransitionTarget === window
 
-    if (animateTimelineWindowTransition && details?.timeline) {
+    if (animateTimelineWindowTransition && timeline) {
       latencyTimelineWindowTransitionTarget = null
     }
 
     renderActiveLatencyDetailsTip({
-      animateTimelineWindowTransition:
-        animateTimelineWindowTransition && Boolean(details?.timeline),
+      animateTimelineWindowTransition: animateTimelineWindowTransition && Boolean(timeline),
     })
   })
 

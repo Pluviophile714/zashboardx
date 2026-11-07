@@ -478,7 +478,38 @@ Rollup table and its indexes to grow beyond the seven-day retention window.
 
 - `pnpm run metrics:test` - 85 passed.
 - `git diff --check` - passed.
-- Frontend type check and production build remain to be run before release.
+- `pnpm run type-check` - passed.
+- `pnpm run build` - passed.
+
+**Release:** Not committed, pushed, or deployed yet.
+
+## 2026-11-07 - Avoid blank latency charts during slow first reads
+
+**Status:** Local fix verified; deployment pending.
+
+**Problem:** The first 1h detail request must load the complete raw sample window. On
+the R5S, a cold detail worker can take longer than the frontend's three-second
+request timeout, leaving the popover on `正在读取` before a later retry finally
+shows the full chart. The 6h, 24h, and 7d views were using the same heavier detail
+request even though they only need aggregated timeline buckets.
+
+**Change:**
+
+- Increased the detail request timeout to twelve seconds so a slow complete 1h
+  read is not aborted prematurely. The chart still waits for the full raw list,
+  so it never draws a partial 1h line.
+- Routed 6h, 24h, and 7d refreshes through the lightweight aggregate timeline
+  endpoint. Bucket drilldown continues to fetch its exact raw samples separately.
+- Kept stale timeline state and retry behavior intact so an existing complete chart
+  remains visible while a newer request is being refreshed.
+
+**Verification:**
+
+- Added a regression assertion for the raw-1h versus aggregate-long-window split.
+- Proxy latency layout tests: 66/66 passed.
+- `pnpm run type-check` - passed.
+- `pnpm run metrics:test` - 85 passed.
+- `pnpm run build` - passed.
 
 **Release:** Not committed, pushed, or deployed yet.
 

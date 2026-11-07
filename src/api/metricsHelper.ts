@@ -689,7 +689,7 @@ export const fetchProxyMetricsDetailsAPI = async (
   metricsWindow: ProxyMetricsTimelineWindow = '24h',
   limit = 30,
   snapshotAt?: string,
-  timeout = 3000,
+  timeout = 12_000,
 ): Promise<ProxyMetricsDetailsResponse | null> => {
   if (!nodeName) {
     return null

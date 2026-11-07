@@ -1111,7 +1111,10 @@ test('loads the full 1h raw sample window through one forced R5S detail request'
   )
   assert.match(proxyNodeCardSource, /const LATENCY_ONE_HOUR_RAW_LIMIT = 200/)
   assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsSamples/)
-  assert.doesNotMatch(proxyNodeCardSource, /refreshProxyMetricsTimeline\(/)
+  assert.match(
+    proxyNodeCardSource,
+    /refreshProxyMetricsTimeline\(sourceName, \{ force: true, window \}\)/,
+  )
 })
 
 test('opens and closes latency details with a fresh 1h range state', () => {
@@ -1241,6 +1244,20 @@ test('range changes exit drilldown and request the selected timeline', () => {
   )
 })
 
+test('uses the fast aggregate timeline path outside the raw one-hour view', () => {
+  const refreshStart = proxyNodeCardSource.indexOf('const refreshLatencyDetailsTimeline =')
+  const refreshEnd = proxyNodeCardSource.indexOf(
+    'const scheduleLatencyTimelineRetry =',
+    refreshStart,
+  )
+  const refreshSource = proxyNodeCardSource.slice(refreshStart, refreshEnd)
+
+  assert.match(
+    refreshSource,
+    /const request =\s*window === '1h'\s*\? refreshR5sLatencyDetailsSnapshot\(sourceName, window, true\)\s*:\s*refreshProxyMetricsTimeline\(sourceName, \{\s*force: true,\s*window\s*\}\)/,
+  )
+})
+
 test('guards stale timeline responses before mutating unavailable state', () => {
   const refreshStart = proxyNodeCardSource.indexOf('const refreshLatencyDetailsTimeline =')
   const refreshEnd = proxyNodeCardSource.indexOf(
@@ -1270,7 +1287,7 @@ test('keeps the last chart and retries an active detail request after a transien
   )
   assert.match(
     proxyNodeCardSource,
-    /if \(details\?\.timeline\) \{[\s\S]*unavailableLatencyTimelineKeys\.delete/,
+    /if \(timeline\) \{[\s\S]*unavailableLatencyTimelineKeys\.delete/,
   )
   assert.match(
     proxyNodeCardSource,
@@ -1302,7 +1319,7 @@ test('keeps showing a stale detail snapshot while retrying until it catches up',
   assert.match(proxyNodeCardSource, /const isLatencyTimelineSnapshotCurrent =/)
   assert.match(
     refreshSource,
-    /if \(details\?\.timeline\) \{[\s\S]*isLatencyTimelineSnapshotCurrent\(sourceName, details\)[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*else \{[\s\S]*scheduleLatencyTimelineRetry\(sourceName, window\)/,
+    /if \(timeline\) \{[\s\S]*window !== '1h'[\s\S]*isLatencyTimelineSnapshotCurrent\(sourceName, result\)[\s\S]*clearLatencyTimelineRetry\(\)[\s\S]*else \{[\s\S]*scheduleLatencyTimelineRetry\(sourceName, window\)/,
   )
   assert.match(
     proxyNodeCardSource,
