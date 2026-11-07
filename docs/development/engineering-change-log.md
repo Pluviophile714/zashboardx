@@ -481,7 +481,7 @@ Rollup table and its indexes to grow beyond the seven-day retention window.
 - `pnpm run type-check` - passed.
 - `pnpm run build` - passed.
 
-**Release:** Not committed, pushed, or deployed yet.
+**Release:** Implemented in `3787eec9`, pushed to `master`, and deployed to the R5S on 2026-11-07.
 
 ## 2026-11-07 - Avoid blank latency charts during slow first reads
 
@@ -511,7 +511,7 @@ request even though they only need aggregated timeline buckets.
 - `pnpm run metrics:test` - 85 passed.
 - `pnpm run build` - passed.
 
-**Release:** Not committed, pushed, or deployed yet.
+**Release:** Implemented in `3787eec9`, pushed to `master`, and deployed to the R5S on 2026-11-07.
 
 ## 2026-11-07 - Surface Metrics fallback state in latency details
 
